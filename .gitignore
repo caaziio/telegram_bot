@@ -1,6 +1,6 @@
 db/rules.sqlite
-bot/userbot_session.session
-bot/userbot_session.session-journal
+userbot_session.session
+userbot_session.session-journal
 __pycache__/
 *.pyc
 .DS_Store

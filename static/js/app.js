@@ -108,10 +108,7 @@ function renderRules() {
     container.innerHTML = '';
     currentRules.forEach((rule, index) => {
         const div = document.createElement('div');
-        div.style.display = 'flex';
-        div.style.gap = '10px';
-        div.style.marginBottom = '10px';
-        div.style.alignItems = 'center';
+        div.className = 'rule-row';
         
         let content = `<span class="status-badge" style="background: var(--accent-color); color: white">${rule.rule_type.toUpperCase()}</span>`;
         
