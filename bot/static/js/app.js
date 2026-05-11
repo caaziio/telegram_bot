@@ -45,6 +45,9 @@ function renderWorkflows() {
             <div class="workflow-footer">
                 <div class="rules-count">${(wf.rules || []).length} Active Rules/Filters</div>
                 <div style="display: flex; gap: 8px;">
+                    <button class="btn-icon" onclick="duplicateWorkflow(${wf.id})" title="Duplicate Workflow">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    </button>
                     <button class="btn-icon" onclick="editWorkflow(${wf.id})">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                     </button>
@@ -115,9 +118,9 @@ function renderRules() {
         if (rule.rule_type === 'token_age') {
             content += `
                 <label style="font-size:0.85rem; color:var(--text-muted)">Min Age (m):</label>
-                <input type="number" class="form-input" style="width:80px" value="${rule.time_min || 0}" onchange="updateRule(${index}, 'time_min', this.value)">
+                <input type="number" class="form-input" style="width:80px" value="${rule.time_min !== undefined ? rule.time_min : ''}" placeholder="0" onchange="updateRule(${index}, 'time_min', this.value)">
                 <label style="font-size:0.85rem; color:var(--text-muted)">Max Age (m):</label>
-                <input type="number" class="form-input" style="width:80px" value="${rule.time_max || 60}" onchange="updateRule(${index}, 'time_max', this.value)">
+                <input type="number" class="form-input" style="width:80px" value="${rule.time_max !== undefined ? rule.time_max : ''}" placeholder="∞" onchange="updateRule(${index}, 'time_max', this.value)">
             `;
         } else if (rule.rule_type === 'extract_ca') {
             content += `<span style="color: var(--text-muted); font-size: 0.85rem;">Automatically extracts Contract Address from message.</span>`;
@@ -233,12 +236,65 @@ async function toggleWorkflow(id) {
 }
 
 async function deleteWorkflow(id) {
+    if (!id) {
+        alert("Workflow ID is missing. Try refreshing the page.");
+        return;
+    }
+    
     if(!confirm('Are you sure you want to delete this workflow?')) return;
-    const res = await fetch('/api/workflows/' + id, { method: 'DELETE' });
-    const result = await res.json();
-    if (result.success) {
-        workflows = workflows.filter(w => w.id !== id);
-        renderWorkflows();
+    
+    try {
+        const res = await fetch('/api/workflows/' + id, { method: 'DELETE' });
+        if (!res.ok) throw new Error("Server error " + res.status);
+        
+        const result = await res.json();
+        if (result.success) {
+            workflows = workflows.filter(w => w.id != id);
+            renderWorkflows();
+        } else {
+            alert('Error deleting workflow: ' + (result.error || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('Failed to delete workflow: ' + e.message);
+        console.error(e);
+    }
+}
+
+async function duplicateWorkflow(id) {
+    const wf = workflows.find(w => w.id === id);
+    if (!wf) return;
+    
+    // Create a copy of the workflow object without the ID
+    const newWf = {
+        name: wf.name + " (Copy)",
+        source_channel: wf.source_channel,
+        source_channel_id: wf.source_channel_id,
+        target_channel: wf.target_channel,
+        target_channel_id: wf.target_channel_id,
+        rules: (wf.rules || []).map(r => ({ ...r }))
+    };
+    
+    try {
+        const res = await fetch('/api/workflows', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newWf)
+        });
+        
+        if (!res.ok) throw new Error("Server error " + res.status);
+        
+        const result = await res.json();
+        if (result.success) {
+            newWf.id = result.id;
+            newWf.is_active = 1;
+            workflows.push(newWf);
+            renderWorkflows();
+        } else {
+            alert('Error duplicating workflow: ' + (result.error || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('Failed to duplicate workflow: ' + e.message);
+        console.error(e);
     }
 }
 

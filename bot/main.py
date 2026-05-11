@@ -84,8 +84,10 @@ def init_db():
     conn.close()
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute('PRAGMA foreign_keys = ON;')
+    conn = sqlite3.connect(DB_PATH, timeout=20)
+    conn.row_factory = sqlite3.Row
+    # Enable foreign keys for ON DELETE CASCADE to work
+    conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
 def get_settings():
@@ -123,24 +125,46 @@ def process_message_logic(text, rules):
         
         # TOKEN AGE FILTER LOGIC
         if rule_type == 'token_age':
-            min_age = float(rule.get('time_min') or 0)
-            max_age = float(rule.get('time_max') or 999999)
+            try:
+                min_val = rule.get('time_min')
+                max_val = rule.get('time_max')
+                min_age = float(min_val) if min_val and str(min_val).strip() != "" else 0
+                max_age = float(max_val) if max_val and str(max_val).strip() != "" else 999999
+            except (ValueError, TypeError):
+                min_age = 0
+                max_age = 999999
             
-            # Robust regex to handle 'Token Age: 1h 46m', 'Age: 1hr 46min', '1 day 2 hrs', etc.
-            age_match = re.search(r'(?:Token )?Age\s*[:\-]?\s*(?:(\d+)\s*(?:d|day|days))?\s*(?:(\d+)\s*(?:h|hr|hrs))?\s*(?:(\d+)\s*(?:m|min|mins))?', text, re.IGNORECASE)
-            
-            if age_match:
-                d = int(age_match.group(1) or 0)
-                h = int(age_match.group(2) or 0)
-                m = int(age_match.group(3) or 0)
-                token_minutes = (d * 1440) + (h * 60) + m
-                
+            # Check for "Just now" or "New" which imply 0 minutes
+            if re.search(r'Age\s*[:\-]?\s*(?:Just now|New)', text, re.IGNORECASE):
+                token_minutes = 0
+            else:
+                # Robust regex to handle '1 day, 2 hours, 45 minutes', '1d 4h', '1hr 46min', etc.
+                # We look for a pattern following "Age"
+                age_body_match = re.search(r'(?:Token )?Age\s*[:\-]?\s*(.*?)(?:\n|$)', text, re.IGNORECASE)
+                if age_body_match:
+                    age_text = age_body_match.group(1)
+                    d = int(re.search(r'(\d+)\s*(?:d|day)', age_text, re.IGNORECASE).group(1) if re.search(r'(\d+)\s*(?:d|day)', age_text, re.IGNORECASE) else 0)
+                    h = int(re.search(r'(\d+)\s*(?:h|hr|hour)', age_text, re.IGNORECASE).group(1) if re.search(r'(\d+)\s*(?:h|hr|hour)', age_text, re.IGNORECASE) else 0)
+                    m = int(re.search(r'(\d+)\s*(?:m|min|minute)', age_text, re.IGNORECASE).group(1) if re.search(r'(\d+)\s*(?:m|min|minute)', age_text, re.IGNORECASE) else 0)
+                    token_minutes = (d * 1440) + (h * 60) + m
+                else:
+                    # If no "Age" label is found, try to find a standalone time pattern that looks like an age
+                    standalone_match = re.search(r'(?:(\d+)\s*(?:d|day)s?)?\s*,?\s*(?:(\d+)\s*(?:h|hr|hour)s?)?\s*,?\s*(?:(\d+)\s*(?:m|min|minute)s?)', text, re.IGNORECASE)
+                    if standalone_match and (standalone_match.group(1) or standalone_match.group(2) or standalone_match.group(3)):
+                        d = int(standalone_match.group(1) or 0)
+                        h = int(standalone_match.group(2) or 0)
+                        m = int(standalone_match.group(3) or 0)
+                        token_minutes = (d * 1440) + (h * 60) + m
+                    else:
+                        # If no token age is found at all, drop if the min_age is > 0
+                        if min_age > 0:
+                            return None, True, f"Dropped by Token Age Filter (No Age found in text, but min allowed is {min_age}m)"
+                        else:
+                            token_minutes = None # Allow it to pass if no rules are violated
+
+            if token_minutes is not None:
                 if not (min_age <= token_minutes <= max_age):
                     return None, True, f"Dropped by Token Age Filter (Allowed: {min_age}-{max_age}m, Found: {token_minutes}m)"
-            else:
-                # If no token age is found at all, drop if the min_age is > 0
-                if min_age > 0:
-                    return None, True, f"Dropped by Token Age Filter (No Age found in text, but min allowed is {min_age}m)"
         
         # EXTRACT CA LOGIC (Now acts purely as a filter)
         elif rule_type == 'extract_ca':
@@ -270,12 +294,17 @@ def toggle_workflow(id):
 
 @app.route('/api/workflows/<int:id>', methods=['DELETE'])
 def delete_workflow(id):
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute('DELETE FROM workflows WHERE id=?', (id,))
-    conn.commit()
-    conn.close()
-    return jsonify({"success": True})
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        # Explicitly delete rules first just in case
+        cursor.execute('DELETE FROM rules WHERE workflow_id=?', (id,))
+        cursor.execute('DELETE FROM workflows WHERE id=?', (id,))
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/settings', methods=['POST'])
 def save_settings():
@@ -516,29 +545,37 @@ async def main():
 
     print("Settings found! Starting Telegram Userbot...")
     try:
-        api_id = int(api_id)
-    except:
-        print("API ID must be a number! Check Dashboard settings.")
-        while True:
-            await asyncio.sleep(1)
+        try:
+            api_id = int(api_id)
+        except:
+            print("API ID must be a number! Check Dashboard settings.")
+            while True:
+                await asyncio.sleep(1)
 
-    tg_client = TelegramClient('userbot_session', api_id, api_hash)
-    await tg_client.connect()
-    
-    if await tg_client.is_user_authorized():
-        print("Userbot is already authorized and running!")
-        register_handlers(tg_client)
-        await tg_client.run_until_disconnected()
-    else:
-        print("Userbot is waiting for authorization via Web Dashboard...")
-        # Keep loop alive so the web dashboard can trigger sign-in
-        while True:
-            await asyncio.sleep(1)
-            if await tg_client.is_user_authorized():
-                print("Authorization complete! Listening for messages.")
-                register_handlers(tg_client)
-                await tg_client.run_until_disconnected()
-                break
+        tg_client = TelegramClient('userbot_session', api_id, api_hash)
+        await tg_client.connect()
+        
+        if await tg_client.is_user_authorized():
+            print("Userbot is already authorized and running!")
+            register_handlers(tg_client)
+            await tg_client.run_until_disconnected()
+        else:
+            print("Userbot is waiting for authorization via Web Dashboard...")
+            # Keep loop alive so the web dashboard can trigger sign-in
+            while True:
+                await asyncio.sleep(1)
+                if await tg_client.is_user_authorized():
+                    print("Authorization complete! Listening for messages.")
+                    register_handlers(tg_client)
+                    await tg_client.run_until_disconnected()
+                    break
+    except asyncio.CancelledError:
+        pass # Normal shutdown
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nStopping bot gracefully...")
+    except Exception as e:
+        print(f"\nAn unexpected error occurred: {e}")
