@@ -18,7 +18,7 @@ telethon_loop = None
 tg_client = None
 phone_code_hash = None
 
-DB_PATH = os.path.join(current_dir, '../db/rules.sqlite')
+DB_PATH = os.path.join(current_dir, 'db/rules.sqlite')
 
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
