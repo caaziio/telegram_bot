@@ -1,0 +1,26 @@
+{
+  "name": "dashboard",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "dev": "next dev -p 5555",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@types/node": "^25.6.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.6",
+    "next": "^16.2.6",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "typescript": "^6.0.3"
+  }
+}

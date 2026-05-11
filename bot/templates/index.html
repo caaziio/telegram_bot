@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TeleFlow Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/globals.css') }}">
+    <style>
+        .hidden { display: none !important; }
+        
+        /* Modal Styles adapted from NextJS */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(4px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            background: var(--bg-dark);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            width: 100%;
+            max-width: 600px;
+            padding: 2rem;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+        }
+        
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+        .form-input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-color);
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            color: var(--text-main);
+            font-family: inherit;
+            transition: border-color 0.2s;
+        }
+        .form-input:focus {
+            outline: none;
+            border-color: var(--accent-color);
+        }
+        
+        .result-success {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            padding: 1rem;
+            border-radius: 8px;
+            height: 100%;
+            width: 100%;
+            text-align: left;
+            box-sizing: border-box;
+        }
+        .result-error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            padding: 1rem;
+            border-radius: 8px;
+            color: #fca5a5;
+            width: 100%;
+            text-align: left;
+            box-sizing: border-box;
+        }
+        .dropdown-content {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            right: 0;
+            background: #1f2937;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+        }
+        .dropdown-item {
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            color: white;
+            font-size: 0.9rem;
+        }
+        .dropdown-item:hover {
+            background: #374151;
+        }
+        .result-header {
+            font-weight: bold;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo-container">
+                <div class="logo-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M22 2L11 13"></path>
+                        <path d="M22 2l-7 20-4-9-9-4 20-7z"></path>
+                    </svg>
+                </div>
+                <div class="logo-text">TeleFlow</div>
+            </div>
+
+            <nav>
+                <div class="nav-link active" id="nav-workflows" onclick="switchTab('workflows')">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                    Workflows
+                </div>
+                <div class="nav-link" id="nav-tester" onclick="switchTab('tester')">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                    Flow Tester
+                </div>
+                <div class="nav-link" id="nav-settings" onclick="switchTab('settings')">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    Settings
+                </div>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            
+            <!-- Workflows Tab -->
+            <div id="tab-workflows">
+                <div class="header">
+                    <div class="header-title">
+                        <h1>Your Workflows</h1>
+                        <p>Manage your automated channel routing and filters</p>
+                    </div>
+                    <button class="btn-primary" onclick="openModal()">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                        Add Flow
+                    </button>
+                </div>
+                <div class="workflows-grid" id="workflows-grid">
+                    <!-- Workflows populated by JS -->
+                </div>
+            </div>
+
+            <!-- Tester Tab -->
+            <div id="tab-tester" class="hidden">
+                <div class="header">
+                    <div class="header-title">
+                        <h1>Flow Tester</h1>
+                        <p>Simulate how your bot will process incoming messages before saving.</p>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
+                    <div style="flex: 1; min-width: 300px;">
+                        <div class="workflow-card">
+                            <h3 style="margin-bottom: 1rem; font-size: 1rem; font-weight: 600;">1. Setup Simulation</h3>
+                            
+                            <div class="form-group">
+                                <label>Select Workflow Rules to Apply</label>
+                                <select class="form-input" id="tester-workflow" style="-webkit-appearance: none;"></select>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Original Telegram Message</label>
+                                <textarea class="form-input" id="tester-input" style="height: 200px; resize: vertical; font-family: monospace; font-size: 0.85rem;">🤖 AI Solana CTO
+🏷️ Pandamic | PANDAMIC
+
+📌 CA ETZKRf2VWzQKi5X3Lr8CzpLHREB5jRB1SWUGzXNGpump
+
+🏛️ Dex: Pumpswap
+📈 24h Volume: $363.16K
+📊 Market Cap: $21.76K
+💧 Liquidity: $11.76K
+⏳ Token Age: 1h 46m</textarea>
+                            </div>
+
+                            <button class="btn-primary" style="width: 100%; justify-content: center;" onclick="runTester()">
+                                Process Message
+                            </button>
+                        </div>
+                    </div>
+
+                    <div style="flex: 1; min-width: 300px;">
+                        <div class="workflow-card" style="height: 100%; display: flex; flex-direction: column;">
+                            <h3 style="margin-bottom: 1rem; font-size: 1rem; font-weight: 600;">2. Processed Result</h3>
+                            <div id="tester-result-container" style="flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-muted);">
+                                Click Process to see the result
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Tab -->
+            <div id="tab-settings" class="hidden">
+                <div class="header">
+                    <div class="header-title">
+                        <h1>Telegram Connection</h1>
+                        <p>Enter your API details to connect the userbot</p>
+                    </div>
+                </div>
+                
+                <div class="workflow-card" style="max-width: 600px; margin-bottom: 2rem;">
+                    <form onsubmit="saveSettings(event)">
+                        <div class="form-group">
+                            <label>API ID</label>
+                            <input class="form-input" id="setting-api-id" placeholder="e.g. 1234567" required />
+                            <small style="color: var(--text-muted); font-size: 0.8rem; display: block; margin-top: 4px;">
+                                Get this from my.telegram.org
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label>API Hash</label>
+                            <input class="form-input" id="setting-api-hash" placeholder="e.g. abcdef1234567890" required />
+                        </div>
+                        <div class="form-group">
+                            <label>Phone Number</label>
+                            <input class="form-input" id="setting-phone" placeholder="e.g. +1234567890" />
+                        </div>
+                        <button type="submit" class="btn-primary" style="width: 100%;">Save & Connect</button>
+                    </form>
+
+                    <div id="auth-section" style="display: none; margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border-color);">
+                        <h3 style="margin-bottom: 1rem; color: #6ee7b7;">Authentication Required</h3>
+                        <p style="margin-bottom: 1rem; font-size: 0.85rem; color: var(--text-muted);">Telegram sent a verification code to your app. Enter it below.</p>
+                        <div class="form-group">
+                            <label>Verification Code</label>
+                            <input type="text" id="tg-code" class="form-input" placeholder="e.g. 12345">
+                        </div>
+                        <button onclick="verifyCode()" type="button" class="btn-primary" style="width: 100%;">Verify Code</button>
+                    </div>
+                </div>
+
+                <div id="dialogs-section" class="workflow-card" style="max-width: 600px; display: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                        <h3 style="font-size: 1.1rem; font-weight: 600;">Top 20 Conversations</h3>
+                        <div>
+                            <button onclick="loadDialogs()" type="button" class="btn-secondary" style="font-size: 0.85rem; padding: 0.25rem 0.75rem; margin-right: 0.5rem;">Refresh</button>
+                            <button onclick="logoutTelegram()" type="button" style="font-size: 0.85rem; padding: 0.25rem 0.75rem; background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239,68,68,0.5); border-radius: 4px; cursor: pointer;">Logout</button>
+                        </div>
+                    </div>
+                    <div style="background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: 8px; max-height: 400px; overflow-y: auto;">
+                        <ul id="dialogs-list" style="list-style: none; padding: 0; margin: 0;">
+                            <!-- Filled by JS -->
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+
+        <!-- Editor Modal -->
+        <div id="workflow-modal" class="modal-overlay hidden">
+            <div class="modal-content">
+                <div class="header" style="margin-bottom: 1.5rem;">
+                    <h2 id="modal-title">New Workflow</h2>
+                    <button class="btn-icon" type="button" onclick="closeModal()">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                </div>
+
+                <form onsubmit="saveWorkflow(event)">
+                    <input type="hidden" id="flow-id" />
+                    
+                    <div class="form-group">
+                        <label>Workflow Name</label>
+                        <input class="form-input" id="flow-name" placeholder="e.g. VIP Signals Forwarder" />
+                    </div>
+
+                    <div style="display: flex; gap: 1rem;">
+                        <div class="form-group" style="flex: 1; position: relative;">
+                            <label>Source Channel</label>
+                            <input type="text" class="form-input" id="flow-source" placeholder="Search channel name..." oninput="handleChannelSearch('source')" onfocus="handleChannelSearch('source')" autocomplete="off" />
+                            <div id="source-dropdown" class="dropdown-content hidden"></div>
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label>Source Channel ID (Auto)</label>
+                            <input class="form-input" id="flow-source-id" placeholder="-100123456789" />
+                        </div>
+                    </div>
+
+                    <div style="display: flex; gap: 1rem;">
+                        <div class="form-group" style="flex: 1; position: relative;">
+                            <label>Target Channel</label>
+                            <input type="text" class="form-input" id="flow-target" placeholder="Search channel name..." oninput="handleChannelSearch('target')" onfocus="handleChannelSearch('target')" autocomplete="off" />
+                            <div id="target-dropdown" class="dropdown-content hidden"></div>
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label>Target Channel ID (Auto)</label>
+                            <input class="form-input" id="flow-target-id" placeholder="-100987654321" />
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Rules & Filters</label>
+                        <div style="background: rgba(255,255,255,0.03); padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+                            <div id="rules-container"></div>
+                            
+                            <div style="display: flex; gap: 10px; margin-top: 1rem; flex-wrap: wrap;">
+                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem;" onclick="addRule('filter')">+ Add Word Filter</button>
+                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem;" onclick="addRule('replace')">+ Add Replace</button>
+                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem;" onclick="addRule('token_age')">+ Add Token Age</button>
+                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #f59e0b;" onclick="addRule('performance')">+ Add Performance</button>
+                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #10b981;" onclick="addRule('extract_ca')">+ Extract CA</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 2rem;">
+                        <button type="button" class="btn-icon" style="padding: 0 1rem;" onclick="closeModal()">Cancel</button>
+                        <button type="submit" class="btn-primary">Save Workflow</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Inject data from Jinja -->
+    <script>
+        const initialWorkflows = {{ workflows | tojson | safe }};
+        const initialSettings = {{ settings | tojson | safe }};
+    </script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v=7"></script>
+</body>
+</html>
