@@ -79,6 +79,7 @@ function openModal() {
     document.getElementById('flow-target-id').value = '';
     currentRules = [];
     renderRules();
+    fetchChannelsList(); // Refresh channels when opening modal
 }
 
 function closeModal() {
@@ -101,6 +102,7 @@ function editWorkflow(id) {
     // Convert rules array of objects
     currentRules = (wf.rules || []).map(r => ({ ...r }));
     renderRules();
+    fetchChannelsList(); // Refresh channels when editing
 }
 
 function renderRules() {
@@ -379,6 +381,7 @@ async function verifyCode() {
             document.getElementById('auth-section').style.display = 'none';
             document.getElementById('dialogs-section').style.display = 'block';
             loadDialogs();
+            fetchChannelsList();
         } else {
             alert('Verification failed: ' + result.error);
         }
@@ -440,8 +443,9 @@ async function checkAuthStatus() {
     }
 }
 
-// Check auth status right after rendering workflows
+// Check auth status right after rendering workflows and then periodically
 setTimeout(checkAuthStatus, 1000);
+setInterval(checkAuthStatus, 15000); // Re-check every 15s to keep UI updated
 
 async function runTester() {
     const workflowId = document.getElementById('tester-workflow').value;
@@ -540,7 +544,12 @@ function handleChannelSearch(type) {
     } else {
         const div = document.createElement('div');
         div.className = 'dropdown-item';
-        div.textContent = 'No channels found';
+        // Show a more helpful message if no channels are found
+        if (availableChannels.length === 0) {
+            div.textContent = 'No channels found. Is the bot connected?';
+        } else {
+            div.textContent = 'No matches found';
+        }
         div.style.color = '#9ca3af';
         dropdown.appendChild(div);
         dropdown.classList.remove('hidden');

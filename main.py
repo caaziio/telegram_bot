@@ -432,15 +432,30 @@ def tg_channels():
         return jsonify({"success": False, "error": "Client not ready"})
         
     async def _get_channels():
-        if not await tg_client.is_user_authorized():
+        try:
+            if not await tg_client.is_user_authorized():
+                return []
+            
+            # Fetch dialogs with a limit to avoid timeouts
+            dialogs = await tg_client.get_dialogs(limit=100)
+            
+            channels = []
+            for d in dialogs:
+                if d.is_channel or d.is_group:
+                    # Safely get username
+                    uname = ""
+                    if hasattr(d.entity, 'username') and d.entity.username:
+                        uname = d.entity.username
+                    
+                    channels.append({
+                        "id": str(d.id),
+                        "name": d.name or "Unnamed",
+                        "username": uname
+                    })
+            return channels
+        except Exception as e:
+            print(f"Error in _get_channels: {e}")
             return []
-        dialogs = await tg_client.get_dialogs()
-        # Filter for channels and groups
-        channels = [
-            {"id": str(d.id), "name": d.name, "username": getattr(d.entity, 'username', '')}
-            for d in dialogs if d.is_channel or d.is_group
-        ]
-        return channels
         
     try:
         channels = asyncio.run_coroutine_threadsafe(_get_channels(), telethon_loop).result(timeout=25)
