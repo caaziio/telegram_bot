@@ -573,8 +573,8 @@ async def main():
         while True:
             try:
                 settings = get_settings()
-                api_id = settings.get('api_id')
-                api_hash = settings.get('api_hash')
+                api_id = str(settings.get('api_id', '')).strip()
+                api_hash = str(settings.get('api_hash', '')).strip()
                 
                 if not api_id or not api_hash:
                     await asyncio.sleep(2)
@@ -582,7 +582,7 @@ async def main():
 
                 # If client exists but credentials changed, disconnect and recreate
                 if tg_client:
-                    if str(api_id) != str(current_api_id) or api_hash != current_api_hash:
+                    if api_id != str(current_api_id) or api_hash != str(current_api_hash):
                         print("API Credentials changed! Restarting Telegram Client...")
                         await tg_client.disconnect()
                         tg_client = None
@@ -594,9 +594,9 @@ async def main():
                 if not tg_client:
                     print(f"Starting Telegram Client with API ID: {api_id}")
                     try:
-                        current_api_id = int(api_id)
+                        current_api_id = api_id
                         current_api_hash = api_hash
-                        tg_client = TelegramClient('userbot_session', current_api_id, current_api_hash)
+                        tg_client = TelegramClient('userbot_session', int(api_id), api_hash)
                         await tg_client.connect()
                     except Exception as e:
                         print(f"Failed to initialize Telegram Client: {e}")
@@ -611,7 +611,9 @@ async def main():
                     while tg_client and await tg_client.is_user_authorized():
                         # Check for credential change every 5 seconds
                         settings = get_settings()
-                        if str(settings.get('api_id')) != str(current_api_id) or settings.get('api_hash') != current_api_hash:
+                        new_id = str(settings.get('api_id', '')).strip()
+                        new_hash = str(settings.get('api_hash', '')).strip()
+                        if new_id != str(current_api_id) or new_hash != str(current_api_hash):
                             break
                         await asyncio.sleep(5)
                 else:
