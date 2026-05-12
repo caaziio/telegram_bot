@@ -19,6 +19,7 @@ tg_client = None
 current_api_id = None
 current_api_hash = None
 reset_requested = False
+handlers_registered = False
 
 DB_PATH = os.path.join(current_dir, 'db/rules.sqlite')
 
@@ -124,6 +125,7 @@ def process_message_logic(text, rules):
     
     for rule in rules:
         rule_type = rule.get('rule_type')
+        print(f"      [RULE] type={rule_type}, search_text={rule.get('search_text')}, time_min={rule.get('time_min')}, time_max={rule.get('time_max')}")
         
         # TOKEN AGE FILTER LOGIC
         if rule_type == 'token_age':
@@ -136,6 +138,8 @@ def process_message_logic(text, rules):
                 min_age = 0
                 max_age = 999999
             
+            print(f"      [TOKEN AGE] min_age={min_age}, max_age={max_age}")
+            
             # Check for "Just now" or "New" which imply 0 minutes
             if re.search(r'Age\s*[:\-]?\s*(?:Just now|New)', text, re.IGNORECASE):
                 token_minutes = 0
@@ -145,10 +149,12 @@ def process_message_logic(text, rules):
                 age_body_match = re.search(r'(?:Token )?Age\s*[:\-]?\s*(.*?)(?:\n|$)', text, re.IGNORECASE)
                 if age_body_match:
                     age_text = age_body_match.group(1)
+                    print(f"      [TOKEN AGE] Extracted age text: '{age_text}'")
                     d = int(re.search(r'(\d+)\s*(?:d|day)', age_text, re.IGNORECASE).group(1) if re.search(r'(\d+)\s*(?:d|day)', age_text, re.IGNORECASE) else 0)
                     h = int(re.search(r'(\d+)\s*(?:h|hr|hour)', age_text, re.IGNORECASE).group(1) if re.search(r'(\d+)\s*(?:h|hr|hour)', age_text, re.IGNORECASE) else 0)
                     m = int(re.search(r'(\d+)\s*(?:m|min|minute)', age_text, re.IGNORECASE).group(1) if re.search(r'(\d+)\s*(?:m|min|minute)', age_text, re.IGNORECASE) else 0)
                     token_minutes = (d * 1440) + (h * 60) + m
+                    print(f"      [TOKEN AGE] Parsed: d={d}, h={h}, m={m} → {token_minutes} minutes")
                 else:
                     # If no "Age" label is found, try to find a standalone time pattern that looks like an age
                     standalone_match = re.search(r'(?:(\d+)\s*(?:d|day)s?)?\s*,?\s*(?:(\d+)\s*(?:h|hr|hour)s?)?\s*,?\s*(?:(\d+)\s*(?:m|min|minute)s?)', text, re.IGNORECASE)
@@ -166,7 +172,10 @@ def process_message_logic(text, rules):
 
             if token_minutes is not None:
                 if not (min_age <= token_minutes <= max_age):
+                    print(f"      [TOKEN AGE] DROPPING: {min_age} <= {token_minutes} <= {max_age} is FALSE")
                     return None, True, f"Dropped by Token Age Filter (Allowed: {min_age}-{max_age}m, Found: {token_minutes}m)"
+                else:
+                    print(f"      [TOKEN AGE] PASSED: {min_age} <= {token_minutes} <= {max_age}")
         
         # EXTRACT CA LOGIC (Now acts purely as a filter)
         elif rule_type == 'extract_ca':
@@ -174,6 +183,8 @@ def process_message_logic(text, rules):
             match = re.search(ca_regex, text, re.IGNORECASE)
             if not match or not match.group(1):
                 return None, True, "Dropped by Extract CA (No Contract Address found in text)"
+            else:
+                print(f"      [EXTRACT CA] PASSED: Found CA={match.group(1)[:20]}...")
 
         # PERFORMANCE FILTER LOGIC
         elif rule_type == 'performance':
@@ -183,15 +194,21 @@ def process_message_logic(text, rules):
                 try:
                     threshold = float(threshold_str)
                     # Look for e.g., '5m: +67%' or '5m: -27%'
-                    pattern = rf'{timeframe}:\s*([\+\-]?\d+(?:\.\d+)?)%'
+                    pattern = rf'{timeframe}:\s*([+\-]?\d+(?:\.\d+)?)%'
                     match = re.search(pattern, text, re.IGNORECASE)
                     if match:
                         actual_performance = float(match.group(1))
                         # Drop if performance is greater than or equal to threshold
                         if actual_performance >= threshold:
                             return None, True, f"Dropped by Performance Filter ({timeframe}: {actual_performance}% >= threshold {threshold}%)"
+                        else:
+                            print(f"      [PERF] PASSED: {timeframe} = {actual_performance}% < {threshold}%")
+                    else:
+                        print(f"      [PERF] PASSED: No '{timeframe}:' pattern found in text (filter skipped)")
                 except ValueError:
                     pass
+            else:
+                print(f"      [PERF] SKIPPED: No threshold set")
 
         # WORD FILTER LOGIC
         elif rule_type == 'filter':
@@ -212,6 +229,7 @@ def process_message_logic(text, rules):
             if replace:
                 processed_text += f"\n\n{replace}"
                 
+    print(f"      [RESULT] All rules passed! Message will be forwarded.")
     return processed_text, False, ""
 
 def process_message(text, rules, message_date):
@@ -482,6 +500,19 @@ def run_flask_app():
     print("Starting Web Dashboard on http://localhost:5000")
     app.run(host='0.0.0.0', port=5000, use_reloader=False)
 
+def normalize_channel_id(raw_id):
+    """Strip the Telegram -100 prefix to get the bare channel ID for comparison.
+    Telethon's chat.id returns bare IDs, but the dashboard may store the full -100... form.
+    We normalize both sides so comparison always works."""
+    s = str(raw_id).strip()
+    # Remove leading minus
+    if s.startswith('-'):
+        s = s[1:]
+    # Remove the '100' prefix that Telegram uses for channels/supergroups
+    if s.startswith('100') and len(s) > 10:
+        s = s[3:]
+    return s
+
 def register_handlers(client):
     @client.on(events.NewMessage)
     async def handler(event):
@@ -495,12 +526,15 @@ def register_handlers(client):
         else:
             actual_chat_id = str(event.chat_id)
             
+        # Normalize for reliable matching
+        normalized_actual_id = normalize_channel_id(actual_chat_id)
+            
         chat_username = getattr(chat, 'username', '') or ''
         
         print(f"\n--- [NEW MESSAGE] ---")
-        print(f"From Chat ID: '{actual_chat_id}'")
+        print(f"From Chat ID: '{actual_chat_id}' (normalized: '{normalized_actual_id}')")
         print(f"From Username: '{chat_username}'")
-        print(f"Message Text: {repr(event.text)}")
+        print(f"Message Text: {repr(event.text[:200] if event.text else '')}")
         
         for wf in workflows:
             if not wf.get('is_active'):
@@ -508,13 +542,15 @@ def register_handlers(client):
                 
             s_username = (wf.get('source_channel') or '').replace('@', '')
             s_id = str(wf.get('source_channel_id') or '').strip()
+            normalized_s_id = normalize_channel_id(s_id) if s_id else ''
             
             print(f"  Checking Workflow '{wf.get('name')}':")
-            print(f"    Expected Source ID: '{s_id}'")
+            print(f"    Expected Source ID: '{s_id}' (normalized: '{normalized_s_id}')")
             print(f"    Expected Source Username: '{s_username}'")
             
             match = False
-            if s_id and actual_chat_id == s_id:
+            # Match by normalized ID (handles -100 prefix mismatch)
+            if normalized_s_id and normalized_actual_id == normalized_s_id:
                 match = True
                 print("    -> Match by ID!")
             elif s_username and chat_username and chat_username.lower() == s_username.lower():
@@ -557,7 +593,7 @@ def register_handlers(client):
 
 
 async def main():
-    global telethon_loop, tg_client, current_api_id, current_api_hash
+    global telethon_loop, tg_client, current_api_id, current_api_hash, handlers_registered
     telethon_loop = asyncio.get_running_loop()
     
     print("Initializing Database...")
@@ -583,6 +619,7 @@ async def main():
                     if tg_client:
                         await tg_client.disconnect()
                         tg_client = None
+                    handlers_registered = False
                     if os.path.exists('userbot_session.session'):
                         os.remove('userbot_session.session')
                     
@@ -606,6 +643,7 @@ async def main():
                         print("API Credentials changed! Restarting Telegram Client...")
                         await tg_client.disconnect()
                         tg_client = None
+                        handlers_registered = False
                     elif await tg_client.is_user_authorized():
                         # Client is running and authorized, just wait
                         await asyncio.sleep(5)
@@ -626,7 +664,10 @@ async def main():
 
                 if await tg_client.is_user_authorized():
                     print("Userbot is authorized and running!")
-                    register_handlers(tg_client)
+                    if not handlers_registered:
+                        register_handlers(tg_client)
+                        handlers_registered = True
+                        print("Event handlers registered.")
                     # This will run until disconnected or credentials change
                     while tg_client and await tg_client.is_user_authorized():
                         # Check for credential change or reset request every 5 seconds
