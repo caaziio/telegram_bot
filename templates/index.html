@@ -229,10 +229,16 @@
                             <input class="form-input" id="setting-api-hash" placeholder="e.g. abcdef1234567890" required />
                         </div>
                         <div class="form-group">
-                            <label>Phone Number</label>
-                            <input class="form-input" id="setting-phone" placeholder="e.g. +1234567890" />
+                            <label>Phone Number (International format)</label>
+                            <input class="form-input" id="setting-phone" placeholder="e.g. +1234567890" required />
+                            <small style="color: var(--text-muted); font-size: 0.8rem; display: block; margin-top: 4px;">
+                                Must start with + and include country code.
+                            </small>
                         </div>
-                        <button type="submit" class="btn-primary" style="width: 100%;">Save & Connect</button>
+                        <div style="display: flex; gap: 10px;">
+                            <button type="submit" class="btn-primary" style="flex: 2;">Save & Connect</button>
+                            <button type="button" class="btn-secondary" style="flex: 1; background: rgba(239, 68, 68, 0.1); color: #fca5a5; border-color: rgba(239, 68, 68, 0.3);" onclick="resetConnection()">Reset Session</button>
+                        </div>
                     </form>
 
                     <div id="auth-section" style="display: none; margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border-color);">

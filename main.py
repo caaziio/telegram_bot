@@ -16,7 +16,8 @@ app = Flask(__name__,
 # Globals for async bridge
 telethon_loop = None
 tg_client = None
-phone_code_hash = None
+current_api_id = None
+current_api_hash = None
 
 DB_PATH = os.path.join(current_dir, 'db/rules.sqlite')
 
@@ -354,12 +355,23 @@ def tg_send_code():
         return jsonify({"success": False, "error": "Bot is initializing. Please wait a few seconds and try again."})
         
     async def _send():
-        global phone_code_hash
         if not tg_client.is_connected():
             await tg_client.connect()
-        result = await tg_client.send_code_request(phone)
-        phone_code_hash = result.phone_code_hash
-        return True
+        
+        try:
+            result = await tg_client.send_code_request(phone)
+            # Save hash to DB so it survives restart
+            conn = get_db()
+            cursor = conn.cursor()
+            cursor.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ('phone_code_hash', result.phone_code_hash))
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            err_str = str(e)
+            if "all available options" in err_str or "ResendCodeRequest" in err_str:
+                raise Exception("Telegram restricted code requests for this number. Please check your Telegram app on another device for the code, or wait 24 hours.")
+            raise e
 
     try:
         asyncio.run_coroutine_threadsafe(_send(), telethon_loop).result(timeout=15)
@@ -375,11 +387,39 @@ def tg_verify_code():
         return jsonify({"success": False, "error": "Client not ready"})
         
     async def _verify():
+        # Retrieve hash from DB
+        settings = get_settings()
+        phone_code_hash = settings.get('phone_code_hash')
+        if not phone_code_hash:
+            raise Exception("Code hash missing. Please request the code again.")
+            
         await tg_client.sign_in(phone, code, phone_code_hash=phone_code_hash)
         return True
 
     try:
         asyncio.run_coroutine_threadsafe(_verify(), telethon_loop).result(timeout=15)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/api/telegram/reset', methods=['POST'])
+def tg_reset():
+    global tg_client
+    try:
+        if tg_client and tg_client.is_connected():
+            asyncio.run_coroutine_threadsafe(tg_client.disconnect(), telethon_loop).result(timeout=5)
+        
+        if os.path.exists('userbot_session.session'):
+            os.remove('userbot_session.session')
+        
+        # Clear settings in DB related to auth
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM settings WHERE key IN ('phone_code_hash')")
+        conn.commit()
+        conn.close()
+        
+        # We don't null tg_client here because main() will handle it
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
@@ -517,7 +557,7 @@ def register_handlers(client):
 
 
 async def main():
-    global telethon_loop, tg_client
+    global telethon_loop, tg_client, current_api_id, current_api_hash
     telethon_loop = asyncio.get_running_loop()
     
     print("Initializing Database...")
@@ -527,48 +567,61 @@ async def main():
     flask_thread = threading.Thread(target=run_flask_app, daemon=True)
     flask_thread.start()
     
-    api_id = None
-    api_hash = None
-    phone = None
-    
     print("Waiting for Telegram settings...")
     
     while True:
-        settings = get_settings()
-        api_id = settings.get('api_id', os.environ.get('TG_API_ID'))
-        api_hash = settings.get('api_hash', os.environ.get('TG_API_HASH'))
-        phone = settings.get('phone', '')
-        
-        if api_id and api_hash:
-            break
-        await asyncio.sleep(2)
-
-    print("Settings found! Starting Telegram Userbot...")
-    try:
         try:
-            api_id = int(api_id)
-        except:
-            print("API ID must be a number! Check Dashboard settings.")
-            while True:
-                await asyncio.sleep(1)
+            settings = get_settings()
+            api_id = settings.get('api_id')
+            api_hash = settings.get('api_hash')
+            
+            if not api_id or not api_hash:
+                await asyncio.sleep(2)
+                continue
 
-        tg_client = TelegramClient('userbot_session', api_id, api_hash)
-        await tg_client.connect()
-        
-        if await tg_client.is_user_authorized():
-            print("Userbot is already authorized and running!")
-            register_handlers(tg_client)
-            await tg_client.run_until_disconnected()
-        else:
-            print("Userbot is waiting for authorization via Web Dashboard...")
-            # Keep loop alive so the web dashboard can trigger sign-in
-            while True:
-                await asyncio.sleep(1)
-                if await tg_client.is_user_authorized():
-                    print("Authorization complete! Listening for messages.")
-                    register_handlers(tg_client)
-                    await tg_client.run_until_disconnected()
-                    break
+            # If client exists but credentials changed, disconnect and recreate
+            if tg_client:
+                if str(api_id) != str(current_api_id) or api_hash != current_api_hash:
+                    print("API Credentials changed! Restarting Telegram Client...")
+                    await tg_client.disconnect()
+                    tg_client = None
+                elif await tg_client.is_user_authorized():
+                    # Client is running and authorized, just wait
+                    await asyncio.sleep(5)
+                    continue
+
+            if not tg_client:
+                print(f"Starting Telegram Client with API ID: {api_id}")
+                try:
+                    current_api_id = int(api_id)
+                    current_api_hash = api_hash
+                    tg_client = TelegramClient('userbot_session', current_api_id, current_api_hash)
+                    await tg_client.connect()
+                except Exception as e:
+                    print(f"Failed to initialize Telegram Client: {e}")
+                    tg_client = None
+                    await asyncio.sleep(5)
+                    continue
+
+            if await tg_client.is_user_authorized():
+                print("Userbot is authorized and running!")
+                # register_handlers is idempotent in our current setup or needs care?
+                # Actually we should only register once.
+                register_handlers(tg_client)
+                # This will run until disconnected or credentials change
+                while tg_client and await tg_client.is_user_authorized():
+                    # Check for credential change every 5 seconds
+                    settings = get_settings()
+                    if str(settings.get('api_id')) != str(current_api_id) or settings.get('api_hash') != current_api_hash:
+                        break
+                    await asyncio.sleep(5)
+            else:
+                # Wait for auth via web dashboard
+                await asyncio.sleep(2)
+
+        except Exception as e:
+            print(f"Error in main loop: {e}")
+            await asyncio.sleep(5)
     except asyncio.CancelledError:
         pass # Normal shutdown
 

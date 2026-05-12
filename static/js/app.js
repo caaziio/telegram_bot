@@ -297,7 +297,13 @@ async function duplicateWorkflow(id) {
 
 async function saveSettings(e) {
     if (e) e.preventDefault();
-    const phone = document.getElementById('setting-phone').value;
+    const phone = document.getElementById('setting-phone').value.trim();
+    
+    if (phone && !phone.startsWith('+')) {
+        alert("Phone number must start with '+' followed by country code (e.g., +1234567890).");
+        return;
+    }
+
     const newSettings = {
         api_id: document.getElementById('setting-api-id').value,
         api_hash: document.getElementById('setting-api-hash').value,
@@ -323,10 +329,31 @@ async function saveSettings(e) {
         if (result.success) {
             document.getElementById('auth-section').style.display = 'block';
         } else {
-            alert('Failed to request code: ' + result.error);
+            let msg = result.error;
+            if (msg.includes("Telegram restricted code requests")) {
+                msg += "\n\nTip: Telegram often sends the code to your other active sessions (Phone/Desktop app) first. Check your Telegram chat!";
+            }
+            alert('Failed to request code: ' + msg);
         }
     } catch (err) {
         alert('Error connecting to backend: ' + err);
+    }
+}
+
+async function resetConnection() {
+    if (!confirm("This will delete your local session and disconnect the bot. You will need to log in again. Continue?")) return;
+    
+    try {
+        const res = await fetch('/api/telegram/reset', { method: 'POST' });
+        const result = await res.json();
+        if (result.success) {
+            alert("Session reset! Please refresh the page and try connecting again.");
+            window.location.reload();
+        } else {
+            alert("Reset failed: " + result.error);
+        }
+    } catch (e) {
+        alert("Reset error: " + e);
     }
 }
 
