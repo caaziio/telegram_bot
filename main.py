@@ -569,59 +569,58 @@ async def main():
     
     print("Waiting for Telegram settings...")
     
-    while True:
-        try:
-            settings = get_settings()
-            api_id = settings.get('api_id')
-            api_hash = settings.get('api_hash')
-            
-            if not api_id or not api_hash:
-                await asyncio.sleep(2)
-                continue
-
-            # If client exists but credentials changed, disconnect and recreate
-            if tg_client:
-                if str(api_id) != str(current_api_id) or api_hash != current_api_hash:
-                    print("API Credentials changed! Restarting Telegram Client...")
-                    await tg_client.disconnect()
-                    tg_client = None
-                elif await tg_client.is_user_authorized():
-                    # Client is running and authorized, just wait
-                    await asyncio.sleep(5)
+    try:
+        while True:
+            try:
+                settings = get_settings()
+                api_id = settings.get('api_id')
+                api_hash = settings.get('api_hash')
+                
+                if not api_id or not api_hash:
+                    await asyncio.sleep(2)
                     continue
 
-            if not tg_client:
-                print(f"Starting Telegram Client with API ID: {api_id}")
-                try:
-                    current_api_id = int(api_id)
-                    current_api_hash = api_hash
-                    tg_client = TelegramClient('userbot_session', current_api_id, current_api_hash)
-                    await tg_client.connect()
-                except Exception as e:
-                    print(f"Failed to initialize Telegram Client: {e}")
-                    tg_client = None
-                    await asyncio.sleep(5)
-                    continue
+                # If client exists but credentials changed, disconnect and recreate
+                if tg_client:
+                    if str(api_id) != str(current_api_id) or api_hash != current_api_hash:
+                        print("API Credentials changed! Restarting Telegram Client...")
+                        await tg_client.disconnect()
+                        tg_client = None
+                    elif await tg_client.is_user_authorized():
+                        # Client is running and authorized, just wait
+                        await asyncio.sleep(5)
+                        continue
 
-            if await tg_client.is_user_authorized():
-                print("Userbot is authorized and running!")
-                # register_handlers is idempotent in our current setup or needs care?
-                # Actually we should only register once.
-                register_handlers(tg_client)
-                # This will run until disconnected or credentials change
-                while tg_client and await tg_client.is_user_authorized():
-                    # Check for credential change every 5 seconds
-                    settings = get_settings()
-                    if str(settings.get('api_id')) != str(current_api_id) or settings.get('api_hash') != current_api_hash:
-                        break
-                    await asyncio.sleep(5)
-            else:
-                # Wait for auth via web dashboard
-                await asyncio.sleep(2)
+                if not tg_client:
+                    print(f"Starting Telegram Client with API ID: {api_id}")
+                    try:
+                        current_api_id = int(api_id)
+                        current_api_hash = api_hash
+                        tg_client = TelegramClient('userbot_session', current_api_id, current_api_hash)
+                        await tg_client.connect()
+                    except Exception as e:
+                        print(f"Failed to initialize Telegram Client: {e}")
+                        tg_client = None
+                        await asyncio.sleep(5)
+                        continue
 
-        except Exception as e:
-            print(f"Error in main loop: {e}")
-            await asyncio.sleep(5)
+                if await tg_client.is_user_authorized():
+                    print("Userbot is authorized and running!")
+                    register_handlers(tg_client)
+                    # This will run until disconnected or credentials change
+                    while tg_client and await tg_client.is_user_authorized():
+                        # Check for credential change every 5 seconds
+                        settings = get_settings()
+                        if str(settings.get('api_id')) != str(current_api_id) or settings.get('api_hash') != current_api_hash:
+                            break
+                        await asyncio.sleep(5)
+                else:
+                    # Wait for auth via web dashboard
+                    await asyncio.sleep(2)
+
+            except Exception as e:
+                print(f"Error in main loop: {e}")
+                await asyncio.sleep(5)
     except asyncio.CancelledError:
         pass # Normal shutdown
 
