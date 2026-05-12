@@ -614,7 +614,9 @@ async def main():
                     register_handlers(tg_client)
                     # This will run until disconnected or credentials change
                     while tg_client and await tg_client.is_user_authorized():
-                        # Check for credential change every 5 seconds
+                        # Check for credential change or reset request every 5 seconds
+                        if reset_requested:
+                            break
                         settings = get_settings()
                         new_id = str(settings.get('api_id', '')).strip()
                         new_hash = str(settings.get('api_hash', '')).strip()
