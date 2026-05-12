@@ -18,6 +18,7 @@ telethon_loop = None
 tg_client = None
 current_api_id = None
 current_api_hash = None
+reset_requested = False
 
 DB_PATH = os.path.join(current_dir, 'db/rules.sqlite')
 
@@ -404,25 +405,9 @@ def tg_verify_code():
 
 @app.route('/api/telegram/reset', methods=['POST'])
 def tg_reset():
-    global tg_client
-    try:
-        if tg_client and tg_client.is_connected():
-            asyncio.run_coroutine_threadsafe(tg_client.disconnect(), telethon_loop).result(timeout=5)
-        
-        if os.path.exists('userbot_session.session'):
-            os.remove('userbot_session.session')
-        
-        # Clear settings in DB related to auth
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM settings WHERE key IN ('phone_code_hash')")
-        conn.commit()
-        conn.close()
-        
-        # We don't null tg_client here because main() will handle it
-        return jsonify({"success": True})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+    global reset_requested
+    reset_requested = True
+    return jsonify({"success": True})
 
 @app.route('/api/telegram/dialogs', methods=['GET'])
 def tg_dialogs():
@@ -572,10 +557,30 @@ async def main():
     try:
         while True:
             try:
+                global reset_requested
                 settings = get_settings()
                 api_id = str(settings.get('api_id', '')).strip()
                 api_hash = str(settings.get('api_hash', '')).strip()
                 
+                # Handle Reset Request
+                if reset_requested:
+                    print("Reset requested! Clearing session...")
+                    if tg_client:
+                        await tg_client.disconnect()
+                        tg_client = None
+                    if os.path.exists('userbot_session.session'):
+                        os.remove('userbot_session.session')
+                    
+                    conn = get_db()
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM settings WHERE key IN ('phone_code_hash')")
+                    conn.commit()
+                    conn.close()
+                    
+                    reset_requested = False
+                    print("Reset complete.")
+                    continue
+
                 if not api_id or not api_hash:
                     await asyncio.sleep(2)
                     continue
