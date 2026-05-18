@@ -130,6 +130,7 @@ def init_db():
             status TEXT,
             dex_url TEXT,
             migration_status TEXT,
+            workflow_id INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -176,6 +177,10 @@ def init_db():
         pass
     try:
         cursor.execute('ALTER TABLE cto_signals ADD COLUMN migration_status TEXT')
+    except Exception:
+        pass
+    try:
+        cursor.execute('ALTER TABLE cto_signals ADD COLUMN workflow_id INTEGER')
     except Exception:
         pass
 
@@ -677,11 +682,38 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
             }
             
             # Skip if we already sent this CTO signal (unless in test mode)
-            is_duplicate = False
+            already_processed_wf_ids = []
             if not test_mode:
-                existing = cursor.execute('SELECT id FROM cto_signals WHERE ca = ?', (ca,)).fetchone()
-                if existing:
-                    is_duplicate = True
+                rows = cursor.execute('SELECT workflow_id FROM cto_signals WHERE ca = ?', (ca,)).fetchall()
+                already_processed_wf_ids = [
+                    r[0] if isinstance(r, (tuple, list)) else r.get('workflow_id') 
+                    for r in rows
+                ]
+                
+            workflows_to_evaluate = []
+            if workflow_id and str(workflow_id).strip() != "" and str(workflow_id) != "active_all":
+                workflows = get_workflows()
+                wf = next((w for w in workflows if str(w.get('id')) == str(workflow_id)), None)
+                if wf:
+                    workflows_to_evaluate.append(wf)
+            else:
+                workflows_to_evaluate = [w for w in get_workflows() if w.get('is_active')]
+
+            is_duplicate_all = False
+            if not test_mode:
+                if None in already_processed_wf_ids:
+                    is_duplicate_all = True
+                elif workflows_to_evaluate:
+                    is_duplicate_all = all(wf.get('id') in already_processed_wf_ids for wf in workflows_to_evaluate)
+                else:
+                    # Fallback mode (workflow_id = 0)
+                    is_duplicate_all = 0 in already_processed_wf_ids
+                    
+            if is_duplicate_all:
+                token_info["status"] = "duplicate"
+                token_info["reason"] = "Skipped: Already processed by all matching workflows"
+                results.append(token_info)
+                continue
                 
             token_url = f"https://api.dexscreener.com/latest/dex/tokens/{ca}"
             token_response = await asyncio.to_thread(requests.get, token_url)
@@ -752,12 +784,6 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
             token_info["perf_24h"] = perf_24h
             token_info["dex_url"] = dex_url
             
-            if is_duplicate:
-                token_info["status"] = "duplicate"
-                token_info["reason"] = "Skipped: Already sent to target"
-                results.append(token_info)
-                continue
-            
             msg = (f"🚀 PROJECT: {str(project_name).upper()} 🚀\n"
                    f"━━━━━━━━━━━\n"
                    f"💰 Market Cap: {mc_str}\n"
@@ -779,23 +805,28 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
             passed_any = False
             token_dropped_reasons = []
             
-            workflows_to_evaluate = []
-            # If a specific workflow is requested (and it's not "active_all"), evaluate only that specific one
-            if workflow_id and str(workflow_id).strip() != "" and str(workflow_id) != "active_all":
-                workflows = get_workflows()
-                wf = next((w for w in workflows if str(w.get('id')) == str(workflow_id)), None)
-                if wf:
-                    workflows_to_evaluate.append(wf)
-            else:
-                # Otherwise, evaluate all active workflows
-                workflows_to_evaluate = [w for w in get_workflows() if w.get('is_active')]
-
             if workflows_to_evaluate:
                 passed_channels = []
                 for wf in workflows_to_evaluate:
+                    wf_id = wf.get('id')
+                    if not test_mode and wf_id in already_processed_wf_ids:
+                        continue
+                        
                     modified_text, dropped, reason = process_message_logic(msg, wf.get('rules', []))
                     if dropped:
                         token_dropped_reasons.append(f"[{wf.get('name') or 'Flow'}]: {reason}")
+                        if not test_mode:
+                            cursor.execute('''
+                                INSERT INTO cto_signals (
+                                    ca, name, platform, market_cap, age, 
+                                    perf_5m, perf_1h, perf_6h, perf_24h, 
+                                    status, dex_url, migration_status, workflow_id
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (
+                                ca, project_name, chain_id, mc_str, age_string, 
+                                perf_5m, perf_1h, perf_6h, perf_24h, 
+                                'skipped', dex_url, migration_status, wf_id
+                            ))
                         continue
                     
                     passed_any = True
@@ -815,6 +846,19 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
                                 print(f"CTO Token {ca} forwarded to target: {final_target} via workflow {wf.get('name')}", flush=True)
                             except Exception as e:
                                 print(f"Failed to send CTO signal to {final_target}: {e}", flush=True)
+                                
+                        if not test_mode:
+                            cursor.execute('''
+                                INSERT INTO cto_signals (
+                                    ca, name, platform, market_cap, age, 
+                                    perf_5m, perf_1h, perf_6h, perf_24h, 
+                                    status, dex_url, migration_status, workflow_id
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (
+                                ca, project_name, chain_id, mc_str, age_string, 
+                                perf_5m, perf_1h, perf_6h, perf_24h, 
+                                'forwarded', dex_url, migration_status, wf_id
+                            ))
                 
                 if passed_any:
                     token_info["status"] = "passed"
@@ -825,7 +869,10 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
                     token_info["reason"] = "; ".join(token_dropped_reasons)
             else:
                 # No workflows active or configured - send directly to fallback target channel
-                if target_channel:
+                if not test_mode and (0 in already_processed_wf_ids or None in already_processed_wf_ids):
+                    token_info["status"] = "duplicate"
+                    token_info["reason"] = "Skipped: Already processed fallback"
+                elif target_channel:
                     token_info["status"] = "passed"
                     token_info["reason"] = f"Sent directly to fallback target: {target_channel}"
                     token_info["formatted_message"] = msg
@@ -836,23 +883,35 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
                             await tg_client.send_message(target_entity, msg)
                         except Exception as e:
                             print(f"Failed to send CTO signal to fallback {target_channel}: {e}")
+                            
+                    if not test_mode:
+                        cursor.execute('''
+                            INSERT INTO cto_signals (
+                                ca, name, platform, market_cap, age, 
+                                perf_5m, perf_1h, perf_6h, perf_24h, 
+                                status, dex_url, migration_status, workflow_id
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            ca, project_name, chain_id, mc_str, age_string, 
+                            perf_5m, perf_1h, perf_6h, perf_24h, 
+                            'forwarded', dex_url, migration_status, 0
+                        ))
                 else:
                     token_info["status"] = "dropped"
                     token_info["reason"] = "Dropped: No active workflows and no fallback target configured"
-
-            if not test_mode:
-                db_status = "forwarded" if token_info.get("status") == "passed" else "skipped"
-                cursor.execute('''
-                    INSERT INTO cto_signals (
-                        ca, name, platform, market_cap, age, 
-                        perf_5m, perf_1h, perf_6h, perf_24h, 
-                        status, dex_url, migration_status
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    ca, project_name, chain_id, mc_str, age_string, 
-                    perf_5m, perf_1h, perf_6h, perf_24h, 
-                    db_status, dex_url, migration_status
-                ))
+                    
+                    if not test_mode:
+                        cursor.execute('''
+                            INSERT INTO cto_signals (
+                                ca, name, platform, market_cap, age, 
+                                perf_5m, perf_1h, perf_6h, perf_24h, 
+                                status, dex_url, migration_status, workflow_id
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            ca, project_name, chain_id, mc_str, age_string, 
+                            perf_5m, perf_1h, perf_6h, perf_24h, 
+                            'skipped', dex_url, migration_status, 0
+                        ))
             
             results.append(token_info)
                     
