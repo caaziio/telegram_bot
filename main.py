@@ -56,6 +56,9 @@ def get_db():
         if global_conn is not None:
             return global_conn
             
+        # Ensure the parent directory for the local database file exists
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        
         if TURSO_URL and (TURSO_URL.startswith("libsql://") or TURSO_URL.startswith("https://")):
             import turso.sync
             # turso.sync only allows ONE connection per file, so we make it global
@@ -80,9 +83,6 @@ def get_db():
         return global_conn
 
 def init_db():
-    if not TURSO_URL:
-        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        
     conn = get_db()
     cursor = conn.cursor()
     
