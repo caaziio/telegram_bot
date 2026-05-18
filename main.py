@@ -119,12 +119,17 @@ def init_db():
         CREATE TABLE IF NOT EXISTS cto_signals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ca TEXT,
+            name TEXT,
+            platform TEXT,
+            market_cap TEXT,
             age TEXT,
             perf_5m REAL,
             perf_1h REAL,
             perf_6h REAL,
             perf_24h REAL,
             status TEXT,
+            dex_url TEXT,
+            migration_status TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -149,6 +154,28 @@ def init_db():
         pass
     try:
         cursor.execute('ALTER TABLE workflows ADD COLUMN target_channel_id TEXT')
+    except Exception:
+        pass
+
+    # Add new cto_signals columns if they are missing from an older schema version
+    try:
+        cursor.execute('ALTER TABLE cto_signals ADD COLUMN name TEXT')
+    except Exception:
+        pass
+    try:
+        cursor.execute('ALTER TABLE cto_signals ADD COLUMN platform TEXT')
+    except Exception:
+        pass
+    try:
+        cursor.execute('ALTER TABLE cto_signals ADD COLUMN market_cap TEXT')
+    except Exception:
+        pass
+    try:
+        cursor.execute('ALTER TABLE cto_signals ADD COLUMN dex_url TEXT')
+    except Exception:
+        pass
+    try:
+        cursor.execute('ALTER TABLE cto_signals ADD COLUMN migration_status TEXT')
     except Exception:
         pass
 
@@ -816,9 +843,16 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
             if not test_mode:
                 db_status = "forwarded" if token_info.get("status") == "passed" else "skipped"
                 cursor.execute('''
-                    INSERT INTO cto_signals (ca, age, perf_5m, perf_1h, perf_6h, perf_24h, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                ''', (ca, age_string, perf_5m, perf_1h, perf_6h, perf_24h, db_status))
+                    INSERT INTO cto_signals (
+                        ca, name, platform, market_cap, age, 
+                        perf_5m, perf_1h, perf_6h, perf_24h, 
+                        status, dex_url, migration_status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    ca, project_name, chain_id, mc_str, age_string, 
+                    perf_5m, perf_1h, perf_6h, perf_24h, 
+                    db_status, dex_url, migration_status
+                ))
             
             results.append(token_info)
                     
