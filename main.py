@@ -622,11 +622,16 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
         cursor = conn.cursor()
         
         # Limit to first 20 tokens to avoid timeouts
+        seen_in_batch = set()
         for token in cto_tokens[:20]:
             ca = token.get("tokenAddress")
             if not ca:
                 continue
                 
+            if ca in seen_in_batch:
+                continue
+            seen_in_batch.add(ca)
+            
             token_info = {
                 "ca": ca,
                 "name": "Unknown",
@@ -791,8 +796,6 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
                 else:
                     token_info["status"] = "dropped"
                     token_info["reason"] = "; ".join(token_dropped_reasons)
-                    results.append(token_info)
-                    continue
             else:
                 # No workflows active or configured - send directly to fallback target channel
                 if target_channel:
@@ -809,14 +812,13 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
                 else:
                     token_info["status"] = "dropped"
                     token_info["reason"] = "Dropped: No active workflows and no fallback target configured"
-                    results.append(token_info)
-                    continue
 
             if not test_mode:
+                db_status = "forwarded" if token_info.get("status") == "passed" else "skipped"
                 cursor.execute('''
                     INSERT INTO cto_signals (ca, age, perf_5m, perf_1h, perf_6h, perf_24h, status)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                ''', (ca, age_string, perf_5m, perf_1h, perf_6h, perf_24h, migration_status))
+                ''', (ca, age_string, perf_5m, perf_1h, perf_6h, perf_24h, db_status))
             
             results.append(token_info)
                     
