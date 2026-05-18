@@ -780,9 +780,9 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
                             target_entity = int(final_target) if str(final_target).lstrip('-').isdigit() else final_target
                             try:
                                 await tg_client.send_message(target_entity, send_msg)
-                                print(f"CTO Token {ca} forwarded to target: {final_target} via workflow {wf.get('name')}")
+                                print(f"CTO Token {ca} forwarded to target: {final_target} via workflow {wf.get('name')}", flush=True)
                             except Exception as e:
-                                print(f"Failed to send CTO signal to {final_target}: {e}")
+                                print(f"Failed to send CTO signal to {final_target}: {e}", flush=True)
                 
                 if passed_any:
                     token_info["status"] = "passed"
@@ -821,6 +821,14 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
             results.append(token_info)
                     
         conn.commit()
+        
+        # Flushed realtime summary for production console logging
+        scanned_count = len(results)
+        passed_count = sum(1 for r in results if r.get("status") == "passed")
+        duplicate_count = sum(1 for r in results if r.get("status") == "duplicate")
+        dropped_count = sum(1 for r in results if r.get("status") == "dropped")
+        print(f"[CTO SCANNER] Done. Scanned: {scanned_count} | Forwarded: {passed_count} | Duplicates: {duplicate_count} | Dropped: {dropped_count}", flush=True)
+        
         return results
         
     except Exception as e:
@@ -855,10 +863,10 @@ async def cto_auto_scanner_loop():
             workflow_id = settings.get('cto_workflow_id')
             
             if is_auto and tg_client and await tg_client.is_user_authorized():
-                print("Running auto CTO scan...")
+                print("Running auto CTO scan...", flush=True)
                 await perform_cto_scan(target, workflow_id)
         except Exception as e:
-            print(f"Error in cto_auto_scanner_loop: {e}")
+            print(f"Error in cto_auto_scanner_loop: {e}", flush=True)
             
         await asyncio.sleep(60) # run every 60 seconds
 
