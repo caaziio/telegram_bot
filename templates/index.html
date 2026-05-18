@@ -104,6 +104,14 @@
             align-items: center;
             gap: 8px;
         }
+        
+        /* Toggle Switch */
+        .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #4b5563; transition: .4s; border-radius: 24px; }
+        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: #10b981; }
+        input:checked + .slider:before { transform: translateX(20px); }
     </style>
 </head>
 <body>
@@ -132,6 +140,10 @@
                 <div class="nav-link" id="nav-settings" onclick="switchTab('settings')">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
                     Settings
+                </div>
+                <div class="nav-link" id="nav-cto" onclick="switchTab('cto')">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                    CTO Scanner
                 </div>
             </nav>
         </aside>
@@ -270,6 +282,98 @@
 
         </main>
 
+            <!-- CTO Tab -->
+            <div id="tab-cto" class="hidden">
+                <div class="header">
+                    <div class="header-title">
+                        <h1>CTO Scanner</h1>
+                        <p>Extract latest CTO data from Dexscreener, save to database, and forward to channel</p>
+                    </div>
+                </div>
+
+                <div class="tester-container">
+                    <div style="flex: 1; min-width: 300px;">
+                        <div class="workflow-card">
+                            <h3 style="margin-bottom: 1rem; font-size: 1rem; font-weight: 600;">1. Scanner Settings</h3>
+                            
+                            <div class="form-group">
+                                <label>Select Processing Workflow (Optional)</label>
+                                <select class="form-input" id="cto-workflow-id" onchange="saveCtoSettings()" style="-webkit-appearance: none; background: rgba(255, 255, 255, 0.05);">
+                                    <option value="" style="background: var(--bg-dark); color: white;">No Filter (Send directly to target below)</option>
+                                </select>
+                                <small style="color: var(--text-muted); font-size: 0.8rem; display: block; margin-top: 4px;">
+                                    If selected, tokens must pass this workflow's rules and will be sent to its target channel.
+                                </small>
+                            </div>
+
+                            <div class="form-group" style="position: relative;">
+                                <label>Target Telegram Channel (Fallback)</label>
+                                <input type="text" class="form-input" id="flow-cto" placeholder="Search channel name..." oninput="handleChannelSearch('cto')" onfocus="handleChannelSearch('cto')" autocomplete="off" />
+                                <div id="cto-dropdown" class="dropdown-content hidden"></div>
+                            </div>
+                            <div class="form-group">
+                                <label>Target Channel ID</label>
+                                <input class="form-input" id="flow-cto-id" placeholder="-100987654321" onchange="saveCtoSettings()" />
+                            </div>
+
+                            <button class="btn-primary" style="width: 100%; justify-content: center; margin-top: 1rem;" onclick="runCtoScanner()" id="btn-run-cto">
+                                Run Scanner Once
+                            </button>
+                            
+                            <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <h4 style="margin: 0; font-size: 0.95rem; color: white;">Real-Time Auto Scan</h4>
+                                    <p style="margin: 4px 0 0; font-size: 0.8rem; color: var(--text-muted);">Automatically fetch & forward every 60s</p>
+                                </div>
+                                <label class="switch">
+                                    <input type="checkbox" id="cto-auto-scan" onchange="saveCtoSettings()">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+
+                            <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <h4 style="margin: 0; font-size: 0.95rem; color: white;">Bypass DB (Test Mode)</h4>
+                                    <p style="margin: 4px 0 0; font-size: 0.8rem; color: var(--text-muted);">Process signals even if already sent</p>
+                                </div>
+                                <label class="switch">
+                                    <input type="checkbox" id="cto-test-mode" onchange="saveCtoSettings()">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="flex: 2; min-width: 600px; display: flex; gap: 20px;">
+                        <!-- Scanned Tokens Ledger -->
+                        <div class="workflow-card" style="flex: 1; display: flex; flex-direction: column; max-height: 600px;">
+                            <h3 style="margin-bottom: 1rem; font-size: 1rem; font-weight: 600; display: flex; align-items: center; justify-content: space-between;">
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    🔍 <span>Scanned Tokens Ledger</span>
+                                </div>
+                                <span id="cto-ledger-count" class="status-badge" style="background: rgba(255,255,255,0.05); color: var(--text-muted); font-size: 0.8rem; padding: 2px 8px;">0</span>
+                            </h3>
+                            <div id="cto-ledger-container" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; color: var(--text-muted); padding-right: 4px;">
+                                Click Run Scanner to fetch community takeovers...
+                            </div>
+                        </div>
+                        
+                        <!-- Forwarded Signals -->
+                        <div class="workflow-card" style="flex: 1; display: flex; flex-direction: column; max-height: 600px;">
+                            <h3 style="margin-bottom: 1rem; font-size: 1rem; font-weight: 600; display: flex; align-items: center; justify-content: space-between; color: #10b981;">
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    ✉️ <span>Forwarded Signals</span>
+                                </div>
+                                <span id="cto-result-count" class="status-badge" style="background: rgba(16, 185, 129, 0.1); color: #10b981; font-size: 0.8rem; padding: 2px 8px; border: 1px solid #10b981;">0</span>
+                            </h3>
+                            <div id="cto-result-container" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; color: var(--text-muted); padding-right: 4px;">
+                                Click Run Scanner to see forwarded messages...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         <!-- Editor Modal -->
         <div id="workflow-modal" class="modal-overlay hidden">
             <div class="modal-content">
@@ -287,30 +391,16 @@
                         <label>Workflow Name</label>
                         <input class="form-input" id="flow-name" placeholder="e.g. VIP Signals Forwarder" />
                     </div>
-
-                    <div class="form-row">
-                        <div class="form-group" style="flex: 1; position: relative;">
-                            <label>Source Channel</label>
-                            <input type="text" class="form-input" id="flow-source" placeholder="Search channel name..." oninput="handleChannelSearch('source')" onfocus="handleChannelSearch('source')" autocomplete="off" />
-                            <div id="source-dropdown" class="dropdown-content hidden"></div>
-                        </div>
-                        <div class="form-group" style="flex: 1;">
-                            <label>Source Channel ID (Auto)</label>
-                            <input class="form-input" id="flow-source-id" placeholder="-100123456789" />
-                        </div>
+                    <div class="form-group" style="position: relative;">
+                        <label>Target Telegram Channel (Where to send signals)</label>
+                        <input type="text" class="form-input" id="flow-target" placeholder="Search channel name..." oninput="handleChannelSearch('target')" onfocus="handleChannelSearch('target')" autocomplete="off" />
+                        <div id="target-dropdown" class="dropdown-content hidden"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Target Channel ID</label>
+                        <input class="form-input" id="flow-target-id" placeholder="-100987654321" />
                     </div>
 
-                    <div class="form-row">
-                        <div class="form-group" style="flex: 1; position: relative;">
-                            <label>Target Channel</label>
-                            <input type="text" class="form-input" id="flow-target" placeholder="Search channel name..." oninput="handleChannelSearch('target')" onfocus="handleChannelSearch('target')" autocomplete="off" />
-                            <div id="target-dropdown" class="dropdown-content hidden"></div>
-                        </div>
-                        <div class="form-group" style="flex: 1;">
-                            <label>Target Channel ID (Auto)</label>
-                            <input class="form-input" id="flow-target-id" placeholder="-100987654321" />
-                        </div>
-                    </div>
 
                     <div class="form-group">
                         <label>Rules & Filters</label>
@@ -318,11 +408,11 @@
                             <div id="rules-container"></div>
                             
                             <div style="display: flex; gap: 10px; margin-top: 1rem; flex-wrap: wrap;">
-                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem;" onclick="addRule('filter')">+ Add Word Filter</button>
-                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem;" onclick="addRule('replace')">+ Add Replace</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem;" onclick="addRule('token_age')">+ Add Token Age</button>
+                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #8b5cf6;" onclick="addRule('market_cap')">+ Add Market Cap</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #f59e0b;" onclick="addRule('performance')">+ Add Performance</button>
-                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #10b981;" onclick="addRule('extract_ca')">+ Extract CA</button>
+                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #ef4444;" onclick="addRule('exclude_platform')">+ Exclude Platform</button>
+                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem;" onclick="addRule('filter')">+ Add Word Filter</button>
                             </div>
                         </div>
                     </div>

@@ -1,4 +1,4 @@
-db/rules.sqlite
+db/
 userbot_session.session
 userbot_session.session-journal
 __pycache__/
@@ -8,3 +8,11 @@ __pycache__/
 node_modules/
 .next/
 .gemini/
+.env
+*.log
+test_*.py
+test_api.py
+test_close.py
+test_commit.py
+test_db.py
+test_save_workflow.py
