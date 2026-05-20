@@ -813,6 +813,13 @@ async function saveCtoSettings() {
     const isAuto = document.getElementById('cto-auto-scan').checked;
     const workflowId = document.getElementById('cto-workflow-id').value;
     const testMode = document.getElementById('cto-test-mode').checked;
+    const interval = document.getElementById('cto-scan-interval').value;
+    
+    // Update description text dynamically
+    const desc = document.getElementById('cto-auto-scan-desc');
+    if (desc) {
+        desc.textContent = `Automatically fetch & forward every ${interval}s`;
+    }
     
     try {
         await fetch('/api/settings', {
@@ -822,7 +829,8 @@ async function saveCtoSettings() {
                 cto_target_channel: targetId,
                 cto_auto_scan: isAuto ? 'true' : 'false',
                 cto_workflow_id: workflowId,
-                cto_test_mode: testMode ? 'true' : 'false'
+                cto_test_mode: testMode ? 'true' : 'false',
+                cto_scan_interval: interval
             })
         });
         
@@ -831,6 +839,7 @@ async function saveCtoSettings() {
         settings.cto_auto_scan = isAuto ? 'true' : 'false';
         settings.cto_workflow_id = workflowId;
         settings.cto_test_mode = testMode ? 'true' : 'false';
+        settings.cto_scan_interval = interval;
     } catch (e) {
         console.error("Failed to save CTO settings", e);
     }
@@ -840,5 +849,12 @@ async function saveCtoSettings() {
 document.getElementById('flow-cto-id').value = settings.cto_target_channel || '';
 document.getElementById('cto-auto-scan').checked = settings.cto_auto_scan === 'true';
 document.getElementById('cto-test-mode').checked = settings.cto_test_mode === 'true';
+if (settings.cto_scan_interval) {
+    document.getElementById('cto-scan-interval').value = settings.cto_scan_interval;
+    const desc = document.getElementById('cto-auto-scan-desc');
+    if (desc) {
+        desc.textContent = `Automatically fetch & forward every ${settings.cto_scan_interval}s`;
+    }
+}
 
 renderWorkflows();

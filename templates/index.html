@@ -323,12 +323,26 @@
                             <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
                                 <div>
                                     <h4 style="margin: 0; font-size: 0.95rem; color: white;">Real-Time Auto Scan</h4>
-                                    <p style="margin: 4px 0 0; font-size: 0.8rem; color: var(--text-muted);">Automatically fetch & forward every 60s</p>
+                                    <p style="margin: 4px 0 0; font-size: 0.8rem; color: var(--text-muted);" id="cto-auto-scan-desc">Automatically fetch & forward every 60s</p>
                                 </div>
                                 <label class="switch">
                                     <input type="checkbox" id="cto-auto-scan" onchange="saveCtoSettings()">
                                     <span class="slider"></span>
                                 </label>
+                            </div>
+
+                            <div class="form-group" style="margin-top: 1rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+                                <label>Scan Interval (Speed)</label>
+                                <select class="form-input" id="cto-scan-interval" onchange="saveCtoSettings()" style="-webkit-appearance: none; background: rgba(255, 255, 255, 0.05); color: white;">
+                                    <option value="5" style="background: var(--bg-dark); color: white;">🔥 5 Seconds (Fastest Safe - Real-Time)</option>
+                                    <option value="10" style="background: var(--bg-dark); color: white;">⚡ 10 Seconds (Recommended Sweet Spot)</option>
+                                    <option value="20" style="background: var(--bg-dark); color: white;">🚀 20 Seconds (Fast)</option>
+                                    <option value="30" style="background: var(--bg-dark); color: white;">⏱️ 30 Seconds (Medium)</option>
+                                    <option value="60" selected style="background: var(--bg-dark); color: white;">💤 60 Seconds (Default - Late Signals)</option>
+                                </select>
+                                <small style="color: var(--text-muted); font-size: 0.8rem; display: block; margin-top: 4px;">
+                                    Faster speeds keep your signals ahead of other traders. 5s-10s is optimal.
+                                </small>
                             </div>
 
                             <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">

@@ -649,6 +649,7 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
             
         cto_tokens = response.json()
         results = []
+        db_modified = False
         
         conn = get_db()
         cursor = conn.cursor()
@@ -856,10 +857,12 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
                     perf_5m, perf_1h, perf_6h, perf_24h, 
                     db_status, dex_url, migration_status
                 ))
+                db_modified = True
             
             results.append(token_info)
                     
-        conn.commit()
+        if db_modified:
+            conn.commit()
         
         # Flushed realtime summary for production console logging
         scanned_count = len(results)
@@ -895,19 +898,27 @@ def scan_cto():
 
 async def cto_auto_scanner_loop():
     while True:
+        interval = 60
         try:
             settings = get_settings()
             is_auto = str(settings.get('cto_auto_scan', 'false')).lower() == 'true'
             target = settings.get('cto_target_channel', '')
             workflow_id = settings.get('cto_workflow_id')
             
+            try:
+                interval = int(settings.get('cto_scan_interval', 60))
+                if interval < 2:  # Safety boundary
+                    interval = 2
+            except (ValueError, TypeError):
+                interval = 60
+                
             if is_auto and tg_client and await tg_client.is_user_authorized():
-                print("Running auto CTO scan...", flush=True)
+                print(f"Running auto CTO scan (Interval: {interval}s)...", flush=True)
                 await perform_cto_scan(target, workflow_id)
         except Exception as e:
             print(f"Error in cto_auto_scanner_loop: {e}", flush=True)
             
-        await asyncio.sleep(60) # run every 60 seconds
+        await asyncio.sleep(interval)
 
 def run_flask_app():
     print("Starting Web Dashboard on http://localhost:5000")
