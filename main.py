@@ -390,8 +390,16 @@ def create_workflow():
                 INSERT INTO workflows (name, source_channel, source_channel_id, target_channel, target_channel_id, is_active)
                 VALUES (?, ?, ?, ?, ?, ?)
             ''', (data.get('name'), data.get('source_channel'), data.get('source_channel_id'), data.get('target_channel'), data.get('target_channel_id'), 1))
+            # Commit the workflow immediately to assign a permanent ID and bypass any driver transaction buffering
+            conn.commit()
             
-            wf_id = cursor.lastrowid
+            # Retrieve the newly inserted workflow ID safely (thread-safe under global db_lock)
+            cursor.execute('SELECT max(id) FROM workflows')
+            row = cursor.fetchone()
+            wf_id = row[0] if row else None
+            
+            if not wf_id:
+                raise Exception("Failed to retrieve the new workflow ID from the database.")
             
             for rule in data.get('rules', []):
                 cursor.execute('''
@@ -602,16 +610,23 @@ def tg_channels():
             
             channels = []
             for d in dialogs:
-                if d.is_channel or d.is_group:
+                if d.is_channel or d.is_group or d.is_user:
                     # Safely get username
                     uname = ""
                     if hasattr(d.entity, 'username') and d.entity.username:
                         uname = d.entity.username
                     
+                    chat_type = "Channel"
+                    if d.is_group:
+                        chat_type = "Group"
+                    elif d.is_user:
+                        chat_type = "User"
+                    
                     channels.append({
                         "id": str(d.id),
                         "name": d.name or "Unnamed",
-                        "username": uname
+                        "username": uname,
+                        "type": chat_type
                     })
             return channels
         except Exception as e:
@@ -981,12 +996,20 @@ def register_handlers(client):
                 match = True
                 print("    -> Match by Username!")
                 
-            # If the user saved a channel NAME instead of username in the 'source_channel' field
-            # We can also check if the name matches the chat title!
+            # If the user saved a channel/chat NAME instead of username in the 'source_channel' field
+            # We can also check if the name matches the chat title or user display name!
             chat_title = getattr(chat, 'title', '') or ''
+            if not chat_title and chat:
+                if hasattr(chat, 'first_name') and chat.first_name:
+                    chat_title = chat.first_name
+                    if hasattr(chat, 'last_name') and chat.last_name:
+                        chat_title += f" {chat.last_name}"
+                elif hasattr(chat, 'username') and chat.username:
+                    chat_title = chat.username
+            
             if not match and chat_title and s_username and chat_title.lower() == s_username.lower():
                 match = True
-                print("    -> Match by Chat Title (Name)!")
+                print("    -> Match by Chat Title/Name!")
             
             if match:
                 print(f"    Proceeding to process message with {len(wf['rules'])} rules...")

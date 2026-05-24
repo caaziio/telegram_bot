@@ -406,13 +406,22 @@
                         <input class="form-input" id="flow-name" placeholder="e.g. VIP Signals Forwarder" />
                     </div>
                     <div class="form-group" style="position: relative;">
-                        <label>Target Telegram Channel (Where to send signals)</label>
-                        <input type="text" class="form-input" id="flow-target" placeholder="Search channel name..." oninput="handleChannelSearch('target')" onfocus="handleChannelSearch('target')" autocomplete="off" />
+                        <label>Source Telegram Channel/Chat (Where to listen for messages)</label>
+                        <input type="text" class="form-input" id="flow-source" placeholder="Search channel or chat name..." oninput="handleChannelSearch('source')" onfocus="handleChannelSearch('source')" autocomplete="off" />
+                        <div id="source-dropdown" class="dropdown-content hidden"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Source Channel/Chat ID</label>
+                        <input class="form-input" id="flow-source-id" placeholder="e.g. -100123456789 or 987654321" />
+                    </div>
+                    <div class="form-group" style="position: relative;">
+                        <label>Target Telegram Channel/Chat (Where to send messages)</label>
+                        <input type="text" class="form-input" id="flow-target" placeholder="Search channel or chat name..." oninput="handleChannelSearch('target')" onfocus="handleChannelSearch('target')" autocomplete="off" />
                         <div id="target-dropdown" class="dropdown-content hidden"></div>
                     </div>
                     <div class="form-group">
-                        <label>Target Channel ID</label>
-                        <input class="form-input" id="flow-target-id" placeholder="-100987654321" />
+                        <label>Target Channel/Chat ID</label>
+                        <input class="form-input" id="flow-target-id" placeholder="e.g. -100123456789 or 987654321" />
                     </div>
 
 

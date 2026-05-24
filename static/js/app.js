@@ -31,6 +31,17 @@ function renderWorkflows() {
                     ${wf.is_active ? 'Active' : 'Paused'}
                 </div>
             </div>
+            <div class="workflow-routing" style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 1rem 0; font-size: 0.82rem; color: #d1d5db; background: rgba(255,255,255,0.03); padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);">
+                <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; display: flex; align-items: center; gap: 4px;" title="${wf.source_channel || wf.source_channel_id || 'Any/CTO'}">
+                    <span style="font-size: 0.95rem;">📢</span> 
+                    <span style="font-weight: 500;">${wf.source_channel || (wf.source_channel_id ? `Chat ${wf.source_channel_id}` : 'Any/CTO')}</span>
+                </div>
+                <div style="color: var(--accent-color); font-weight: 700; font-size: 1rem;">➔</div>
+                <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; display: flex; align-items: center; gap: 4px; justify-content: flex-end;" title="${wf.target_channel || wf.target_channel_id || 'None'}">
+                    <span style="font-weight: 500; text-align: right;">${wf.target_channel || (wf.target_channel_id ? `Chat ${wf.target_channel_id}` : 'Fallback')}</span>
+                    <span style="font-size: 0.95rem;">🎯</span>
+                </div>
+            </div>
             <div class="workflow-rules-preview" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 1.5rem; min-height: 40px; align-content: flex-start;">
                 ${(wf.rules && wf.rules.length > 0) ? wf.rules.map(r => {
                     let label = '';
@@ -241,13 +252,15 @@ async function saveWorkflow(e) {
     }
 
     const id = document.getElementById('flow-id').value;
+    const sourceChannel = document.getElementById('flow-source').value;
+    const sourceChannelId = document.getElementById('flow-source-id').value;
     const targetChannel = document.getElementById('flow-target').value;
     const targetChannelId = document.getElementById('flow-target-id').value;
     
     const workflow = {
         name: name,
-        source_channel: "",
-        source_channel_id: "",
+        source_channel: sourceChannel,
+        source_channel_id: sourceChannelId,
         target_channel: targetChannel,
         target_channel_id: targetChannelId,
         rules: currentRules
@@ -330,14 +343,19 @@ async function duplicateWorkflow(id) {
     const wf = workflows.find(w => w.id == id);
     if (!wf) return;
     
-    // Create a copy of the workflow object without the ID
+    // Create a copy of the workflow object without the ID and clean its rules
     const newWf = {
         name: wf.name + " (Copy)",
         source_channel: wf.source_channel,
         source_channel_id: wf.source_channel_id,
         target_channel: wf.target_channel,
         target_channel_id: wf.target_channel_id,
-        rules: (wf.rules || []).map(r => ({ ...r }))
+        rules: (wf.rules || []).map(r => {
+            const ruleCopy = { ...r };
+            delete ruleCopy.id;
+            delete ruleCopy.workflow_id;
+            return ruleCopy;
+        })
     };
     
     try {
@@ -599,9 +617,27 @@ function handleChannelSearch(type) {
         matches.slice(0, 50).forEach(c => {
             const div = document.createElement('div');
             div.className = 'dropdown-item';
-            div.textContent = c.name || `Channel ${c.id}`;
+            div.style.display = 'flex';
+            div.style.justifyContent = 'space-between';
+            div.style.alignItems = 'center';
+            div.style.padding = '0.5rem 1rem';
+            div.style.gap = '8px';
+            
+            let typeBadge = '';
+            if (c.type === 'User') {
+                typeBadge = `<span style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(59, 130, 246, 0.3); font-weight: 500;">👤 User</span>`;
+            } else if (c.type === 'Group') {
+                typeBadge = `<span style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.3); font-weight: 500;">👥 Group</span>`;
+            } else {
+                typeBadge = `<span style="background: rgba(139, 92, 246, 0.15); color: #a78bfa; font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(139, 92, 246, 0.3); font-weight: 500;">📢 Channel</span>`;
+            }
+            
+            div.innerHTML = `
+                <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 75%;">${c.name || 'Chat ' + c.id}</span>
+                ${typeBadge}
+            `;
             div.onclick = () => {
-                input.value = c.name || `Channel ${c.id}`;
+                input.value = c.name || `Chat ${c.id}`;
                 idInput.value = c.id;
                 dropdown.classList.add('hidden');
             };
