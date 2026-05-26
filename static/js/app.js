@@ -844,12 +844,34 @@ async function logoutTelegram() {
     }
 }
 
+function handleIntervalChange() {
+    const select = document.getElementById('cto-scan-interval');
+    const customContainer = document.getElementById('cto-custom-interval-container');
+    const customInput = document.getElementById('cto-custom-scan-interval');
+    
+    if (select && select.value === 'custom') {
+        if (customContainer) customContainer.classList.remove('hidden');
+        if (customInput && !customInput.value) {
+            customInput.value = '15'; // Default custom value
+        }
+    } else {
+        if (customContainer) customContainer.classList.add('hidden');
+    }
+    saveCtoSettings();
+}
+
 async function saveCtoSettings() {
     const targetId = document.getElementById('flow-cto-id').value;
     const isAuto = document.getElementById('cto-auto-scan').checked;
     const workflowId = document.getElementById('cto-workflow-id').value;
     const testMode = document.getElementById('cto-test-mode').checked;
-    const interval = document.getElementById('cto-scan-interval').value;
+    
+    const select = document.getElementById('cto-scan-interval');
+    let interval = select ? select.value : '60';
+    if (interval === 'custom') {
+        const customInput = document.getElementById('cto-custom-scan-interval');
+        interval = (customInput && customInput.value) ? customInput.value : '15';
+    }
     
     // Update description text dynamically
     const desc = document.getElementById('cto-auto-scan-desc');
@@ -886,7 +908,22 @@ document.getElementById('flow-cto-id').value = settings.cto_target_channel || ''
 document.getElementById('cto-auto-scan').checked = settings.cto_auto_scan === 'true';
 document.getElementById('cto-test-mode').checked = settings.cto_test_mode === 'true';
 if (settings.cto_scan_interval) {
-    document.getElementById('cto-scan-interval').value = settings.cto_scan_interval;
+    const select = document.getElementById('cto-scan-interval');
+    const customContainer = document.getElementById('cto-custom-interval-container');
+    const customInput = document.getElementById('cto-custom-scan-interval');
+    
+    if (select) {
+        const hasOption = Array.from(select.options).some(opt => opt.value === settings.cto_scan_interval);
+        if (hasOption) {
+            select.value = settings.cto_scan_interval;
+            if (customContainer) customContainer.classList.add('hidden');
+        } else {
+            select.value = 'custom';
+            if (customContainer) customContainer.classList.remove('hidden');
+            if (customInput) customInput.value = settings.cto_scan_interval;
+        }
+    }
+    
     const desc = document.getElementById('cto-auto-scan-desc');
     if (desc) {
         desc.textContent = `Automatically fetch & forward every ${settings.cto_scan_interval}s`;

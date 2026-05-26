@@ -333,15 +333,25 @@
 
                             <div class="form-group" style="margin-top: 1rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
                                 <label>Scan Interval (Speed)</label>
-                                <select class="form-input" id="cto-scan-interval" onchange="saveCtoSettings()" style="-webkit-appearance: none; background: rgba(255, 255, 255, 0.05); color: white;">
+                                <select class="form-input" id="cto-scan-interval" onchange="handleIntervalChange()" style="-webkit-appearance: none; background: rgba(255, 255, 255, 0.05); color: white;">
+                                    <option value="2" style="background: var(--bg-dark); color: white;">⚡⚡ 2 Seconds (Super Fast - Real-Time)</option>
                                     <option value="5" style="background: var(--bg-dark); color: white;">🔥 5 Seconds (Fastest Safe - Real-Time)</option>
                                     <option value="10" style="background: var(--bg-dark); color: white;">⚡ 10 Seconds (Recommended Sweet Spot)</option>
                                     <option value="20" style="background: var(--bg-dark); color: white;">🚀 20 Seconds (Fast)</option>
                                     <option value="30" style="background: var(--bg-dark); color: white;">⏱️ 30 Seconds (Medium)</option>
                                     <option value="60" selected style="background: var(--bg-dark); color: white;">💤 60 Seconds (Default - Late Signals)</option>
+                                    <option value="custom" style="background: var(--bg-dark); color: white;">⚙️ Custom Interval...</option>
                                 </select>
                                 <small style="color: var(--text-muted); font-size: 0.8rem; display: block; margin-top: 4px;">
                                     Faster speeds keep your signals ahead of other traders. 5s-10s is optimal.
+                                </small>
+                            </div>
+
+                            <div class="form-group hidden" id="cto-custom-interval-container" style="margin-top: 0.75rem;">
+                                <label>Custom Interval (Seconds)</label>
+                                <input type="number" class="form-input" id="cto-custom-scan-interval" min="2" placeholder="e.g. 15" oninput="saveCtoSettings()" style="background: rgba(255, 255, 255, 0.05); color: white;" />
+                                <small style="color: var(--text-muted); font-size: 0.8rem; display: block; margin-top: 4px;">
+                                    Enter any value in seconds (minimum 2s).
                                 </small>
                             </div>
 
@@ -454,6 +464,6 @@
         const initialWorkflows = {{ workflows | tojson | safe }};
         const initialSettings = {{ settings | tojson | safe }};
     </script>
-    <script src="{{ url_for('static', filename='js/app.js') }}?v=7"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v=8"></script>
 </body>
 </html>
