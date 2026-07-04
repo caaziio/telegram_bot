@@ -252,6 +252,32 @@
                             <label>DexScreener Solana Payment Address (Monitored)</label>
                             <input class="form-input" id="setting-cto-dex-payment-address" placeholder="e.g. 5P245..." />
                         </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label>Wallet Polling</label>
+                                <select class="form-input" id="setting-wallet-poll-enabled" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white;">
+                                    <option value="false">Disabled (Webhooks Only)</option>
+                                    <option value="true">Enabled (Poll Helius)</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label>Payment Polling</label>
+                                <select class="form-input" id="setting-helius-poll-enabled" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white;">
+                                    <option value="false">Disabled (Webhooks Only)</option>
+                                    <option value="true">Enabled (Poll Helius)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 1rem;">
+                            <label>Polling Interval (Seconds)</label>
+                            <select class="form-input" id="setting-polling-interval" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white;">
+                                <option value="5">5s (Ultra Fast - High Credits)</option>
+                                <option value="10">10s (Recommended Default)</option>
+                                <option value="30">30s (Balanced)</option>
+                                <option value="60">60s (Saves Credits)</option>
+                                <option value="120">120s (Maximum Savings)</option>
+                            </select>
+                        </div>
                         <div class="form-group">
                             <label>Helius Webhook URL (For Real-Time Webhooks)</label>
                             <input class="form-input" id="setting-helius-webhook-url" readonly style="background: rgba(255,255,255,0.02); color: var(--text-muted);" />

@@ -621,6 +621,15 @@ if (document.getElementById('setting-helius-key')) {
 if (document.getElementById('setting-cto-dex-payment-address')) {
     document.getElementById('setting-cto-dex-payment-address').value = settings.cto_dex_payment_address || '';
 }
+if (document.getElementById('setting-wallet-poll-enabled')) {
+    document.getElementById('setting-wallet-poll-enabled').value = settings.wallet_tracker_poll_enabled || 'false';
+}
+if (document.getElementById('setting-helius-poll-enabled')) {
+    document.getElementById('setting-helius-poll-enabled').value = settings.helius_poll_enabled || 'false';
+}
+if (document.getElementById('setting-polling-interval')) {
+    document.getElementById('setting-polling-interval').value = settings.polling_interval || '10';
+}
 const webhookUrlInput = document.getElementById('setting-helius-webhook-url');
 if (webhookUrlInput) {
     webhookUrlInput.value = window.location.origin + '/api/helius/webhook';
@@ -743,6 +752,9 @@ async function saveHeliusSettings(e) {
     if (e) e.preventDefault();
     const heliusKey = document.getElementById('setting-helius-key').value.trim();
     const paymentAddress = document.getElementById('setting-cto-dex-payment-address').value.trim();
+    const walletPollEnabled = document.getElementById('setting-wallet-poll-enabled').value;
+    const heliusPollEnabled = document.getElementById('setting-helius-poll-enabled').value;
+    const pollingInterval = document.getElementById('setting-polling-interval').value;
     
     try {
         const res = await fetch('/api/settings', {
@@ -750,13 +762,19 @@ async function saveHeliusSettings(e) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 helius_api_key: heliusKey,
-                cto_dex_payment_address: paymentAddress
+                cto_dex_payment_address: paymentAddress,
+                wallet_tracker_poll_enabled: walletPollEnabled,
+                helius_poll_enabled: heliusPollEnabled,
+                polling_interval: pollingInterval
             })
         });
         const result = await res.json();
         if (result.success) {
             settings.helius_api_key = heliusKey;
             settings.cto_dex_payment_address = paymentAddress;
+            settings.wallet_tracker_poll_enabled = walletPollEnabled;
+            settings.helius_poll_enabled = heliusPollEnabled;
+            settings.polling_interval = pollingInterval;
             alert('Helius settings saved successfully!');
         } else {
             alert('Error saving Helius settings: ' + result.error);

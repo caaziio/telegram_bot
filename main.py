@@ -1444,44 +1444,75 @@ async def process_payment_payer_history(payer_address, payment_timestamp, api_ke
     else:
         print(f"[HELIUS DISCOVERY] No token isolated from payer history for {payer_address}.", flush=True)
 
+async def get_latest_signatures(address, api_key, limit=5):
+    url = f"https://mainnet.helius-rpc.com/?api-key={api_key}"
+    payload = {
+        "jsonrpc": "2.0",
+        "id": "helius-polling",
+        "method": "getSignaturesForAddress",
+        "params": [
+            address,
+            {
+                "limit": limit
+            }
+        ]
+    }
+    headers = {"Content-Type": "application/json"}
+    try:
+        r = await asyncio.to_thread(requests.post, url, json=payload, headers=headers, timeout=10)
+        if r.status_code == 200:
+            res = r.json()
+            if "result" in res and isinstance(res["result"], list):
+                return [tx.get("signature") for tx in res["result"] if tx.get("signature")]
+    except Exception as e:
+        print(f"[HELIUS RPC] Error fetching signatures for {address}: {e}", flush=True)
+    return []
+
+# Helper to trace and process payment sender history in background
+async def process_payment_and_forward(payer_address, tx_timestamp, amount_usd=0.0):
+    try:
+        print(f"[WALLET TRACKER] Tracing sender history for {payer_address}...", flush=True)
+        loop_settings = get_settings()
+        loop_api_key = loop_settings.get('helius_api_key')
+        if not loop_api_key:
+            print("[WALLET TRACKER] Helius API key not found in settings. Skipping history trace.", flush=True)
+            return
+            
+        token = await find_token_from_payer_history(payer_address, tx_timestamp, loop_api_key)
+        if token:
+            print(f"[WALLET TRACKER] Discovered token {token} from sender {payer_address}. Forwarding to filters...", flush=True)
+            target = loop_settings.get('cto_target_channel', '')
+            wf_id = loop_settings.get('cto_workflow_id')
+            t_mode = loop_settings.get('cto_test_mode', 'false').lower() == 'true'
+            
+            item = {
+                "tokenAddress": token,
+                "order_type": "Tracked Wallet Payment",
+                "order_status": "detected",
+                "payment_timestamp": tx_timestamp * 1000,
+                "amount_usd": amount_usd
+            }
+            await process_single_cto_item(item, target, wf_id, t_mode)
+        else:
+            print(f"[WALLET TRACKER] No token discovered for sender {payer_address}.", flush=True)
+    except Exception as ex:
+        print(f"[WALLET TRACKER] Error processing payment sender history: {ex}", flush=True)
+
 async def wallet_tracker_polling_loop():
     processed_signatures = set()
     initialized_addresses = set()
     print("[WALLET TRACKER POLLING] Started background payment monitoring loop.", flush=True)
     
-    # Helper to trace and process payment sender history in background
-    async def process_payment_and_forward(payer_address, tx_timestamp, amount_usd=0.0):
-        try:
-            print(f"[WALLET TRACKER] Tracing sender history for {payer_address}...", flush=True)
-            loop_settings = get_settings()
-            loop_api_key = loop_settings.get('helius_api_key')
-            if not loop_api_key:
-                print("[WALLET TRACKER] Helius API key not found in settings. Skipping history trace.", flush=True)
-                return
-                
-            token = await find_token_from_payer_history(payer_address, tx_timestamp, loop_api_key)
-            if token:
-                print(f"[WALLET TRACKER] Discovered token {token} from sender {payer_address}. Forwarding to filters...", flush=True)
-                target = loop_settings.get('cto_target_channel', '')
-                wf_id = loop_settings.get('cto_workflow_id')
-                t_mode = loop_settings.get('cto_test_mode', 'false').lower() == 'true'
-                
-                item = {
-                    "tokenAddress": token,
-                    "order_type": "Tracked Wallet Payment",
-                    "order_status": "detected",
-                    "payment_timestamp": tx_timestamp * 1000,
-                    "amount_usd": amount_usd
-                }
-                await process_single_cto_item(item, target, wf_id, t_mode)
-            else:
-                print(f"[WALLET TRACKER] No token discovered for sender {payer_address}.", flush=True)
-        except Exception as ex:
-            print(f"[WALLET TRACKER] Error processing payment sender history: {ex}", flush=True)
-            
     while True:
         try:
             settings = get_settings()
+            poll_enabled = settings.get('wallet_tracker_poll_enabled', 'false').lower() == 'true'
+            poll_interval = int(settings.get('polling_interval', '10'))
+            
+            if not poll_enabled:
+                await asyncio.sleep(poll_interval)
+                continue
+                
             api_key = settings.get('helius_api_key')
             tracked_address_str = settings.get('tracked_wallet_address')
             
@@ -1489,19 +1520,26 @@ async def wallet_tracker_polling_loop():
                 addresses = [a.strip() for a in tracked_address_str.split(',') if len(a.strip()) >= 32]
                 
                 for tracked_address in addresses:
+                    # Check signatures first (1 credit RPC request)
+                    sigs = await get_latest_signatures(tracked_address, api_key, limit=10)
+                    
+                    if tracked_address not in initialized_addresses:
+                        for s in sigs:
+                            processed_signatures.add(s)
+                        initialized_addresses.add(tracked_address)
+                        continue
+                        
+                    # Check if there are any new signatures
+                    has_new = any(s not in processed_signatures for s in sigs)
+                    if not has_new:
+                        continue
+                        
+                    # Only poll Enhanced Transactions when a new signature is detected
                     url = f"https://api.helius.xyz/v0/addresses/{tracked_address}/transactions?api-key={api_key}"
                     r = await asyncio.to_thread(requests.get, url, timeout=10)
                     if r.status_code == 200:
                         txs = r.json()
                         if isinstance(txs, list):
-                            # Initialize set with first batch on startup to avoid processing old history for this address
-                            if tracked_address not in initialized_addresses:
-                                for t in txs:
-                                    if t.get("signature"):
-                                        processed_signatures.add(t.get("signature"))
-                                initialized_addresses.add(tracked_address)
-                                continue
-                            
                             for tx in txs:
                                 sig = tx.get("signature")
                                 if not sig or sig in processed_signatures:
@@ -1563,10 +1601,12 @@ async def wallet_tracker_polling_loop():
                                                 asyncio.create_task(process_payment_and_forward(from_addr, timestamp, amount_usd))
                                             except sqlite3.IntegrityError:
                                                 pass
+                    else:
+                        print(f"[WALLET TRACKER POLLING] Helius API error {r.status_code} for {tracked_address}: {r.text.strip()}", flush=True)
         except Exception as e:
             print(f"[WALLET TRACKER POLLING] Loop error: {e}", flush=True)
             
-        await asyncio.sleep(10)
+        await asyncio.sleep(poll_interval)
 
 @app.route('/api/wallet/save_tracked', methods=['POST'])
 def save_tracked_wallet():
@@ -1672,7 +1712,12 @@ def get_wallet_history_transactions():
             try:
                 r = requests.get(url, timeout=15)
                 if r.status_code != 200:
-                    break
+                    if r.status_code == 429:
+                        return jsonify({"success": False, "error": "Helius API key rate limit or credit limit exceeded (429: max usage reached). Please check/upgrade your Helius plan or add credits."})
+                    elif r.status_code in (401, 403):
+                        return jsonify({"success": False, "error": f"Helius API authorization failed (status {r.status_code}). Please verify your Helius API key in Settings."})
+                    else:
+                        return jsonify({"success": False, "error": f"Helius API returned status code {r.status_code}: {r.text.strip()}"})
                 
                 txs = r.json()
                 if not txs or not isinstance(txs, list):
@@ -1774,7 +1819,10 @@ def get_wallet_history_transactions():
                 if not last_sig:
                     break
             except Exception as e:
-                break
+                import traceback
+                print(f"[TRACKER DECORATOR] Exception during Helius scan: {e}", flush=True)
+                traceback.print_exc()
+                return jsonify({"success": False, "error": f"Error scanning transactions from Helius: {str(e)}"})
             
     sorted_senders = list(senders_map.values())
     sorted_senders.sort(key=lambda x: x["latest_timestamp"], reverse=True)
@@ -2295,64 +2343,144 @@ def helius_webhook():
             
         settings = get_settings()
         monitored_address = settings.get('cto_dex_payment_address')
-        if not monitored_address:
-            return jsonify({"status": "ignored", "reason": "cto_dex_payment_address is not configured"}), 200
+        tracked_address_str = settings.get('tracked_wallet_address')
+        
+        # Build lists of addresses we care about
+        tracked_addresses = []
+        if tracked_address_str:
+            tracked_addresses = [a.strip() for a in tracked_address_str.split(',') if len(a.strip()) >= 32]
             
         for tx in transactions:
-            is_payment = False
-            
-            # Check if this transaction sent tokens/SOL to our monitored address
-            for transfer in tx.get('tokenTransfers', []):
-                if transfer.get('toUserAccount') == monitored_address:
-                    is_payment = True
-                    break
-                    
-            if not is_payment:
+            sig = tx.get("signature")
+            if not sig:
+                continue
+                
+            # 1. Process tracked wallet payments
+            for tracked_address in tracked_addresses:
+                # Process native transfers
                 for transfer in tx.get('nativeTransfers', []):
+                    to_addr = transfer.get('toUserAccount')
+                    from_addr = transfer.get('fromUserAccount')
+                    amount_lamports = transfer.get('amount', 0)
+                    if to_addr == tracked_address and from_addr != tracked_address:
+                        amount_sol = amount_lamports / 1_000_000_000.0
+                        sol_price = get_token_price_usd("SOL")
+                        amount_usd = amount_sol * sol_price if sol_price else 0.0
+                        timestamp = tx.get("timestamp", int(time.time()))
+                        with db_lock:
+                            conn = get_db()
+                            cursor = conn.cursor()
+                            try:
+                                cursor.execute('''
+                                    INSERT INTO wallet_payments (tracked_address, sender_address, amount, mint, signature, timestamp)
+                                    VALUES (?, ?, ?, ?, ?, ?)
+                                ''', (tracked_address, from_addr, amount_sol, "SOL", sig, timestamp))
+                                conn.commit()
+                                print(f"[HELIUS WEBHOOK] Logged real-time tracked native payment: {amount_sol} SOL from {from_addr} to {tracked_address}", flush=True)
+                                run_async_coroutine(process_payment_and_forward(from_addr, timestamp, amount_usd))
+                            except sqlite3.IntegrityError:
+                                pass
+                                
+                # Process token transfers
+                for transfer in tx.get('tokenTransfers', []):
+                    to_addr = transfer.get('toUserAccount')
+                    from_addr = transfer.get('fromUserAccount')
+                    token_amount = transfer.get('tokenAmount', 0)
+                    mint = transfer.get('mint', '')
+                    if to_addr == tracked_address and from_addr != tracked_address:
+                        token_price = get_token_price_usd(mint)
+                        amount_usd = token_amount * token_price if token_price else 0.0
+                        timestamp = tx.get("timestamp", int(time.time()))
+                        with db_lock:
+                            conn = get_db()
+                            cursor = conn.cursor()
+                            try:
+                                cursor.execute('''
+                                    INSERT INTO wallet_payments (tracked_address, sender_address, amount, mint, signature, timestamp)
+                                    VALUES (?, ?, ?, ?, ?, ?)
+                                ''', (tracked_address, from_addr, token_amount, mint, sig, timestamp))
+                                conn.commit()
+                                print(f"[HELIUS WEBHOOK] Logged real-time tracked token payment: {token_amount} {mint[:8]}... from {from_addr} to {tracked_address}", flush=True)
+                                run_async_coroutine(process_payment_and_forward(from_addr, timestamp, amount_usd))
+                            except sqlite3.IntegrityError:
+                                pass
+                                
+            # 2. Process DexScreener monitored payment address
+            if monitored_address:
+                is_payment = False
+                
+                # Check if this transaction sent tokens/SOL to our monitored address
+                for transfer in tx.get('tokenTransfers', []):
                     if transfer.get('toUserAccount') == monitored_address:
                         is_payment = True
                         break
-            
-            if is_payment:
-                # Find payer address
-                payer_address = None
-                for transfer in tx.get('tokenTransfers', []):
-                    if transfer.get('toUserAccount') == monitored_address:
-                        payer_address = transfer.get('fromUserAccount')
-                        break
-                if not payer_address:
+                        
+                if not is_payment:
                     for transfer in tx.get('nativeTransfers', []):
+                        if transfer.get('toUserAccount') == monitored_address:
+                            is_payment = True
+                            break
+                            
+                if is_payment:
+                    # Find payer address
+                    payer_address = None
+                    for transfer in tx.get('tokenTransfers', []):
                         if transfer.get('toUserAccount') == monitored_address:
                             payer_address = transfer.get('fromUserAccount')
                             break
-
-                # Extract any referenced base token mint addresses, excluding native assets & USDC
-                mints = set()
-                for tc in tx.get('tokenBalanceChanges', []):
-                    mints.add(tc.get('mint'))
-                for tt in tx.get('tokenTransfers', []):
-                    mints.add(tt.get('mint'))
-                
-                excluded_mints = {
-                    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', # USDC
-                    'So11111111111111111111111111111111111111112', # WSOL
-                    'Es9vMFrzaypmko8L7jV8YW156HCfaNuDY8jNH5KB3C1d', # USDT
-                    monitored_address
-                }
-                base_tokens = [m for m in mints if m and m not in excluded_mints]
-                
-                print(f"[HELIUS WEBHOOK] DexScreener payment transaction detected: {tx.get('signature')} | Discovered tokens: {base_tokens}", flush=True)
-                
-                if base_tokens:
-                    # Instantly check each base token in background Telethon loop
-                    for ca in base_tokens:
-                        run_async_coroutine(verify_and_forward_cto_token(ca))
-                elif payer_address:
-                    api_key = settings.get('helius_api_key')
-                    tx_ts = tx.get("timestamp", int(time.time()))
-                    print(f"[HELIUS WEBHOOK] No base tokens in payment tx. Triggering payer history search for {payer_address}...", flush=True)
-                    run_async_coroutine(process_payment_payer_history(payer_address, tx_ts, api_key))
+                    if not payer_address:
+                        for transfer in tx.get('nativeTransfers', []):
+                            if transfer.get('toUserAccount') == monitored_address:
+                                payer_address = transfer.get('fromUserAccount')
+                                break
+                                
+                    # Extract any referenced base token mint addresses, excluding native assets & USDC
+                    mints = set()
+                    for tc in tx.get('tokenBalanceChanges', []):
+                        mints.add(tc.get('mint'))
+                    for tt in tx.get('tokenTransfers', []):
+                        mints.add(tt.get('mint'))
+                        
+                    excluded_mints = {
+                        'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', # USDC
+                        'So11111111111111111111111111111111111111112', # WSOL
+                        'Es9vMFrzaypmko8L7jV8YW156HCfaNuDY8jNH5KB3C1d', # USDT
+                        monitored_address
+                    }
+                    base_tokens = [m for m in mints if m and m not in excluded_mints]
                     
+                    print(f"[HELIUS WEBHOOK] DexScreener payment transaction detected: {sig} | Discovered tokens: {base_tokens}", flush=True)
+                    
+                    # Calculate amount_usd for DexScreener payment if possible
+                    amount_usd = 0.0
+                    for transfer in tx.get('tokenTransfers', []):
+                        if transfer.get('toUserAccount') == monitored_address:
+                            amt = transfer.get('tokenAmount', 0)
+                            mint = transfer.get('mint', '')
+                            if mint in ('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'Es9vMFrzaypmko8L7jV8YW156HCfaNuDY8jNH5KB3C1d'):
+                                amount_usd += amt
+                            else:
+                                t_price = get_token_price_usd(mint)
+                                amount_usd += amt * t_price if t_price else 0.0
+                            break
+                    if amount_usd == 0.0:
+                        for transfer in tx.get('nativeTransfers', []):
+                            if transfer.get('toUserAccount') == monitored_address:
+                                amount_sol = transfer.get('amount', 0) / 1e9
+                                sol_price = get_token_price_usd("SOL")
+                                amount_usd += amount_sol * sol_price if sol_price else 0.0
+                                break
+
+                    if base_tokens:
+                        # Instantly check each base token in background Telethon loop
+                        for ca in base_tokens:
+                            run_async_coroutine(verify_and_forward_cto_token(ca, amount_usd))
+                    elif payer_address:
+                        api_key = settings.get('helius_api_key')
+                        tx_ts = tx.get("timestamp", int(time.time()))
+                        print(f"[HELIUS WEBHOOK] No base tokens in payment tx. Triggering payer history search for {payer_address}...", flush=True)
+                        run_async_coroutine(process_payment_payer_history(payer_address, tx_ts, api_key, amount_usd))
+                        
         return jsonify({"status": "success"}), 200
     except Exception as e:
         print(f"[HELIUS WEBHOOK] Error handling webhook: {e}", flush=True)
@@ -2365,11 +2493,34 @@ async def helius_polling_loop():
     while True:
         try:
             settings = get_settings()
+            poll_enabled = settings.get('helius_poll_enabled', 'false').lower() == 'true'
+            poll_interval = int(settings.get('polling_interval', '10'))
+            
+            if not poll_enabled:
+                await asyncio.sleep(poll_interval)
+                continue
+                
             api_key = settings.get('helius_api_key')
             payment_address = settings.get('cto_dex_payment_address')
             is_auto = str(settings.get('cto_auto_scan', 'false')).lower() == 'true'
             
             if api_key and payment_address and is_auto:
+                # Check signatures first via standard RPC (1 credit cost)
+                sigs = await get_latest_signatures(payment_address, api_key, limit=10)
+                
+                # Initialize set on startup if empty
+                if not processed_signatures:
+                    for s in sigs:
+                        processed_signatures.add(s)
+                    await asyncio.sleep(poll_interval)
+                    continue
+                    
+                has_new = any(s not in processed_signatures for s in sigs)
+                if not has_new:
+                    await asyncio.sleep(poll_interval)
+                    continue
+                    
+                # Fetch parsed transaction history ONLY when a new transaction is detected
                 url = f"https://api.helius.xyz/v0/addresses/{payment_address}/transactions?api-key={api_key}"
                 r = await asyncio.to_thread(requests.get, url, timeout=10)
                 if r.status_code == 200:
@@ -2380,13 +2531,6 @@ async def helius_polling_loop():
                             sig = tx.get("signature")
                             if not sig:
                                 continue
-                            
-                            # Initialize set with first batch on startup to avoid processing old history
-                            if not processed_signatures:
-                                for t in txs:
-                                    if t.get("signature"):
-                                        processed_signatures.add(t.get("signature"))
-                                break
                                 
                             if sig in processed_signatures:
                                 continue
@@ -2436,7 +2580,7 @@ async def helius_polling_loop():
                                         sol_price = get_token_price_usd("SOL")
                                         amount_usd += amount_sol * sol_price if sol_price else 0.0
                                         break
-
+                                        
                             has_custom_token = False
                             for mint in mints:
                                 if mint and mint not in excluded_mints:
@@ -2454,7 +2598,7 @@ async def helius_polling_loop():
         except Exception as e:
             print(f"[HELIUS POLLING] Loop error: {e}", flush=True)
             
-        await asyncio.sleep(10)
+        await asyncio.sleep(poll_interval)
 
 async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
     try:
