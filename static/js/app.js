@@ -3,7 +3,7 @@ let settings = initialSettings || {};
 let currentRules = [];
 
 function switchTab(tabId) {
-    const tabs = ['workflows', 'tester', 'settings', 'cto'];
+    const tabs = ['workflows', 'settings', 'wallet-tracker'];
     tabs.forEach(t => {
         const tabEl = document.getElementById('tab-' + t);
         const navEl = document.getElementById('nav-' + t);
@@ -18,6 +18,17 @@ function switchTab(tabId) {
 }
 
 function renderWorkflows() {
+    // Populate the dropdown selector in Scan History card
+    const scanSelect = document.getElementById('scan-test-workflow');
+    if (scanSelect) {
+        const currentVal = scanSelect.value;
+        scanSelect.innerHTML = '<option value="">None (Show All Senders)</option>';
+        workflows.forEach(wf => {
+            scanSelect.innerHTML += `<option value="${wf.id}">${wf.name}</option>`;
+        });
+        scanSelect.value = currentVal;
+    }
+
     const grid = document.getElementById('workflows-grid');
     grid.innerHTML = '';
     
@@ -31,16 +42,9 @@ function renderWorkflows() {
                     ${wf.is_active ? 'Active' : 'Paused'}
                 </div>
             </div>
-            <div class="workflow-routing" style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 1rem 0; font-size: 0.82rem; color: #d1d5db; background: rgba(255,255,255,0.03); padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);">
-                <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; display: flex; align-items: center; gap: 4px;" title="${wf.source_channel || wf.source_channel_id || 'Any/CTO'}">
-                    <span style="font-size: 0.95rem;">📢</span> 
-                    <span style="font-weight: 500;">${wf.source_channel || (wf.source_channel_id ? `Chat ${wf.source_channel_id}` : 'Any/CTO')}</span>
-                </div>
-                <div style="color: var(--accent-color); font-weight: 700; font-size: 1rem;">➔</div>
-                <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; display: flex; align-items: center; gap: 4px; justify-content: flex-end;" title="${wf.target_channel || wf.target_channel_id || 'None'}">
-                    <span style="font-weight: 500; text-align: right;">${wf.target_channel || (wf.target_channel_id ? `Chat ${wf.target_channel_id}` : 'Fallback')}</span>
-                    <span style="font-size: 0.95rem;">🎯</span>
-                </div>
+            <div style="font-size: 0.82rem; color: var(--text-muted); margin: 0.75rem 0 1rem 0; display: flex; align-items: center; gap: 6px;">
+                <span>📢 Target Group:</span>
+                <strong style="color: #f3f4f6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 80%;" title="${wf.target_channel || wf.target_channel_id || 'Fallback Group'}">${wf.target_channel || (wf.target_channel_id ? `Chat ${wf.target_channel_id}` : 'Fallback Group')}</strong>
             </div>
             <div class="workflow-rules-preview" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 1.5rem; min-height: 40px; align-content: flex-start;">
                 ${(wf.rules && wf.rules.length > 0) ? wf.rules.map(r => {
@@ -57,6 +61,15 @@ function renderWorkflows() {
                     } else if (r.rule_type === 'performance') {
                         label = `📊 Perf (${r.search_text || '5m'}): ${r.time_min || '-∞'}% to ${r.time_max || '∞'}%`;
                         color = '#f59e0b';
+                    } else if (r.rule_type === 'dex_payment') {
+                        let minP = (r.time_min !== undefined && r.time_min !== null && r.time_min !== '') ? r.time_min : '0';
+                        let maxP = (r.time_max !== undefined && r.time_max !== null && r.time_max !== '') ? r.time_max : '∞';
+                        let labelText = r.search_text ? ` (${r.search_text})` : '';
+                        label = `💳 DEX Pay: $${minP}-$${maxP}${labelText}`;
+                        color = '#10b981';
+                    } else if (r.rule_type === 'migrated') {
+                        label = `🧬 Migrated: ${r.search_text === 'no' ? 'No' : 'Yes'}`;
+                        color = '#6366f1';
                     } else if (r.rule_type === 'exclude_platform') {
                         label = `🚫 Exclude: ${r.search_text}`;
                         color = '#ef4444';
@@ -96,25 +109,12 @@ function renderWorkflows() {
         grid.appendChild(card);
     });
 
-    // Populate tester dropdown
+    // Populate tester dropdown if it exists
     const select = document.getElementById('tester-workflow');
-    select.innerHTML = workflows.map(wf => `<option value="${wf.id}">${wf.name}</option>`).join('');
-    
-    // Populate CTO scanner workflow dropdown
-    const ctoSelect = document.getElementById('cto-workflow-id');
-    if (ctoSelect) {
-        const defaultOption = `<option value="active_all" style="background: var(--bg-dark); color: white;">Evaluate All Active Workflows</option>`;
-        const noFilterOption = `<option value="" style="background: var(--bg-dark); color: white;">No Filter (Send directly to target below)</option>`;
-        const options = workflows.map(wf => `<option value="${wf.id}" style="background: var(--bg-dark); color: white;">${wf.name}</option>`).join('');
-        ctoSelect.innerHTML = defaultOption + noFilterOption + options;
-        
-        // Restore selection if it exists, otherwise default to active_all
-        if (settings.cto_workflow_id) {
-            ctoSelect.value = settings.cto_workflow_id;
-        } else {
-            ctoSelect.value = "active_all";
-        }
+    if (select) {
+        select.innerHTML = workflows.map(wf => `<option value="${wf.id}">${wf.name}</option>`).join('');
     }
+
 }
 
 function openModal() {
@@ -173,57 +173,91 @@ function renderRules() {
     currentRules.forEach((rule, index) => {
         const div = document.createElement('div');
         div.className = 'rule-row';
+        div.style = 'display: grid; grid-template-columns: 130px 1fr auto; gap: 1rem; align-items: center; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); padding: 10px 14px; border-radius: 8px; margin-bottom: 10px;';
         
-        let content = `<span class="status-badge" style="background: var(--accent-color); color: white">${rule.rule_type.toUpperCase()}</span>`;
+        let badgeColor = 'var(--accent-color)';
+        if (rule.rule_type === 'token_age') badgeColor = '#3b82f6';
+        else if (rule.rule_type === 'market_cap') badgeColor = '#10b981';
+        else if (rule.rule_type === 'dex_payment') badgeColor = '#06b6d4';
+        else if (rule.rule_type === 'migrated') badgeColor = '#6366f1';
+        else if (rule.rule_type === 'performance') badgeColor = '#f59e0b';
+        else if (rule.rule_type === 'exclude_platform') badgeColor = '#ef4444';
+        else if (rule.rule_type === 'filter') badgeColor = '#ec4899';
+        
+        let badgeHtml = `<div style="display: flex; align-items: center;">
+            <span class="status-badge" style="background: ${badgeColor}; color: white; width: 100%; text-align: center; justify-content: center; display: inline-flex;">${rule.rule_type.toUpperCase()}</span>
+        </div>`;
+        
+        let fieldsHtml = '<div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; flex: 1;">';
         
         if (rule.rule_type === 'token_age') {
-            content += `
-                <label style="font-size:0.85rem; color:var(--text-muted)">Min Age (m):</label>
-                <input type="number" class="form-input" style="width:80px" value="${(rule.time_min !== undefined && rule.time_min !== null) ? rule.time_min : ''}" placeholder="0" oninput="updateRule(${index}, 'time_min', this.value)">
-                <label style="font-size:0.85rem; color:var(--text-muted)">Max Age (m):</label>
-                <input type="number" class="form-input" style="width:80px" value="${(rule.time_max !== undefined && rule.time_max !== null) ? rule.time_max : ''}" placeholder="∞" oninput="updateRule(${index}, 'time_max', this.value)">
+            fieldsHtml += `
+                <label style="font-size:0.85rem; color:var(--text-muted)">Min (m):</label>
+                <input type="number" class="form-input" style="width:75px" value="${(rule.time_min !== undefined && rule.time_min !== null) ? rule.time_min : ''}" placeholder="0" oninput="updateRule(${index}, 'time_min', this.value)">
+                <label style="font-size:0.85rem; color:var(--text-muted)">Max (m):</label>
+                <input type="number" class="form-input" style="width:75px" value="${(rule.time_max !== undefined && rule.time_max !== null) ? rule.time_max : ''}" placeholder="∞" oninput="updateRule(${index}, 'time_max', this.value)">
             `;
         } else if (rule.rule_type === 'extract_ca') {
-            content += `<span style="color: var(--text-muted); font-size: 0.85rem;">Automatically extracts Contract Address from message.</span>`;
+            fieldsHtml += `<span style="color: var(--text-muted); font-size: 0.85rem;">Automatically extracts Contract Address from message.</span>`;
         } else if (rule.rule_type === 'performance') {
-            // Default to '5m' if not set
             const timeframe = rule.search_text || '5m';
-            content += `
+            fieldsHtml += `
                 <label style="font-size:0.85rem; color:var(--text-muted)">Timeframe:</label>
-                <select class="form-input" style="width:90px" onchange="updateRule(${index}, 'search_text', this.value)">
+                <select class="form-input" style="width:85px" onchange="updateRule(${index}, 'search_text', this.value)">
                     <option value="5m" ${timeframe === '5m' ? 'selected' : ''}>5m</option>
                     <option value="1hr" ${timeframe === '1hr' ? 'selected' : ''}>1hr</option>
                     <option value="6hr" ${timeframe === '6hr' ? 'selected' : ''}>6hr</option>
                     <option value="24hr" ${timeframe === '24hr' ? 'selected' : ''}>24hr</option>
                 </select>
                 <label style="font-size:0.85rem; color:var(--text-muted)">Min %:</label>
-                <input type="number" class="form-input" style="width:80px" placeholder="-∞" value="${(rule.time_min !== undefined && rule.time_min !== null) ? rule.time_min : ''}" oninput="updateRule(${index}, 'time_min', this.value)">
+                <input type="number" class="form-input" style="width:75px" placeholder="-∞" value="${(rule.time_min !== undefined && rule.time_min !== null) ? rule.time_min : ''}" oninput="updateRule(${index}, 'time_min', this.value)">
                 <label style="font-size:0.85rem; color:var(--text-muted)">Max %:</label>
-                <input type="number" class="form-input" style="width:80px" placeholder="∞" value="${(rule.time_max !== undefined && rule.time_max !== null) ? rule.time_max : ''}" oninput="updateRule(${index}, 'time_max', this.value)">
+                <input type="number" class="form-input" style="width:75px" placeholder="∞" value="${(rule.time_max !== undefined && rule.time_max !== null) ? rule.time_max : ''}" oninput="updateRule(${index}, 'time_max', this.value)">
             `;
         } else if (rule.rule_type === 'market_cap') {
-            content += `
-                <label style="font-size:0.85rem; color:var(--text-muted)">Min MC ($):</label>
-                <input type="number" class="form-input" style="width:100px" placeholder="0" value="${(rule.time_min !== undefined && rule.time_min !== null) ? rule.time_min : ''}" oninput="updateRule(${index}, 'time_min', this.value)">
-                <label style="font-size:0.85rem; color:var(--text-muted)">Max MC ($):</label>
-                <input type="number" class="form-input" style="width:100px" placeholder="∞" value="${(rule.time_max !== undefined && rule.time_max !== null) ? rule.time_max : ''}" oninput="updateRule(${index}, 'time_max', this.value)">
+            fieldsHtml += `
+                <label style="font-size:0.85rem; color:var(--text-muted)">Min ($):</label>
+                <input type="number" class="form-input" style="width:85px" placeholder="0" value="${(rule.time_min !== undefined && rule.time_min !== null) ? rule.time_min : ''}" oninput="updateRule(${index}, 'time_min', this.value)">
+                <label style="font-size:0.85rem; color:var(--text-muted)">Max ($):</label>
+                <input type="number" class="form-input" style="width:85px" placeholder="∞" value="${(rule.time_max !== undefined && rule.time_max !== null) ? rule.time_max : ''}" oninput="updateRule(${index}, 'time_max', this.value)">
+            `;
+        } else if (rule.rule_type === 'dex_payment') {
+            fieldsHtml += `
+                <label style="font-size:0.85rem; color:var(--text-muted)">Min ($):</label>
+                <input type="number" class="form-input" style="width:75px" placeholder="0" value="${(rule.time_min !== undefined && rule.time_min !== null) ? rule.time_min : ''}" oninput="updateRule(${index}, 'time_min', this.value)">
+                <label style="font-size:0.85rem; color:var(--text-muted)">Max ($):</label>
+                <input type="number" class="form-input" style="width:75px" placeholder="∞" value="${(rule.time_max !== undefined && rule.time_max !== null) ? rule.time_max : ''}" oninput="updateRule(${index}, 'time_max', this.value)">
+                <label style="font-size:0.85rem; color:var(--text-muted)">Label:</label>
+                <input class="form-input" style="width:105px" placeholder="e.g. CTO" value="${rule.search_text || ''}" oninput="updateRule(${index}, 'search_text', this.value)">
+            `;
+        } else if (rule.rule_type === 'migrated') {
+            const isMigrated = rule.search_text || 'yes';
+            fieldsHtml += `
+                <label style="font-size:0.85rem; color:var(--text-muted)">Migrated:</label>
+                <select class="form-input" style="width:90px" onchange="updateRule(${index}, 'search_text', this.value)">
+                    <option value="yes" ${isMigrated === 'yes' ? 'selected' : ''}>Yes</option>
+                    <option value="no" ${isMigrated === 'no' ? 'selected' : ''}>No</option>
+                </select>
             `;
         } else if (rule.rule_type === 'exclude_platform') {
-            content += `
-                <input class="form-input" placeholder="e.g. pump.fun" value="${rule.search_text || ''}" oninput="updateRule(${index}, 'search_text', this.value)">
+            fieldsHtml += `
+                <input class="form-input" style="flex: 1; max-width: 250px;" placeholder="e.g. pump.fun" value="${rule.search_text || ''}" oninput="updateRule(${index}, 'search_text', this.value)">
             `;
         } else {
-            content += `<input class="form-input" placeholder="${rule.rule_type === 'filter' ? 'Word to drop message' : 'Word to find'}" value="${rule.search_text || ''}" oninput="updateRule(${index}, 'search_text', this.value)">`;
+            fieldsHtml += `<input class="form-input" style="flex: 1; max-width: 250px;" placeholder="${rule.rule_type === 'filter' ? 'Word to drop message' : 'Word to find'}" value="${rule.search_text || ''}" oninput="updateRule(${index}, 'search_text', this.value)">`;
             if (rule.rule_type === 'replace') {
-                content += `<input class="form-input" placeholder="Replace with..." value="${rule.replace_text || ''}" oninput="updateRule(${index}, 'replace_text', this.value)">`;
+                fieldsHtml += `<input class="form-input" style="flex: 1; max-width: 250px;" placeholder="Replace with..." value="${rule.replace_text || ''}" oninput="updateRule(${index}, 'replace_text', this.value)">`;
             }
         }
+        fieldsHtml += '</div>';
         
-        content += `<button type="button" class="btn-icon" style="color: #ef4444" onclick="removeRule(${index})">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-        </button>`;
+        let deleteHtml = `<div style="display: flex; align-items: center; justify-content: flex-end;">
+            <button type="button" class="btn-icon" style="color: #ef4444; padding: 4px;" onclick="removeRule(${index})">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            </button>
+        </div>`;
         
-        div.innerHTML = content;
+        div.innerHTML = badgeHtml + fieldsHtml + deleteHtml;
         container.appendChild(div);
     });
 }
@@ -581,6 +615,16 @@ async function runTester() {
 document.getElementById('setting-api-id').value = settings.api_id || '';
 document.getElementById('setting-api-hash').value = settings.api_hash || '';
 document.getElementById('setting-phone').value = settings.phone || '';
+if (document.getElementById('setting-helius-key')) {
+    document.getElementById('setting-helius-key').value = settings.helius_api_key || '';
+}
+if (document.getElementById('setting-cto-dex-payment-address')) {
+    document.getElementById('setting-cto-dex-payment-address').value = settings.cto_dex_payment_address || '';
+}
+const webhookUrlInput = document.getElementById('setting-helius-webhook-url');
+if (webhookUrlInput) {
+    webhookUrlInput.value = window.location.origin + '/api/helius/webhook';
+}
 
 let availableChannels = [];
 
@@ -669,161 +713,9 @@ document.addEventListener('click', function(e) {
         const d = document.getElementById('target-dropdown');
         if (d) d.classList.add('hidden');
     }
-    if (!e.target.closest('#flow-cto') && !e.target.closest('#cto-dropdown')) {
-        const d = document.getElementById('cto-dropdown');
-        if (d) d.classList.add('hidden');
-    }
 });
 
-async function runCtoScanner() {
-    const targetId = document.getElementById('flow-cto-id').value;
-    const btn = document.getElementById('btn-run-cto');
-    const container = document.getElementById('cto-result-container');
-    const ledgerContainer = document.getElementById('cto-ledger-container');
-    
-    btn.disabled = true;
-    btn.innerHTML = 'Scanning (this may take a moment)...';
-    container.innerHTML = '<div style="text-align:center; padding: 2rem;">Waiting for scan to complete...</div>';
-    ledgerContainer.innerHTML = '<div style="text-align:center; padding: 2rem;">Fetching CTO data from Dexscreener...</div>';
-    
-    const workflowId = document.getElementById('cto-workflow-id').value;
-    const testMode = document.getElementById('cto-test-mode').checked;
-    
-    try {
-        const res = await fetch('/api/cto/scan', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                target_channel: targetId,
-                workflow_id: workflowId,
-                test_mode: testMode
-            })
-        });
-        
-        const result = await res.json();
-        
-        if (result.success) {
-            const scanTime = new Date().toLocaleString();
-            
-            const setBadge = (id, val) => {
-                const el = document.getElementById(id);
-                if (el) el.textContent = val;
-            };
-            
-            if (result.results && result.results.length > 0) {
-                // Update ledger count badge safely
-                setBadge('cto-ledger-count', result.results.length);
-                
-                // Populate Scanned Tokens Ledger
-                ledgerContainer.innerHTML = result.results.map((t, idx) => {
-                    let badgeColor = '';
-                    let badgeBg = '';
-                    let statusLabel = '';
-                    let reasonColor = '#ef4444';
-                    
-                    if (t.status === 'passed') {
-                        badgeColor = '#10b981';
-                        badgeBg = 'rgba(16, 185, 129, 0.1)';
-                        statusLabel = '✅ Passed';
-                        reasonColor = '#10b981';
-                    } else if (t.status === 'duplicate') {
-                        badgeColor = '#f59e0b';
-                        badgeBg = 'rgba(245, 158, 11, 0.1)';
-                        statusLabel = '⚠️ Duplicate';
-                        reasonColor = '#f59e0b';
-                    } else { // dropped
-                        badgeColor = '#ef4444';
-                        badgeBg = 'rgba(239, 68, 68, 0.1)';
-                        statusLabel = '❌ Dropped';
-                        reasonColor = '#ef4444';
-                    }
-                    
-                    return `
-                        <div class="result-success" style="padding: 1rem; margin-bottom: 0.5rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: 8px;">
-                            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
-                                <span style="font-weight: bold; color: white; font-size: 0.95rem;">#${idx + 1} ${(t.name || 'Unknown').toUpperCase()}</span>
-                                <span style="font-size: 0.78rem; font-weight: 600; padding: 2px 6px; border-radius: 4px; color: ${badgeColor}; background: ${badgeBg}; border: 1px solid ${badgeColor}">${statusLabel}</span>
-                            </div>
-                            
-                            <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 6px; display: flex; align-items: center; gap: 4px;">
-                                📅 <span>Scanned: ${scanTime}</span>
-                            </div>
-                            
-                            <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 6px; word-break: break-all;">
-                                🧬 <span style="font-family: monospace; user-select: all; color: #f3f4f6;">${t.ca}</span>
-                            </div>
-                            
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.8rem; margin-bottom: 8px;">
-                                <div>💰 MC: <span style="color: white; font-weight: 500;">${t.market_cap}</span></div>
-                                <div>⏱️ Age: <span style="color: white; font-weight: 500;">${t.age}</span></div>
-                                <div>🌐 Platform: <span style="color: white; font-weight: 500;">${t.platform}</span></div>
-                            </div>
-                            
-                            <div style="display: flex; gap: 10px; font-size: 0.75rem; background: rgba(255,255,255,0.02); padding: 4px 8px; border-radius: 4px; justify-content: space-between; align-items: center;">
-                                <span style="color: #10b981;">5m: ${t.perf_5m > 0 ? '+' : ''}${t.perf_5m}%</span>
-                                <span style="color: #3b82f6;">1h: ${t.perf_1h > 0 ? '+' : ''}${t.perf_1h}%</span>
-                                <span style="color: #f59e0b;">6h: ${t.perf_6h > 0 ? '+' : ''}${t.perf_6h}%</span>
-                                <span style="color: #ef4444;">24h: ${t.perf_24h > 0 ? '+' : ''}${t.perf_24h}%</span>
-                            </div>
-                            
-                            <div style="font-size: 0.78rem; color: ${reasonColor}; margin-top: 8px; font-style: italic; border-top: 1px dashed rgba(255,255,255,0.05); padding-top: 6px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-                                <span>${t.reason}</span>
-                                ${t.dex_url ? `
-                                    <a href="${t.dex_url}" target="_blank" style="background: rgba(59, 130, 246, 0.12); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.4); text-decoration: none; font-size: 0.72rem; padding: 2px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; font-weight: 500; font-style: normal; transition: all 0.2s;" onmouseover="this.style.background='rgba(59, 130, 246, 0.25)'" onmouseout="this.style.background='rgba(59, 130, 246, 0.12)'">
-                                        📊 Chart ↗
-                                    </a>
-                                ` : ''}
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-                
-                // Populate Forwarded Signals (show only passed tokens)
-                const passedTokens = result.results.filter(t => t.status === 'passed');
-                // Update forwarded count badge safely
-                setBadge('cto-result-count', passedTokens.length);
-                
-                if (passedTokens.length > 0) {
-                    container.innerHTML = passedTokens.map((t, idx) => `
-                        <div class="result-success" style="padding: 1rem; margin-bottom: 0.5rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: 8px;">
-                            <div style="font-size: 0.8rem; font-weight: bold; color: #10b981; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
-                                <span>Signal #${idx + 1}</span>
-                                <span style="color: var(--text-muted); font-weight: normal; font-size: 0.72rem;">📅 Sent: ${scanTime}</span>
-                            </div>
-                            <div style="font-family: monospace; font-size: 0.82rem; white-space: pre-wrap; color: white; line-height: 1.4;">${t.formatted_message}</div>
-                        </div>
-                    `).join('');
-                } else {
-                    container.innerHTML = '<div style="text-align:center; padding: 2rem;">No tokens passed the current rules & duplicate checks.</div>';
-                }
-                
-                if (targetId && passedTokens.length > 0) {
-                    alert(`Successfully scanned and forwarded ${passedTokens.length} tokens to target channel!`);
-                }
-            } else {
-                setBadge('cto-ledger-count', '0');
-                setBadge('cto-result-count', '0');
-                ledgerContainer.innerHTML = '<div style="text-align:center; padding: 2rem;">No tokens returned by Dexscreener.</div>';
-                container.innerHTML = '<div style="text-align:center; padding: 2rem;">No active tokens found matching criteria.</div>';
-            }
-        } else {
-            const setBadge = (id, val) => {
-                const el = document.getElementById(id);
-                if (el) el.textContent = val;
-            };
-            setBadge('cto-ledger-count', '0');
-            setBadge('cto-result-count', '0');
-            container.innerHTML = `<div class="result-error">Error: ${result.error}</div>`;
-            ledgerContainer.innerHTML = `<div class="result-error">Error: ${result.error}</div>`;
-        }
-    } catch (e) {
-        container.innerHTML = `<div class="result-error">Request failed: ${e.message}</div>`;
-        ledgerContainer.innerHTML = `<div class="result-error">Request failed: ${e.message}</div>`;
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = 'Run Scanner';
-    }
-}
+
 
 async function logoutTelegram() {
     if (!confirm("Are you sure you want to log out of Telegram? You will need to request a new code to connect again.")) return;
@@ -844,90 +736,429 @@ async function logoutTelegram() {
     }
 }
 
-function handleIntervalChange() {
-    const select = document.getElementById('cto-scan-interval');
-    const customContainer = document.getElementById('cto-custom-interval-container');
-    const customInput = document.getElementById('cto-custom-scan-interval');
+
+
+// Helius Settings Functions
+async function saveHeliusSettings(e) {
+    if (e) e.preventDefault();
+    const heliusKey = document.getElementById('setting-helius-key').value.trim();
+    const paymentAddress = document.getElementById('setting-cto-dex-payment-address').value.trim();
     
-    if (select && select.value === 'custom') {
-        if (customContainer) customContainer.classList.remove('hidden');
-        if (customInput && !customInput.value) {
-            customInput.value = '15'; // Default custom value
+    try {
+        const res = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                helius_api_key: heliusKey,
+                cto_dex_payment_address: paymentAddress
+            })
+        });
+        const result = await res.json();
+        if (result.success) {
+            settings.helius_api_key = heliusKey;
+            settings.cto_dex_payment_address = paymentAddress;
+            alert('Helius settings saved successfully!');
+        } else {
+            alert('Error saving Helius settings: ' + result.error);
         }
-    } else {
-        if (customContainer) customContainer.classList.add('hidden');
+    } catch (err) {
+        alert('Failed to save settings: ' + err.message);
     }
-    saveCtoSettings();
 }
 
-async function saveCtoSettings() {
-    const targetId = document.getElementById('flow-cto-id').value;
-    const isAuto = document.getElementById('cto-auto-scan').checked;
-    const workflowId = document.getElementById('cto-workflow-id').value;
-    const testMode = document.getElementById('cto-test-mode').checked;
-    
-    const select = document.getElementById('cto-scan-interval');
-    let interval = select ? select.value : '60';
-    if (interval === 'custom') {
-        const customInput = document.getElementById('cto-custom-scan-interval');
-        interval = (customInput && customInput.value) ? customInput.value : '15';
-    }
-    
-    // Update description text dynamically
-    const desc = document.getElementById('cto-auto-scan-desc');
-    if (desc) {
-        desc.textContent = `Automatically fetch & forward every ${interval}s`;
+
+// Wallet Tracker functions
+async function saveTrackedAddress(event) {
+    if (event) event.preventDefault();
+    const address = document.getElementById('tracker-monitored-address').value.trim();
+    if (!address) {
+        alert("Please enter a valid Solana address");
+        return;
     }
     
     try {
-        await fetch('/api/settings', {
+        const res = await fetch('/api/wallet/save_tracked', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                cto_target_channel: targetId,
-                cto_auto_scan: isAuto ? 'true' : 'false',
-                cto_workflow_id: workflowId,
-                cto_test_mode: testMode ? 'true' : 'false',
-                cto_scan_interval: interval
+            body: JSON.stringify({ address })
+        });
+        const result = await res.json();
+        if (result.success) {
+            settings.tracked_wallet_address = address;
+            document.getElementById('scan-wallet-address').value = address;
+            alert("Tracked address saved. Monitoring started in background!");
+            loadRealtimePayments();
+        } else {
+            alert("Error saving tracked address: " + result.error);
+        }
+    } catch (e) {
+        alert("Failed to save tracked address: " + e.message);
+    }
+}
+
+async function scanWalletHistory() {
+    const address = document.getElementById('scan-wallet-address').value.trim();
+    const minAmount = document.getElementById('scan-min-amount').value.trim();
+    const maxAmount = document.getElementById('scan-max-amount').value.trim();
+    const timeValue = document.getElementById('scan-time-value').value.trim();
+    const timeUnit = document.getElementById('scan-time-unit').value;
+    
+    const testWorkflowSelect = document.getElementById('scan-test-workflow');
+    const workflowId = testWorkflowSelect ? testWorkflowSelect.value : '';
+    
+    const container = document.getElementById('tracker-senders-container');
+    const badge = document.getElementById('tracker-senders-count');
+    
+    if (!address) {
+        alert("Please enter a Solana wallet address to scan");
+        return;
+    }
+    
+    container.innerHTML = '<div style="text-align:center; padding: 2rem; color: var(--text-muted);">Scanning transactions (this may take a few seconds)...</div>';
+    badge.textContent = '0';
+    
+    try {
+        const res = await fetch('/api/wallet/transactions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                address,
+                min_amount: minAmount ? parseFloat(minAmount) : null,
+                max_amount: maxAmount ? parseFloat(maxAmount) : null,
+                time_value: timeValue ? parseFloat(timeValue) : 12,
+                time_unit: timeUnit,
+                workflow_id: workflowId ? parseInt(workflowId) : null
             })
         });
         
-        // Update local settings object so dropdown restoration works without reload
-        settings.cto_target_channel = targetId;
-        settings.cto_auto_scan = isAuto ? 'true' : 'false';
-        settings.cto_workflow_id = workflowId;
-        settings.cto_test_mode = testMode ? 'true' : 'false';
-        settings.cto_scan_interval = interval;
+        const result = await res.json();
+        if (result.success) {
+            badge.textContent = result.senders.length;
+            if (result.senders.length === 0) {
+                container.innerHTML = '<div style="text-align:center; padding: 2rem; color: var(--text-muted);">No matching transactions found in the specified window.</div>';
+                return;
+            }
+            
+            container.innerHTML = result.senders.map((s, idx) => {
+                const latestDate = new Date(s.latest_timestamp * 1000).toLocaleString();
+                
+                // Construct test badge if a workflow test was performed
+                let testBadgeHtml = '';
+                if (s.test_status) {
+                    if (s.test_status === 'passed') {
+                        testBadgeHtml = `
+                            <div style="margin-bottom: 10px; padding: 6px 10px; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px; display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: #34d399; font-weight: 600;">
+                                🟢 PASSED WORKFLOW CHECKLIST
+                            </div>
+                        `;
+                    } else if (s.test_status === 'dropped') {
+                        testBadgeHtml = `
+                            <div style="margin-bottom: 10px; padding: 6px 10px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 6px; display: flex; flex-direction: column; gap: 2px; font-size: 0.78rem; color: #f87171; font-weight: 500;">
+                                <div style="font-weight: 700; color: #fca5a5; display: flex; align-items: center; gap: 6px;">
+                                    🔴 DROPPED BY WORKFLOW
+                                </div>
+                                <div style="font-size: 0.72rem; color: #fca5a5; margin-top: 2px;">Reason: ${s.test_reason}</div>
+                            </div>
+                        `;
+                    } else if (s.test_status === 'error') {
+                        testBadgeHtml = `
+                            <div style="margin-bottom: 10px; padding: 6px 10px; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 6px; display: flex; flex-direction: column; gap: 2px; font-size: 0.78rem; color: #fbbf24; font-weight: 500;">
+                                <div style="font-weight: 700;">⚠️ TEST RUN ERROR</div>
+                                <div style="font-size: 0.72rem; margin-top: 2px;">${s.test_reason}</div>
+                            </div>
+                        `;
+                    }
+                }
+
+                // Construct details of transfers
+                const transfersListHtml = s.transfers.map(t => {
+                    const explorerUrl = `https://solscan.io/tx/${t.signature}`;
+                    const tokenDisplayName = t.token_name ? t.token_name : (t.mint === 'SOL' ? 'SOL' : t.mint.slice(0,6) + '...');
+                    const amountUsdText = t.amount_usd ? `$${t.amount_usd.toFixed(2)}` : '$0.00';
+                    return `
+                        <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.75rem; background:rgba(255,255,255,0.02); padding: 4px 8px; border-radius:4px; margin-top:4px;">
+                            <span style="color:#10b981; font-weight: 500;">+${t.amount.toFixed(4)} ${tokenDisplayName} (${amountUsdText})</span>
+                            <a href="${explorerUrl}" target="_blank" style="color:#60a5fa; text-decoration:none; font-family:monospace;">${t.signature.slice(0,8)}... ↗</a>
+                        </div>
+                    `;
+                }).join('');
+                
+                return `
+                    <div class="result-success" style="padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.2); margin-bottom: 0.5rem;">
+                        ${testBadgeHtml}
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <span style="font-weight:bold; color:white; font-size:0.9rem;">#${idx + 1} Sender</span>
+                            <button onclick="openWalletTxModal('${s.address}')" class="btn-primary" style="padding: 4px 10px; font-size: 0.75rem; border-radius: 4px; box-shadow: none;">
+                                Inspect Wallet ↗
+                            </button>
+                        </div>
+                        <div style="font-size:0.78rem; font-family:monospace; color:#60a5fa; word-break:break-all; margin-bottom:8px; user-select:all;">
+                            ${s.address}
+                        </div>
+                        <div style="font-size:0.8rem; margin-bottom:6px; display:flex; justify-content:space-between;">
+                            <span>Total Sent: <strong style="color:white;">$${s.total_sent_usd.toFixed(2)}</strong></span>
+                            <span style="color:var(--text-muted);">${s.tx_count} tx(s)</span>
+                        </div>
+                        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:6px;">
+                            Latest: ${latestDate}
+                        </div>
+                        
+                        ${s.last_bought_token ? `
+                        <div style="margin-top: 8px; margin-bottom: 8px; padding: 8px; background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.2); border-radius: 6px;">
+                            <div style="font-size: 0.72rem; color: #a78bfa; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
+                                🪙 Last Token Bought Before Payment:
+                            </div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                                <div style="display: flex; flex-direction: column; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: calc(100% - 100px);">
+                                    <span style="font-weight: bold; color: white; font-size: 0.82rem;" title="${s.last_bought_token_name || ''}">${s.last_bought_token_name || 'Unknown Token'}</span>
+                                    <span style="font-family: monospace; color: var(--text-muted); font-size: 0.7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: all;" title="${s.last_bought_token}">${s.last_bought_token}</span>
+                                </div>
+                                <a href="https://dexscreener.com/solana/${s.last_bought_token}" target="_blank" class="btn-primary" style="padding: 3px 8px; font-size: 0.7rem; border-radius: 4px; text-decoration: none; background: #8b5cf6; color: white; flex-shrink: 0; font-weight: 600; box-shadow: none;">
+                                    Dexscreener ↗
+                                </a>
+                            </div>
+                        </div>
+                        ` : `
+                        <div style="margin-top: 8px; margin-bottom: 8px; padding: 6px 8px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 6px; font-size: 0.72rem; color: var(--text-muted);">
+                            🪙 Last Token Bought: None detected in recent history
+                        </div>
+                        `}
+
+                        <div style="border-top:1px dashed rgba(255,255,255,0.05); padding-top:6px; margin-top:6px;">
+                            <span style="font-size:0.75rem; color:var(--text-muted); font-weight:500;">Transfers:</span>
+                            ${transfersListHtml}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        } else {
+            container.innerHTML = `<div class="result-error">Error: ${result.error}</div>`;
+        }
     } catch (e) {
-        console.error("Failed to save CTO settings", e);
+        container.innerHTML = `<div class="result-error">Request failed: ${e.message}</div>`;
     }
 }
 
-// Initialize CTO settings
-document.getElementById('flow-cto-id').value = settings.cto_target_channel || '';
-document.getElementById('cto-auto-scan').checked = settings.cto_auto_scan === 'true';
-document.getElementById('cto-test-mode').checked = settings.cto_test_mode === 'true';
-if (settings.cto_scan_interval) {
-    const select = document.getElementById('cto-scan-interval');
-    const customContainer = document.getElementById('cto-custom-interval-container');
-    const customInput = document.getElementById('cto-custom-scan-interval');
+async function openWalletTxModal(senderAddress) {
+    const modal = document.getElementById('wallet-tx-modal');
+    const title = document.getElementById('wallet-tx-modal-title');
+    const subtitle = document.getElementById('wallet-tx-modal-subtitle');
+    const loader = document.getElementById('wallet-tx-loader');
+    const tbody = document.getElementById('wallet-tx-tbody');
     
-    if (select) {
-        const hasOption = Array.from(select.options).some(opt => opt.value === settings.cto_scan_interval);
-        if (hasOption) {
-            select.value = settings.cto_scan_interval;
-            if (customContainer) customContainer.classList.add('hidden');
+    if (!modal) return;
+    
+    title.textContent = "Sender Wallet Inspect (Level 2)";
+    subtitle.textContent = "Address: " + senderAddress;
+    tbody.innerHTML = '';
+    loader.style.display = 'block';
+    modal.classList.remove('hidden');
+    
+    try {
+        const res = await fetch('/api/wallet/address_transactions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ address: senderAddress })
+        });
+        const result = await res.json();
+        
+        loader.style.display = 'none';
+        
+        if (result.success) {
+            if (result.transactions.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 2rem; color:var(--text-muted);">No recent transactions found.</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = result.transactions.map(tx => {
+                const txDate = new Date(tx.timestamp * 1000).toLocaleString();
+                const explorerUrl = `https://solscan.io/tx/${tx.signature}`;
+                
+                let actionBadge = '';
+                if (tx.action === 'BUY') {
+                    actionBadge = `<span style="color:#34d399; background:rgba(16, 185, 129, 0.15); padding:2px 6px; border-radius:4px; font-weight:600; font-size:0.72rem;">🟢 BUY</span>`;
+                } else if (tx.action === 'SELL') {
+                    actionBadge = `<span style="color:#f87171; background:rgba(239, 68, 68, 0.15); padding:2px 6px; border-radius:4px; font-weight:600; font-size:0.72rem;">🔴 SELL</span>`;
+                } else {
+                    actionBadge = `<span style="color:#9ca3af; background:rgba(156,163,175,0.15); padding:2px 6px; border-radius:4px; font-weight:600; font-size:0.72rem;">⚪ ${tx.action.slice(0, 10)}</span>`;
+                }
+                
+                let tokenHtml = '-';
+                let tradeBtn = '';
+                if (tx.token_bought) {
+                    const dexscreenerUrl = `https://dexscreener.com/solana/${tx.token_bought}`;
+                    const displayName = tx.token_name ? tx.token_name : (tx.token_bought.slice(0,6) + '...' + tx.token_bought.slice(-4));
+                    tokenHtml = `
+                        <div style="display:flex; flex-direction:column; gap:2px;">
+                            <span style="font-weight:600; color:white; font-size:0.88rem;" title="${tx.token_bought}">${displayName}</span>
+                            <div style="display:flex; align-items:center; gap:6px; font-size:0.75rem;">
+                                <span style="font-family:monospace; color:#60a5fa; user-select:all;" title="${tx.token_bought}">${tx.token_bought.slice(0,6)}...${tx.token_bought.slice(-4)}</span>
+                                <button onclick="navigator.clipboard.writeText('${tx.token_bought}'); alert('Token Address copied!');" class="btn-icon" style="padding:2px; font-size:0.75rem;" title="Copy Address">📋</button>
+                            </div>
+                        </div>
+                    `;
+                    tradeBtn = `
+                        <a href="${dexscreenerUrl}" target="_blank" style="background: linear-gradient(135deg, #10b981, #059669); color: white; text-decoration: none; font-size: 0.72rem; padding: 3px 8px; border-radius: 4px; display: inline-flex; align-items: center; font-weight: 600; transition: all 0.2s; box-shadow: 0 0 8px rgba(16,185,129,0.3);" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+                            Trade ↗
+                        </a>
+                    `;
+                }
+                
+                const amountText = tx.amount_bought > 0 ? tx.amount_bought.toLocaleString(undefined, {maximumFractionDigits: 2}) : '-';
+                const costText = tx.value_exchanged || '-';
+                
+                return `
+                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                        <td style="padding:0.75rem 0.5rem; color:var(--text-muted); font-size:0.8rem; white-space:nowrap;">
+                            ${txDate}
+                        </td>
+                        <td style="padding:0.75rem 0.5rem; white-space:nowrap;">
+                            ${actionBadge}
+                        </td>
+                        <td style="padding:0.75rem 0.5rem;">
+                            ${tokenHtml}
+                        </td>
+                        <td style="padding:0.75rem 0.5rem; text-align:right; font-weight:500; color:${tx.action === 'BUY' ? '#34d399' : (tx.action === 'SELL' ? '#f87171' : 'white')};">
+                            ${amountText}
+                        </td>
+                        <td style="padding:0.75rem 0.5rem; text-align:right; color:white; font-weight:500;">
+                            ${costText}
+                        </td>
+                        <td style="padding:0.75rem 0.5rem; text-align:right; white-space:nowrap; display:flex; gap:6px; justify-content:flex-end; align-items:center;">
+                            ${tradeBtn}
+                            <a href="${explorerUrl}" target="_blank" style="background: rgba(59, 130, 246, 0.12); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.4); text-decoration: none; font-size: 0.72rem; padding: 2px 8px; border-radius: 4px; display: inline-flex; align-items: center; font-weight: 500; font-style: normal; transition: all 0.2s;">
+                                Tx ↗
+                            </a>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
         } else {
-            select.value = 'custom';
-            if (customContainer) customContainer.classList.remove('hidden');
-            if (customInput) customInput.value = settings.cto_scan_interval;
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding: 2rem; color:#ef4444;">Error: ${result.error}</td></tr>`;
         }
-    }
-    
-    const desc = document.getElementById('cto-auto-scan-desc');
-    if (desc) {
-        desc.textContent = `Automatically fetch & forward every ${settings.cto_scan_interval}s`;
+    } catch (e) {
+        loader.style.display = 'none';
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding: 2rem; color:#ef4444;">Request failed: ${e.message}</td></tr>`;
     }
 }
+
+function closeWalletTxModal() {
+    const modal = document.getElementById('wallet-tx-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function loadRealtimePayments() {
+    const container = document.getElementById('realtime-payments-container');
+    if (!container) return;
+    
+    try {
+        const res = await fetch('/api/wallet/payments_log');
+        const result = await res.json();
+        
+        if (result.success) {
+            if (result.payments.length === 0) {
+                container.innerHTML = '<div style="text-align:center; padding: 2rem; color: var(--text-muted);">No payments tracked yet. Background monitor checks every 10s.</div>';
+                return;
+            }
+            
+            container.innerHTML = result.payments.map((p, idx) => {
+                const dateStr = new Date(p.timestamp * 1000).toLocaleString();
+                const explorerUrl = `https://solscan.io/tx/${p.signature}`;
+                const amountUsdText = p.amount_usd ? `$${p.amount_usd.toFixed(2)}` : '$0.00';
+                const tokenDisplayName = p.token_name ? p.token_name : (p.mint === 'SOL' ? 'SOL' : p.mint.slice(0,6) + '...');
+                
+                return `
+                    <div class="result-success" style="padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.1); border-left: 3px solid #8b5cf6; margin-bottom: 0.5rem;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <span style="font-weight:600; color:#c084fc; font-size:0.82rem;">💳 Incoming Transfer</span>
+                            <span style="font-size:0.72rem; color:var(--text-muted);">${dateStr}</span>
+                        </div>
+                        <div style="font-size:0.95rem; font-weight:bold; color:white; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                            <span>+${p.amount.toFixed(4)} ${tokenDisplayName}</span>
+                            <span style="color:#c084fc; font-size:0.9rem;">${amountUsdText}</span>
+                        </div>
+                        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px; display:flex; flex-direction:column; gap:4px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span>Sender: <span style="font-family:monospace; color:#60a5fa; user-select:all;">${p.sender_address.slice(0,10)}...${p.sender_address.slice(-6)}</span></span>
+                                <button onclick="openWalletTxModal('${p.sender_address}')" class="btn-primary" style="padding: 3px 8px; font-size: 0.72rem; border-radius: 4px; box-shadow: none; background: rgba(139, 92, 246, 0.2); border: 1px solid rgba(139, 92, 246, 0.4); color: #c084fc;">
+                                    Inspect Wallet ↗
+                                </button>
+                            </div>
+                            <div>Receiver: <span style="font-family:monospace; color:white;">${p.tracked_address.slice(0,10)}...${p.tracked_address.slice(-6)}</span></div>
+                        </div>
+                        <div style="text-align:right; font-size:0.72rem; margin-top:6px; border-top:1px dashed rgba(255,255,255,0.05); padding-top:6px;">
+                            <a href="${explorerUrl}" target="_blank" style="color:#60a5fa; text-decoration:none; font-family:monospace;">View signature ${p.signature.slice(0,8)}... ↗</a>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+    } catch (e) {
+        console.error("Failed to load real-time payments", e);
+    }
+}
+
+async function toggleLiveScan() {
+    const currentActive = str(settings.cto_auto_scan).toLowerCase() === 'true';
+    const nextActive = !currentActive;
+    
+    try {
+        const res = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cto_auto_scan: nextActive ? 'true' : 'false' })
+        });
+        const result = await res.json();
+        if (result.success) {
+            settings.cto_auto_scan = nextActive ? 'true' : 'false';
+            updateLiveScanButtonUI();
+        } else {
+            alert('Failed to update live scan status: ' + result.error);
+        }
+    } catch (err) {
+        alert('Network error updating live scan: ' + err.message);
+    }
+}
+
+function updateLiveScanButtonUI() {
+    const btn = document.getElementById('btn-toggle-live-scan');
+    if (!btn) return;
+    const isActive = str(settings.cto_auto_scan).toLowerCase() === 'true';
+    if (isActive) {
+        btn.innerHTML = '🟢 Live Scan Active';
+        btn.style.background = 'rgba(16, 185, 129, 0.15)';
+        btn.style.borderColor = '#10b981';
+        btn.style.color = '#10b981';
+    } else {
+        btn.innerHTML = '⚫ Start Live Scan';
+        btn.style.background = 'rgba(255, 255, 255, 0.05)';
+        btn.style.borderColor = 'rgba(255, 255, 255, 0.15)';
+        btn.style.color = 'var(--text-muted)';
+    }
+}
+
+function str(val) {
+    return val === undefined || val === null ? '' : String(val);
+}
+
+// Initialization on load
+if (document.getElementById('tracker-monitored-address')) {
+    document.getElementById('tracker-monitored-address').value = settings.tracked_wallet_address || '';
+}
+if (document.getElementById('scan-wallet-address')) {
+    document.getElementById('scan-wallet-address').value = settings.tracked_wallet_address || '';
+}
+
+// Close Level 2 modal when clicking overlay
+document.addEventListener('click', function(e) {
+    const modal = document.getElementById('wallet-tx-modal');
+    if (modal && e.target === modal) {
+        closeWalletTxModal();
+    }
+});
+
+loadRealtimePayments();
+setInterval(loadRealtimePayments, 15000);
 
 renderWorkflows();
+updateLiveScanButtonUI();
