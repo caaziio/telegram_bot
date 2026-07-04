@@ -350,6 +350,11 @@ def init_db():
     
         # Add ON DELETE CASCADE support
         cursor.execute('PRAGMA foreign_keys = ON;')
+        
+        # Migrate invalid cto_workflow_id '1' setting to 'active_all'
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('cto_workflow_id', 'active_all')")
+        cursor.execute("UPDATE settings SET value = 'active_all' WHERE key = 'cto_workflow_id' AND value = '1'")
+        
         conn.commit()
 
 def get_settings():
@@ -1072,6 +1077,9 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
         wf = next((w for w in workflows if str(w.get('id')) == str(workflow_id)), None)
         if wf:
             workflows_to_evaluate.append(wf)
+        else:
+            print(f"[REAL-TIME SCANNER] Warning: Specified workflow ID {workflow_id} not found in database. Falling back to all active workflows.", flush=True)
+            workflows_to_evaluate = [w for w in workflows if w.get('is_active')]
     else:
         workflows_to_evaluate = [w for w in get_workflows() if w.get('is_active')]
         
@@ -1233,20 +1241,13 @@ def get_dex_payment_amount_usd(token_address, payment_timestamp, api_key):
     settings = get_settings()
     monitored_addresses = []
     
-    # Get monitored addresses (cto_dex_payment_address and tracked_wallet_address)
+    # Get only the cto_dex_payment_address (where DEX payments are actually sent)
+    # to avoid sequential loop timeouts when querying user wallets.
     cto_addr = settings.get('cto_dex_payment_address')
     if cto_addr and len(cto_addr.strip()) >= 32:
         monitored_addresses.append(cto_addr.strip())
-        
-    tracked_addr_str = settings.get('tracked_wallet_address')
-    if tracked_addr_str:
-        for a in tracked_addr_str.split(','):
-            a_clean = a.strip()
-            if len(a_clean) >= 32 and a_clean not in monitored_addresses:
-                monitored_addresses.append(a_clean)
                 
-    # We will try scanning the transaction history of the monitored addresses first,
-    # as they are the most likely recipients of the payment transaction.
+    # We will try scanning the transaction history of the cto_dex_payment_address first.
     # If none are configured, fallback to scanning the token address.
     addresses_to_scan = monitored_addresses if monitored_addresses else [token_address]
     
