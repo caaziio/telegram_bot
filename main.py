@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import time
 import requests
 from telethon import TelegramClient, events
+from telethon.sessions import StringSession
 from flask import Flask, render_template, request, jsonify
 from dotenv import load_dotenv
 import turso
@@ -849,6 +850,20 @@ def tg_verify_code():
             raise Exception("Code hash missing. Please request the code again.")
             
         await tg_client.sign_in(phone, code, phone_code_hash=phone_code_hash)
+        
+        # Save session string immediately upon successful verification
+        try:
+            new_session_str = tg_client.session.save()
+            if new_session_str:
+                with db_lock:
+                    conn = get_db()
+                    cursor = conn.cursor()
+                    cursor.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ('telegram_string_session', new_session_str))
+                    conn.commit()
+                print("[AUTH] Successfully saved Telegram StringSession to database after verification.")
+        except Exception as e:
+            print(f"[AUTH] Error saving StringSession after verification: {e}")
+            
         return True
 
     try:
@@ -930,7 +945,15 @@ def tg_logout():
         return jsonify({"success": False, "error": "Client not ready"})
         
     async def _logout():
-        await tg_client.log_out()
+        try:
+            await tg_client.log_out()
+        except Exception:
+            pass
+        with db_lock:
+            conn = get_db()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM settings WHERE key = 'telegram_string_session'")
+            conn.commit()
         return True
 
     try:
@@ -938,6 +961,85 @@ def tg_logout():
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
+
+def check_token_migration(ca, pairs):
+    """
+    Checks if a token has migrated and identifies where it is right now.
+    Returns:
+      is_migrated (bool): True if originated on bonding curve and graduated to a standard DEX
+      migration_detail (str): e.g. "Yes (to Raydium)", "No (Still on pump.fun)", or "No (Direct Launch on Raydium)"
+      current_location (str): e.g. "Raydium", "pump.fun", "Meteora", etc.
+    """
+    # 1. Determine if token originated on a bonding curve platform
+    is_bonding_curve = False
+    origin_platform = "pump.fun"
+    
+    if ca.lower().endswith("pump"):
+        is_bonding_curve = True
+        origin_platform = "pump.fun"
+    else:
+        for p in pairs:
+            d_id = p.get("dexId", "").lower()
+            if d_id == "pumpfun":
+                is_bonding_curve = True
+                origin_platform = "pump.fun"
+                break
+            elif d_id == "moonshot":
+                is_bonding_curve = True
+                origin_platform = "Moonshot"
+                break
+            elif d_id == "pumpswap":
+                is_bonding_curve = True
+                origin_platform = "Pumpswap"
+                break
+
+    # 2. Extract standard DEX pairs and bonding curve pairs
+    standard_dex_pair = None
+    for p in pairs:
+        d_id = p.get("dexId", "").lower()
+        if d_id not in ["pumpfun", "moonshot", "pumpswap"]:
+            if not standard_dex_pair:
+                standard_dex_pair = p
+                break # First pair has highest volume/liquidity
+                
+    # Format nice display names
+    dex_names = {
+        "pumpfun": "pump.fun",
+        "moonshot": "Moonshot",
+        "pumpswap": "Pumpswap",
+        "raydium": "Raydium",
+        "meteora": "Meteora",
+        "orca": "Orca",
+        "fluxbeam": "Fluxbeam",
+        "phoenix": "Phoenix",
+        "openbook": "Openbook",
+        "lifinity": "Lifinity",
+        "pancakeswap": "Pancakeswap"
+    }
+    
+    # 3. Determine current location (primary trading exchange)
+    if pairs:
+        primary_dex = pairs[0].get("dexId", "").lower()
+        current_location = dex_names.get(primary_dex, primary_dex.capitalize())
+    else:
+        current_location = "Unknown"
+        
+    # 4. Determine migration status and details
+    if is_bonding_curve:
+        if standard_dex_pair:
+            is_migrated = True
+            target_dex = standard_dex_pair.get("dexId", "").lower()
+            target_dex_name = dex_names.get(target_dex, target_dex.capitalize())
+            migration_detail = f"Yes (to {target_dex_name})"
+        else:
+            is_migrated = False
+            migration_detail = f"No (Still on {origin_platform})"
+    else:
+        # Direct launch on a standard DEX (not from a bonding curve)
+        is_migrated = False
+        migration_detail = f"No (Direct Launch on {current_location})"
+        
+    return is_migrated, migration_detail, current_location
 
 async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
     ca = item.get("tokenAddress")
@@ -1060,13 +1162,8 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
     perf_6h = float(price_change.get("h6", 0))
     perf_24h = float(price_change.get("h24", 0))
     
-    # Detect if token has migrated
-    is_migrated = False
-    for p in pairs:
-        dex_id = p.get("dexId", "").lower()
-        if dex_id in ["raydium", "meteora", "orca"]:
-            is_migrated = True
-            break
+    # Detect if token has migrated and current location
+    is_migrated, migration_detail, current_location = check_token_migration(ca, pairs)
 
     # Fetch DEX payment amount in USD
     payment_amount_usd = item.get("amount_usd")
@@ -1115,7 +1212,8 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
            f"┃ Age (Since Migration): {age_string}\n"
            f"┃ Order: 📦 {type_display}\n"
            f"┃ DEX Payment: ${payment_amount_usd:.2f} USD\n"
-           f"┃ Migrated: {'Yes' if is_migrated else 'No'}\n"
+           f"┃ Migrated: {migration_detail}\n"
+           f"┃ Current DEX: {current_location}\n"
            f"┃ Status: {status_emoji} {order_status.upper()}\n"
            f"┃ Order Placed: {payment_time_str}\n\n"
            f"📊 PRICE PERFORMANCE\n"
@@ -1970,12 +2068,8 @@ def get_wallet_history_transactions():
                                     perf_6h = float(price_change.get("h6", 0))
                                     perf_24h = float(price_change.get("h24", 0))
                                     
-                                    # migration
-                                    for p in pairs:
-                                        dex_id = p.get("dexId", "").lower()
-                                        if dex_id in ["raydium", "meteora", "orca"]:
-                                            is_migrated = True
-                                            break
+                                    # migration and current location
+                                    is_migrated, migration_detail, current_location = check_token_migration(token, pairs)
                             
                             payment_amount_usd = s["total_sent_usd"]
                             
@@ -1997,7 +2091,8 @@ def get_wallet_history_transactions():
                                    f"┃ Age (Since Migration): {age_string}\n"
                                    f"┃ Order: 📦 {type_display}\n"
                                    f"┃ DEX Payment: ${payment_amount_usd:.2f} USD\n"
-                                   f"┃ Migrated: {'Yes' if is_migrated else 'No'}\n"
+                                   f"┃ Migrated: {migration_detail}\n"
+                                   f"┃ Current DEX: {current_location}\n"
                                    f"┃ Status: ✅ APPROVED\n"
                                    f"┃ Order Placed: {payment_time_str}\n\n"
                                    f"📊 PRICE PERFORMANCE\n"
@@ -3064,7 +3159,7 @@ async def main():
                     with db_lock:
                         conn = get_db()
                         cursor = conn.cursor()
-                        cursor.execute("DELETE FROM settings WHERE key IN ('phone_code_hash')")
+                        cursor.execute("DELETE FROM settings WHERE key IN ('phone_code_hash', 'telegram_string_session')")
                         conn.commit()
                     
                     reset_requested = False
@@ -3092,7 +3187,16 @@ async def main():
                     try:
                         current_api_id = api_id
                         current_api_hash = api_hash
-                        tg_client = TelegramClient(session_path, int(api_id), api_hash)
+                        
+                        # Retrieve saved string session if available
+                        string_session_val = settings.get('telegram_string_session', '').strip()
+                        if string_session_val:
+                            print("Found saved Telegram session in database. Using StringSession...")
+                            tg_client = TelegramClient(StringSession(string_session_val), int(api_id), api_hash)
+                        else:
+                            print("No saved session in database. Using file-based session...")
+                            tg_client = TelegramClient(session_path, int(api_id), api_hash)
+                            
                         await tg_client.connect()
                     except Exception as e:
                         print(f"Failed to initialize Telegram Client: {e}")
@@ -3102,6 +3206,22 @@ async def main():
 
                 if await tg_client.is_user_authorized():
                     print("Userbot is authorized and running!")
+                    
+                    # Auto-persist session to database if not already saved
+                    string_session_val = settings.get('telegram_string_session', '').strip()
+                    if not string_session_val:
+                        try:
+                            new_session_str = tg_client.session.save()
+                            if new_session_str:
+                                with db_lock:
+                                    conn = get_db()
+                                    cursor = conn.cursor()
+                                    cursor.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ('telegram_string_session', new_session_str))
+                                    conn.commit()
+                                print("Successfully persisted Telegram session string to database settings!")
+                        except Exception as e:
+                            print(f"Error persisting session string: {e}")
+                            
                     if not handlers_registered:
                         register_handlers(tg_client)
                         handlers_registered = True
