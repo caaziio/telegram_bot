@@ -633,6 +633,19 @@ if (document.getElementById('setting-polling-interval')) {
 const webhookUrlInput = document.getElementById('setting-helius-webhook-url');
 if (webhookUrlInput) {
     webhookUrlInput.value = window.location.origin + '/api/helius/webhook';
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        const warningDiv = document.createElement('div');
+        warningDiv.style.marginTop = '8px';
+        warningDiv.style.padding = '8px 12px';
+        warningDiv.style.background = 'rgba(245, 158, 11, 0.1)';
+        warningDiv.style.border = '1px solid rgba(245, 158, 11, 0.3)';
+        warningDiv.style.borderRadius = '6px';
+        warningDiv.style.color = '#f59e0b';
+        warningDiv.style.fontSize = '0.8rem';
+        warningDiv.style.lineHeight = '1.4';
+        warningDiv.innerHTML = '⚠️ <strong>Localhost Detected:</strong> Helius cannot send webhooks to a local URL. You must expose port 5000 using a tunnel (e.g., <code>ngrok http 5000</code>) and paste your public tunnel URL in Helius Developer Portal pointing to <code>/api/helius/webhook</code>.';
+        webhookUrlInput.parentNode.appendChild(warningDiv);
+    }
 }
 
 let availableChannels = [];
@@ -775,6 +788,7 @@ async function saveHeliusSettings(e) {
             settings.wallet_tracker_poll_enabled = walletPollEnabled;
             settings.helius_poll_enabled = heliusPollEnabled;
             settings.polling_interval = pollingInterval;
+            updateTrackerStatusUI();
             alert('Helius settings saved successfully!');
         } else {
             alert('Error saving Helius settings: ' + result.error);
@@ -804,8 +818,15 @@ async function saveTrackedAddress(event) {
         if (result.success) {
             settings.tracked_wallet_address = address;
             document.getElementById('scan-wallet-address').value = address;
-            alert("Tracked address saved. Monitoring started in background!");
+            
+            if (str(settings.cto_auto_scan).toLowerCase() !== 'true') {
+                alert("Tracked address saved. Make sure to click 'Start Live Scan' in the header to start monitoring!");
+            } else {
+                alert("Tracked address saved. Monitoring started in background!");
+            }
+            
             loadRealtimePayments();
+            updateTrackerStatusUI();
         } else {
             alert("Error saving tracked address: " + result.error);
         }
@@ -1130,6 +1151,7 @@ async function toggleLiveScan() {
         if (result.success) {
             settings.cto_auto_scan = nextActive ? 'true' : 'false';
             updateLiveScanButtonUI();
+            updateTrackerStatusUI();
         } else {
             alert('Failed to update live scan status: ' + result.error);
         }
@@ -1152,6 +1174,25 @@ function updateLiveScanButtonUI() {
         btn.style.background = 'rgba(255, 255, 255, 0.05)';
         btn.style.borderColor = 'rgba(255, 255, 255, 0.15)';
         btn.style.color = 'var(--text-muted)';
+    }
+}
+
+function updateTrackerStatusUI() {
+    const indicator = document.getElementById('tracker-status-indicator');
+    if (!indicator) return;
+    const hasAddress = settings.tracked_wallet_address && settings.tracked_wallet_address.trim().length >= 32;
+    const isPolling = String(settings.wallet_tracker_poll_enabled).toLowerCase() === 'true';
+    const isLiveScan = String(settings.cto_auto_scan).toLowerCase() === 'true';
+    if (hasAddress && (isPolling || isLiveScan)) {
+        indicator.innerHTML = 'Active';
+        indicator.style.background = 'rgba(16, 185, 129, 0.15)';
+        indicator.style.borderColor = '#10b981';
+        indicator.style.color = '#10b981';
+    } else {
+        indicator.innerHTML = 'Inactive';
+        indicator.style.background = 'rgba(255, 255, 255, 0.05)';
+        indicator.style.borderColor = 'rgba(255, 255, 255, 0.15)';
+        indicator.style.color = 'var(--text-muted)';
     }
 }
 
@@ -1180,3 +1221,4 @@ setInterval(loadRealtimePayments, 15000);
 
 renderWorkflows();
 updateLiveScanButtonUI();
+updateTrackerStatusUI();

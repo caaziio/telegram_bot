@@ -132,7 +132,15 @@ def get_token_metadata(mint):
         
     return ""
 
-DB_PATH = os.path.join(current_dir, 'db/bot.sqlite')
+PERSISTENT_DATA_DIR = os.environ.get("PERSISTENT_DATA_DIR")
+if not PERSISTENT_DATA_DIR and os.path.exists("/data") and os.access("/data", os.W_OK):
+    PERSISTENT_DATA_DIR = "/data"
+
+if PERSISTENT_DATA_DIR:
+    DB_PATH = os.path.join(PERSISTENT_DATA_DIR, 'bot.sqlite')
+else:
+    DB_PATH = os.path.join(current_dir, 'db/bot.sqlite')
+
 TURSO_URL = os.environ.get("TURSO_DATABASE_URL")
 TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
 
@@ -150,9 +158,7 @@ class CustomRow(dict):
 def custom_row_factory(cursor, row):
     return CustomRow(cursor, row)
 
-DB_PATH = os.path.join(current_dir, 'db/bot.sqlite')
-TURSO_URL = os.environ.get("TURSO_DATABASE_URL")
-TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
+# Resolved above based on PERSISTENT_DATA_DIR
 
 db_lock = threading.RLock()
 global_conn = None
@@ -354,6 +360,10 @@ def init_db():
         # Migrate invalid cto_workflow_id '1' setting to 'active_all'
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('cto_workflow_id', 'active_all')")
         cursor.execute("UPDATE settings SET value = 'active_all' WHERE key = 'cto_workflow_id' AND value = '1'")
+        
+        # Set defaults for polling options to false as webhooks are preferred to save Helius credits
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('wallet_tracker_poll_enabled', 'false')")
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('helius_poll_enabled', 'false')")
         
         conn.commit()
 
@@ -1506,10 +1516,11 @@ async def wallet_tracker_polling_loop():
     while True:
         try:
             settings = get_settings()
+            is_auto = str(settings.get('cto_auto_scan', 'false')).lower() == 'true'
             poll_enabled = settings.get('wallet_tracker_poll_enabled', 'false').lower() == 'true'
             poll_interval = int(settings.get('polling_interval', '10'))
             
-            if not poll_enabled:
+            if not is_auto or not poll_enabled:
                 await asyncio.sleep(poll_interval)
                 continue
                 
@@ -1597,8 +1608,23 @@ async def wallet_tracker_polling_loop():
                                                 ''', (tracked_address, from_addr, token_amount, mint, sig, timestamp))
                                                 conn.commit()
                                                 print(f"[WALLET TRACKER] Logged real-time token payment: {token_amount} {mint[:8]}... from {from_addr} to {tracked_address}", flush=True)
-                                                # Trigger background history tracing and filtering
-                                                asyncio.create_task(process_payment_and_forward(from_addr, timestamp, amount_usd))
+                                                
+                                                # If it is a custom token, forward it directly. Otherwise trace payer history.
+                                                if mint not in ('So11111111111111111111111111111111111111112', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'Es9vMFrzaypmko8L7jV8YW156HCfaNuDY8jNH5KB3C1d', 'SOL'):
+                                                    print(f"[WALLET TRACKER] Custom token detected: {mint}. Forwarding directly to filters.", flush=True)
+                                                    target = settings.get('cto_target_channel', '')
+                                                    wf_id = settings.get('cto_workflow_id')
+                                                    t_mode = settings.get('cto_test_mode', 'false').lower() == 'true'
+                                                    item = {
+                                                        "tokenAddress": mint,
+                                                        "order_type": "Tracked Wallet Swap",
+                                                        "order_status": "detected",
+                                                        "payment_timestamp": timestamp * 1000,
+                                                        "amount_usd": amount_usd
+                                                    }
+                                                    asyncio.create_task(process_single_cto_item(item, target, wf_id, t_mode))
+                                                else:
+                                                    asyncio.create_task(process_payment_and_forward(from_addr, timestamp, amount_usd))
                                             except sqlite3.IntegrityError:
                                                 pass
                     else:
@@ -2342,6 +2368,11 @@ def helius_webhook():
             return jsonify({"status": "ignored"}), 400
             
         settings = get_settings()
+        is_auto = str(settings.get('cto_auto_scan', 'false')).lower() == 'true'
+        if not is_auto:
+            print("[HELIUS WEBHOOK] Ignored webhook transaction because live scan is inactive.", flush=True)
+            return jsonify({"status": "ignored", "reason": "live scan inactive"}), 200
+            
         monitored_address = settings.get('cto_dex_payment_address')
         tracked_address_str = settings.get('tracked_wallet_address')
         
@@ -2401,7 +2432,23 @@ def helius_webhook():
                                 ''', (tracked_address, from_addr, token_amount, mint, sig, timestamp))
                                 conn.commit()
                                 print(f"[HELIUS WEBHOOK] Logged real-time tracked token payment: {token_amount} {mint[:8]}... from {from_addr} to {tracked_address}", flush=True)
-                                run_async_coroutine(process_payment_and_forward(from_addr, timestamp, amount_usd))
+                                
+                                # If it is a custom token, forward it directly. Otherwise trace payer history.
+                                if mint not in ('So11111111111111111111111111111111111111112', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'Es9vMFrzaypmko8L7jV8YW156HCfaNuDY8jNH5KB3C1d', 'SOL'):
+                                    print(f"[HELIUS WEBHOOK] Custom token detected: {mint}. Forwarding directly to filters.", flush=True)
+                                    target = settings.get('cto_target_channel', '')
+                                    wf_id = settings.get('cto_workflow_id')
+                                    t_mode = settings.get('cto_test_mode', 'false').lower() == 'true'
+                                    item = {
+                                        "tokenAddress": mint,
+                                        "order_type": "Tracked Wallet Swap",
+                                        "order_status": "detected",
+                                        "payment_timestamp": timestamp * 1000,
+                                        "amount_usd": amount_usd
+                                    }
+                                    run_async_coroutine(process_single_cto_item(item, target, wf_id, t_mode))
+                                else:
+                                    run_async_coroutine(process_payment_and_forward(from_addr, timestamp, amount_usd))
                             except sqlite3.IntegrityError:
                                 pass
                                 
@@ -2493,18 +2540,18 @@ async def helius_polling_loop():
     while True:
         try:
             settings = get_settings()
+            is_auto = str(settings.get('cto_auto_scan', 'false')).lower() == 'true'
             poll_enabled = settings.get('helius_poll_enabled', 'false').lower() == 'true'
             poll_interval = int(settings.get('polling_interval', '10'))
             
-            if not poll_enabled:
+            if not is_auto or not poll_enabled:
                 await asyncio.sleep(poll_interval)
                 continue
                 
             api_key = settings.get('helius_api_key')
             payment_address = settings.get('cto_dex_payment_address')
-            is_auto = str(settings.get('cto_auto_scan', 'false')).lower() == 'true'
             
-            if api_key and payment_address and is_auto:
+            if api_key and payment_address:
                 # Check signatures first via standard RPC (1 credit cost)
                 sigs = await get_latest_signatures(payment_address, api_key, limit=10)
                 
@@ -2808,8 +2855,9 @@ async def cto_auto_scanner_loop():
         await asyncio.sleep(interval)
 
 def run_flask_app():
-    print("Starting Web Dashboard on http://localhost:5000")
-    app.run(host='0.0.0.0', port=5000, use_reloader=False)
+    port = int(os.environ.get("PORT", 5000))
+    print(f"Starting Web Dashboard on http://localhost:{port}")
+    app.run(host='0.0.0.0', port=port, use_reloader=False)
 
 def normalize_channel_id(raw_id):
     """Strip the Telegram -100 prefix to get the bare channel ID for comparison.
@@ -2937,6 +2985,10 @@ async def main():
                 api_id = str(settings.get('api_id', '')).strip()
                 api_hash = str(settings.get('api_hash', '')).strip()
                 
+                session_path = 'userbot_session'
+                if PERSISTENT_DATA_DIR:
+                    session_path = os.path.join(PERSISTENT_DATA_DIR, 'userbot_session')
+
                 # Handle Reset Request
                 if reset_requested:
                     print("Reset requested! Clearing session...")
@@ -2944,8 +2996,9 @@ async def main():
                         await tg_client.disconnect()
                         tg_client = None
                     handlers_registered = False
-                    if os.path.exists('userbot_session.session'):
-                        os.remove('userbot_session.session')
+                    session_file = session_path + '.session'
+                    if os.path.exists(session_file):
+                        os.remove(session_file)
                     
                     with db_lock:
                         conn = get_db()
@@ -2978,7 +3031,7 @@ async def main():
                     try:
                         current_api_id = api_id
                         current_api_hash = api_hash
-                        tg_client = TelegramClient('userbot_session', int(api_id), api_hash)
+                        tg_client = TelegramClient(session_path, int(api_id), api_hash)
                         await tg_client.connect()
                     except Exception as e:
                         print(f"Failed to initialize Telegram Client: {e}")
