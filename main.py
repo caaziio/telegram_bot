@@ -132,6 +132,34 @@ def get_token_metadata(mint):
         
     return ""
 
+async def safe_send_message(client, target, message):
+    """Sends a Telegram message to target entity, automatically handling cache misses
+    by fetching dialogs if the entity isn't cached yet.
+    """
+    if not client or not target:
+        return
+        
+    target_entity = int(target) if str(target).lstrip('-').isdigit() else target
+    
+    try:
+        # Try to send message directly using current entity cache
+        await client.send_message(target_entity, message)
+    except Exception as e:
+        err_str = str(e).lower()
+        if "not registered" in err_str or "could not find" in err_str or "invalid" in err_str or "chat_id_invalid" in err_str:
+            print(f"[TELEGRAM SEND] Target {target} not found in entity cache. Fetching dialogs to reload cache...", flush=True)
+            try:
+                # Force loading dialogs to populate Telethon's internal cache
+                await client.get_dialogs(limit=100)
+                # Retry sending
+                await client.send_message(target_entity, message)
+                print(f"[TELEGRAM SEND] Successfully sent message to {target} after reloading cache.", flush=True)
+            except Exception as retry_err:
+                print(f"[TELEGRAM SEND] Retry sending failed: {retry_err}", flush=True)
+                raise retry_err
+        else:
+            raise e
+
 PERSISTENT_DATA_DIR = os.environ.get("PERSISTENT_DATA_DIR")
 if not PERSISTENT_DATA_DIR and os.path.exists("/data") and os.access("/data", os.W_OK):
     PERSISTENT_DATA_DIR = "/data"
@@ -1132,9 +1160,8 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
             if final_target:
                 passed_channels.append(final_target)
                 if tg_client:
-                    target_entity = int(final_target) if str(final_target).lstrip('-').isdigit() else final_target
                     try:
-                        await tg_client.send_message(target_entity, send_msg)
+                        await safe_send_message(tg_client, final_target, send_msg)
                         print(f"[REAL-TIME SCANNER] Token {ca} successfully forwarded to target: {final_target} via workflow {wf.get('name')}", flush=True)
                     except Exception as e:
                         print(f"[REAL-TIME SCANNER] Failed to send to {final_target}: {e}", flush=True)
@@ -1606,8 +1633,11 @@ async def wallet_tracker_polling_loop():
                                                 print(f"[WALLET TRACKER] Logged real-time native payment: {amount_sol} SOL from {from_addr} to {tracked_address}", flush=True)
                                                 # Trigger background history tracing and filtering
                                                 asyncio.create_task(process_payment_and_forward(from_addr, timestamp, amount_usd))
-                                            except sqlite3.IntegrityError:
-                                                pass
+                                            except Exception as e:
+                                                if "unique" in str(e).lower() or "integrity" in str(e).lower():
+                                                    pass
+                                                else:
+                                                    print(f"[WALLET TRACKER] Error inserting native transfer: {e}", flush=True)
                                                 
                                 # Process token transfers
                                 for transfer in tx.get('tokenTransfers', []):
@@ -1645,8 +1675,11 @@ async def wallet_tracker_polling_loop():
                                                     asyncio.create_task(process_single_cto_item(item, target, wf_id, t_mode))
                                                 else:
                                                     asyncio.create_task(process_payment_and_forward(from_addr, timestamp, amount_usd))
-                                            except sqlite3.IntegrityError:
-                                                pass
+                                            except Exception as e:
+                                                if "unique" in str(e).lower() or "integrity" in str(e).lower():
+                                                    pass
+                                                else:
+                                                    print(f"[WALLET TRACKER] Error inserting token transfer: {e}", flush=True)
                     else:
                         print(f"[WALLET TRACKER POLLING] Helius API error {r.status_code} for {tracked_address}: {r.text.strip()}", flush=True)
         except Exception as e:
@@ -1989,10 +2022,9 @@ def get_wallet_history_transactions():
                                     t_username = wf_target_channel or ''
                                     final_target = t_id if t_id else t_username
                                     if final_target:
-                                        target_entity = int(final_target) if str(final_target).lstrip('-').isdigit() else final_target
                                         try:
                                             send_text = _ if _ else msg
-                                            await tg_client.send_message(target_entity, send_text)
+                                            await safe_send_message(tg_client, final_target, send_text)
                                             print(f"[TEST RUNNER] Successfully forwarded passing test token {token} to {final_target}", flush=True)
                                             s["test_reason"] = f"Passed & Forwarded to Telegram!"
                                         except Exception as tg_err:
@@ -2437,8 +2469,11 @@ def helius_webhook():
                                 conn.commit()
                                 print(f"[HELIUS WEBHOOK] Logged real-time tracked native payment: {amount_sol} SOL from {from_addr} to {tracked_address}", flush=True)
                                 run_async_coroutine(process_payment_and_forward(from_addr, timestamp, amount_usd))
-                            except sqlite3.IntegrityError:
-                                pass
+                            except Exception as e:
+                                if "unique" in str(e).lower() or "integrity" in str(e).lower():
+                                    pass
+                                else:
+                                    print(f"[HELIUS WEBHOOK] Error inserting native transfer: {e}", flush=True)
                                 
                 # Process token transfers
                 for transfer in tx.get('tokenTransfers', []):
@@ -2477,8 +2512,11 @@ def helius_webhook():
                                     run_async_coroutine(process_single_cto_item(item, target, wf_id, t_mode))
                                 else:
                                     run_async_coroutine(process_payment_and_forward(from_addr, timestamp, amount_usd))
-                            except sqlite3.IntegrityError:
-                                pass
+                            except Exception as e:
+                                if "unique" in str(e).lower() or "integrity" in str(e).lower():
+                                    pass
+                                else:
+                                    print(f"[HELIUS WEBHOOK] Error inserting token transfer: {e}", flush=True)
                                 
             # 2. Process DexScreener monitored payment address
             if monitored_address:
@@ -2973,13 +3011,7 @@ def register_handlers(client):
                     if target:
                         print(f"    Sending to target: '{target}'")
                         try:
-                            # If target is string representation of int (e.g. "-100...")
-                            if target.lstrip('-').isdigit():
-                                target_entity = int(target)
-                            else:
-                                target_entity = target
-                            
-                            await client.send_message(target_entity, modified_text)
+                            await safe_send_message(client, target, modified_text)
                             print(f"    Successfully forwarded to {target}")
                         except Exception as e:
                             print(f"    Failed to forward message to {target}: {e}")
