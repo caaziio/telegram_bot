@@ -168,13 +168,28 @@ def pull_database_if_needed(conn):
     global last_pull_time
     if TURSO_URL and (TURSO_URL.startswith("libsql://") or TURSO_URL.startswith("https://")):
         now = time.time()
-        if now - last_pull_time >= 10:
+        if now - last_pull_time >= 60:
             with db_lock:
                 try:
                     conn.pull()
                     last_pull_time = now
                 except Exception as e:
-                    print(f"[TURSO] Warning: Failed to pull remote updates: {e}", flush=True)
+                    if "busy" not in str(e).lower():
+                        print(f"[TURSO] Warning: Failed to pull remote updates: {e}", flush=True)
+
+async def turso_sync_loop():
+    if not TURSO_URL or not (TURSO_URL.startswith("libsql://") or TURSO_URL.startswith("https://")):
+        return
+    print("[TURSO] Started background periodic database sync loop.", flush=True)
+    while True:
+        await asyncio.sleep(60)
+        try:
+            with db_lock:
+                conn = get_db()
+                await asyncio.to_thread(conn.pull)
+        except Exception as e:
+            if "busy" not in str(e).lower():
+                print(f"[TURSO] Warning: Failed to pull remote updates in background: {e}", flush=True)
     
 def get_db():
     global global_conn, last_pull_time
@@ -191,6 +206,13 @@ def get_db():
             import turso.sync
             # turso.sync only allows ONE connection per file, so we make it global
             global_conn = turso.sync.connect(DB_PATH, remote_url=TURSO_URL, auth_token=TURSO_TOKEN)
+            
+            # Set busy timeout on the local sqlite database for Turso connection
+            try:
+                cursor = global_conn.cursor()
+                cursor.execute("PRAGMA busy_timeout = 10000;")
+            except Exception as e:
+                print(f"[TURSO] Warning: Failed to set busy_timeout: {e}", flush=True)
             
             # Pull latest changes from remote Turso database on startup
             try:
@@ -370,7 +392,6 @@ def init_db():
 def get_settings():
     with db_lock:
         conn = get_db()
-        pull_database_if_needed(conn)
         cursor = conn.cursor()
         settings = {}
         for row in cursor.execute('SELECT key, value FROM settings').fetchall():
@@ -385,7 +406,6 @@ def get_settings():
 def get_workflows():
     with db_lock:
         conn = get_db()
-        pull_database_if_needed(conn)
         conn.row_factory = custom_row_factory
         cursor = conn.cursor()
         
@@ -2367,6 +2387,14 @@ def helius_webhook():
         if not isinstance(transactions, list):
             return jsonify({"status": "ignored"}), 400
             
+        # Debug: Save raw webhook payload to a local file for inspection
+        try:
+            import json
+            with open("debug_webhook.json", "w") as f:
+                json.dump(transactions, f, indent=2)
+        except Exception as e:
+            print(f"[HELIUS WEBHOOK] Error saving raw webhook data: {e}", flush=True)
+            
         settings = get_settings()
         is_auto = str(settings.get('cto_auto_scan', 'false')).lower() == 'true'
         if not is_auto:
@@ -2976,6 +3004,7 @@ async def main():
     # asyncio.create_task(cto_auto_scanner_loop())
     asyncio.create_task(helius_polling_loop())
     asyncio.create_task(wallet_tracker_polling_loop())
+    asyncio.create_task(turso_sync_loop())
     
     try:
         while True:
