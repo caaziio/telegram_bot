@@ -974,7 +974,7 @@ def tg_logout():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
-def check_token_migration(ca, pairs):
+async def check_token_migration(ca, pairs):
     """
     Checks if a token has migrated and identifies where it is right now.
     Returns:
@@ -1005,15 +1005,6 @@ def check_token_migration(ca, pairs):
                 origin_platform = "Pumpswap"
                 break
 
-    # 2. Extract standard DEX pairs and bonding curve pairs
-    standard_dex_pair = None
-    for p in pairs:
-        d_id = p.get("dexId", "").lower()
-        if d_id not in ["pumpfun", "moonshot", "pumpswap"]:
-            if not standard_dex_pair:
-                standard_dex_pair = p
-                break # First pair has highest volume/liquidity
-                
     # Format nice display names
     dex_names = {
         "pumpfun": "pump.fun",
@@ -1029,27 +1020,71 @@ def check_token_migration(ca, pairs):
         "pancakeswap": "Pancakeswap"
     }
     
-    # 3. Determine current location (primary trading exchange)
+    # 2. Determine current location (primary trading exchange)
     if pairs:
         primary_dex = pairs[0].get("dexId", "").lower()
         current_location = dex_names.get(primary_dex, primary_dex.capitalize())
     else:
+        primary_dex = ""
         current_location = "Unknown"
         
+    # 3. Check for pump.fun bonding curve completion on-chain to handle DexScreener lag.
+    is_completed_on_chain = False
+    if is_bonding_curve and origin_platform == "pump.fun":
+        bonding_curve_address = None
+        for p in pairs:
+            if p.get("dexId", "").lower() == "pumpfun":
+                bonding_curve_address = p.get("pairAddress")
+                break
+        
+        if bonding_curve_address:
+            settings = get_settings()
+            api_key = settings.get('helius_api_key')
+            if api_key:
+                url = f"https://mainnet.helius-rpc.com/?api-key={api_key}"
+                payload = {
+                    "jsonrpc": "2.0",
+                    "id": "get-bonding-curve",
+                    "method": "getAccountInfo",
+                    "params": [
+                        bonding_curve_address,
+                        {
+                            "encoding": "base64"
+                        }
+                    ]
+                }
+                headers = {"Content-Type": "application/json"}
+                try:
+                    r = await asyncio.to_thread(requests.post, url, json=payload, headers=headers, timeout=5)
+                    if r.status_code == 200:
+                        res = r.json()
+                        value = res.get("result", {}).get("value")
+                        if value and "data" in value:
+                            data_b64 = value["data"][0]
+                            import base64
+                            data_bytes = base64.b64decode(data_b64)
+                            if len(data_bytes) >= 49:
+                                # complete is a bool (1 byte) at offset 48 (0x30)
+                                is_completed_on_chain = (data_bytes[48] == 1)
+                                if is_completed_on_chain:
+                                    print(f"[MIGRATION] On-chain check confirmed migration for {ca}.", flush=True)
+                except Exception as e:
+                    print(f"[MIGRATION] Error verifying bonding curve on-chain: {e}", flush=True)
+
     # 4. Determine migration status and details
-    if is_bonding_curve:
-        if standard_dex_pair:
-            is_migrated = True
-            target_dex = standard_dex_pair.get("dexId", "").lower()
-            target_dex_name = dex_names.get(target_dex, target_dex.capitalize())
-            migration_detail = f"Yes (to {target_dex_name})"
-        else:
-            is_migrated = False
-            migration_detail = f"No (Still on {origin_platform})"
-    else:
-        # Direct launch on a standard DEX (not from a bonding curve)
+    if is_completed_on_chain:
+        is_migrated = True
+        current_location = "Raydium"
+        migration_detail = "Yes (to Raydium)"
+    elif primary_dex == "pumpfun":
         is_migrated = False
-        migration_detail = f"No (Direct Launch on {current_location})"
+        migration_detail = "No (Still on pump.fun)"
+    elif primary_dex == "":
+        is_migrated = False
+        migration_detail = "No (Unknown)"
+    else:
+        is_migrated = True
+        migration_detail = f"Yes (to {current_location})"
         
     return is_migrated, migration_detail, current_location
 
@@ -1157,16 +1192,47 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
     else:
         mc_str = "Unknown"
     
-    pair_created_at = primary_pair.get("pairCreatedAt")
-    age_string = "Unknown"
-    if pair_created_at:
+    # Calculate Age (From creation) and Age (After migration)
+    age_creation_str = "Unknown"
+    age_migration_str = "0"
+    
+    # Age (From creation) - oldest pair creation time
+    creation_times = [p.get("pairCreatedAt") for p in pairs if p.get("pairCreatedAt")]
+    if creation_times:
+        oldest_created_at = min(creation_times)
         current_time_ms = int(time.time() * 1000)
-        age_ms = current_time_ms - pair_created_at
-        age_minutes = int(age_ms / (1000 * 60))
-        if age_minutes < 60:
-            age_string = f"{age_minutes}m"
+        age_creation_ms = current_time_ms - oldest_created_at
+        if age_creation_ms >= 0:
+            age_creation_minutes = int(age_creation_ms / (1000 * 60))
+            if age_creation_minutes < 60:
+                age_creation_str = f"{age_creation_minutes}m"
+            else:
+                age_creation_str = f"{int(age_creation_minutes / 60)}h {age_creation_minutes % 60}m"
+                
+    # Detect if token has migrated and current location
+    is_migrated, migration_detail, current_location = await check_token_migration(ca, pairs)
+
+    # Age (After migration) - creation time of the standard DEX pair
+    if is_migrated:
+        standard_dex_pair = None
+        for p in pairs:
+            d_id = p.get("dexId", "").lower()
+            if d_id not in ["pumpfun", "moonshot", "pumpswap"]:
+                standard_dex_pair = p
+                break
+        
+        if standard_dex_pair and standard_dex_pair.get("pairCreatedAt"):
+            migration_created_at = standard_dex_pair.get("pairCreatedAt")
+            current_time_ms = int(time.time() * 1000)
+            age_migration_ms = current_time_ms - migration_created_at
+            if age_migration_ms >= 0:
+                age_migration_minutes = int(age_migration_ms / (1000 * 60))
+                if age_migration_minutes < 60:
+                    age_migration_str = f"{age_migration_minutes}m"
+                else:
+                    age_migration_str = f"{int(age_migration_minutes / 60)}h {age_migration_minutes % 60}m"
         else:
-            age_string = f"{int(age_minutes / 60)}h {age_minutes % 60}m"
+            age_migration_str = "0"
             
     price_change = primary_pair.get("priceChange", {})
     perf_5m = float(price_change.get("m5", 0))
@@ -1174,9 +1240,6 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
     perf_6h = float(price_change.get("h6", 0))
     perf_24h = float(price_change.get("h24", 0))
     
-    # Detect if token has migrated and current location
-    is_migrated, migration_detail, current_location = check_token_migration(ca, pairs)
-
     # Fetch DEX payment amount in USD
     payment_amount_usd = item.get("amount_usd")
     if payment_amount_usd is None or payment_amount_usd == 0.0:
@@ -1190,7 +1253,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
     token_info["platform"] = chain_id
     token_info["migration_status"] = migration_status_formatted
     token_info["market_cap"] = mc_str
-    token_info["age"] = age_string
+    token_info["age"] = age_creation_str
     token_info["perf_5m"] = perf_5m
     token_info["perf_1h"] = perf_1h
     token_info["perf_6h"] = perf_6h
@@ -1221,7 +1284,8 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
            f"🧬 CA: {ca}\n"
            f"━━━━━━━━━━━\n\n"
            f"⏱️ TOKEN TIMINGS\n"
-           f"┃ Age (Since Migration): {age_string}\n"
+           f"┃ Age (From creation): {age_creation_str}\n"
+           f"┃ Age (After migration): {age_migration_str}\n"
            f"┃ Order: 📦 {type_display}\n"
            f"┃ DEX Payment: ${payment_amount_usd:.2f} USD\n"
            f"┃ Migrated: {migration_detail}\n"
@@ -2062,16 +2126,43 @@ def get_wallet_history_transactions():
                                         else:
                                             mc_str = f"${raw_mc:.2f}"
                                             
-                                    # age
-                                    pair_created_at = primary_pair.get("pairCreatedAt")
-                                    if pair_created_at:
+                                    # Age (From creation) - oldest pair creation time
+                                    creation_times = [p.get("pairCreatedAt") for p in pairs if p.get("pairCreatedAt")]
+                                    if creation_times:
+                                        oldest_created_at = min(creation_times)
                                         current_time_ms = int(time.time() * 1000)
-                                        age_ms = current_time_ms - pair_created_at
-                                        age_minutes = int(age_ms / (1000 * 60))
-                                        if age_minutes < 60:
-                                            age_string = f"{age_minutes}m"
+                                        age_creation_ms = current_time_ms - oldest_created_at
+                                        if age_creation_ms >= 0:
+                                            age_creation_minutes = int(age_creation_ms / (1000 * 60))
+                                            if age_creation_minutes < 60:
+                                                age_creation_str = f"{age_creation_minutes}m"
+                                            else:
+                                                age_creation_str = f"{int(age_creation_minutes / 60)}h {age_creation_minutes % 60}m"
+                                                
+                                    # migration and current location
+                                    is_migrated, migration_detail, current_location = await check_token_migration(token, pairs)
+                                    
+                                    # Age (After migration) - creation time of the standard DEX pair
+                                    if is_migrated:
+                                        standard_dex_pair = None
+                                        for p in pairs:
+                                            d_id = p.get("dexId", "").lower()
+                                            if d_id not in ["pumpfun", "moonshot", "pumpswap"]:
+                                                standard_dex_pair = p
+                                                break
+                                        
+                                        if standard_dex_pair and standard_dex_pair.get("pairCreatedAt"):
+                                            migration_created_at = standard_dex_pair.get("pairCreatedAt")
+                                            current_time_ms = int(time.time() * 1000)
+                                            age_migration_ms = current_time_ms - migration_created_at
+                                            if age_migration_ms >= 0:
+                                                age_migration_minutes = int(age_migration_ms / (1000 * 60))
+                                                if age_migration_minutes < 60:
+                                                    age_migration_str = f"{age_migration_minutes}m"
+                                                else:
+                                                    age_migration_str = f"{int(age_migration_minutes / 60)}h {age_migration_minutes % 60}m"
                                         else:
-                                            age_string = f"{int(age_minutes / 60)}h {age_minutes % 60}m"
+                                            age_migration_str = "0"
                                             
                                     # perf
                                     price_change = primary_pair.get("priceChange", {})
@@ -2079,9 +2170,6 @@ def get_wallet_history_transactions():
                                     perf_1h = float(price_change.get("h1", 0))
                                     perf_6h = float(price_change.get("h6", 0))
                                     perf_24h = float(price_change.get("h24", 0))
-                                    
-                                    # migration and current location
-                                    is_migrated, migration_detail, current_location = check_token_migration(token, pairs)
                             
                             payment_amount_usd = s["total_sent_usd"]
                             
@@ -2100,7 +2188,8 @@ def get_wallet_history_transactions():
                                    f"🧬 CA: {token}\n"
                                    f"━━━━━━━━━━━\n\n"
                                    f"⏱️ TOKEN TIMINGS\n"
-                                   f"┃ Age (Since Migration): {age_string}\n"
+                                   f"┃ Age (From creation): {age_creation_str}\n"
+                                   f"┃ Age (After migration): {age_migration_str}\n"
                                    f"┃ Order: 📦 {type_display}\n"
                                    f"┃ DEX Payment: ${payment_amount_usd:.2f} USD\n"
                                    f"┃ Migrated: {migration_detail}\n"
