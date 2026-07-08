@@ -206,19 +206,36 @@ def pull_database_if_needed(conn):
                     if "busy" not in str(e).lower():
                         print(f"[TURSO] Warning: Failed to pull remote updates: {e}", flush=True)
 
+def safe_sync_pull(conn):
+    # Acquire db_lock inside the thread worker so we don't hold the lock on the main event loop
+    with db_lock:
+        try:
+            conn.pull()
+        except Exception as e:
+            if "busy" not in str(e).lower():
+                print(f"[TURSO] Warning: Failed to pull remote updates in background thread: {e}", flush=True)
+
 async def turso_sync_loop():
     if not TURSO_URL or not (TURSO_URL.startswith("libsql://") or TURSO_URL.startswith("https://")):
         return
     print("[TURSO] Started background periodic database sync loop.", flush=True)
+    
+    # Run the first database pull in background immediately after 1 second
+    await asyncio.sleep(1)
+    try:
+        conn = get_db()
+        await asyncio.to_thread(safe_sync_pull, conn)
+        print("[TURSO] Initial background sync complete.", flush=True)
+    except Exception as e:
+        print(f"[TURSO] Warning: Initial background sync failed: {e}", flush=True)
+
     while True:
         await asyncio.sleep(60)
         try:
-            with db_lock:
-                conn = get_db()
-                await asyncio.to_thread(conn.pull)
+            conn = get_db()
+            await asyncio.to_thread(safe_sync_pull, conn)
         except Exception as e:
-            if "busy" not in str(e).lower():
-                print(f"[TURSO] Warning: Failed to pull remote updates in background: {e}", flush=True)
+            print(f"[TURSO] Warning: Failed to start background sync thread: {e}", flush=True)
     
 def get_db():
     global global_conn, last_pull_time
@@ -243,13 +260,8 @@ def get_db():
             except Exception as e:
                 print(f"[TURSO] Warning: Failed to set busy_timeout: {e}", flush=True)
             
-            # Pull latest changes from remote Turso database on startup
-            try:
-                global_conn.pull()
-                last_pull_time = time.time()
-                print("[TURSO] Successfully pulled latest database state from Turso cloud on startup.", flush=True)
-            except Exception as e:
-                print(f"[TURSO] Warning: Failed to pull from Turso on startup: {e}", flush=True)
+            # Note: Startup pull has been moved to a background sync task to prevent blocking health checks
+            pass
             
             # Override commit to automatically push changes to the cloud safely
             original_commit = global_conn.commit
@@ -3018,7 +3030,7 @@ async def cto_auto_scanner_loop():
 def run_flask_app():
     port = int(os.environ.get("PORT", 5000))
     print(f"Starting Web Dashboard on http://localhost:{port}")
-    app.run(host='0.0.0.0', port=port, use_reloader=False)
+    app.run(host='0.0.0.0', port=port, use_reloader=False, threaded=True)
 
 def normalize_channel_id(raw_id):
     """Strip the Telegram -100 prefix to get the bare channel ID for comparison.
@@ -3118,12 +3130,12 @@ async def main():
     global telethon_loop, tg_client, current_api_id, current_api_hash, handlers_registered
     telethon_loop = asyncio.get_running_loop()
     
-    print("Initializing Database...")
-    init_db()
-    
-    # Start Flask dashboard in background
+    # Start Flask dashboard in background immediately so health checks pass
     flask_thread = threading.Thread(target=run_flask_app, daemon=True)
     flask_thread.start()
+    
+    print("Initializing Database...")
+    init_db()
     
     print("Waiting for Telegram settings...")
     
