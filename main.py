@@ -480,44 +480,83 @@ def process_message_logic(text, rules):
                 min_age = 0
                 max_age = 5256000
             
-            print(f"      [TOKEN AGE] min_age={min_age}, max_age={max_age}")
+            age_type = rule.get('search_text') or 'creation'
+            age_type = age_type.lower().strip()
+            print(f"      [TOKEN AGE] type={age_type}, min_age={min_age}, max_age={max_age}")
             
-            # Check for "Just now" or "New" which imply 0 minutes
-            if re.search(r'Age\s*[:\-]?\s*(?:Just now|New)', text, re.IGNORECASE):
-                token_minutes = 0
+            # Find the relevant line for age extraction
+            lines = text.split('\n') if text else []
+            age_line = None
+            
+            if age_type == 'migration':
+                # Look for migration age line
+                for line in lines:
+                    if 'after migration' in line.lower() or 'migration age' in line.lower() or 'age (after migration)' in line.lower():
+                        age_line = line
+                        break
             else:
-                # Robust regex to handle '1 day, 2 hours, 45 minutes', '1d 4h', '1hr 46min', etc.
-                # We look for a pattern following "Age"
-                age_body_match = re.search(r'(?:Token )?Age\s*[:\-]?\s*(.*?)(?:\n|$)', text, re.IGNORECASE)
-                if age_body_match:
-                    age_text = age_body_match.group(1)
-                    print(f"      [TOKEN AGE] Extracted age text: '{age_text}'")
+                # Look for creation age line specifically first
+                for line in lines:
+                    if 'from creation' in line.lower() or 'creation age' in line.lower() or 'age (from creation)' in line.lower():
+                        age_line = line
+                        break
+                # If not found, look for general "age" line that is NOT a migration line
+                if not age_line:
+                    for line in lines:
+                        if 'age' in line.lower() and 'migration' not in line.lower():
+                            age_line = line
+                            break
+            
+            age_text = None
+            if age_line:
+                # Try to get text after colon
+                if ':' in age_line:
+                    age_text = age_line.split(':', 1)[1].strip()
+                else:
+                    age_text = age_line.strip()
+            
+            token_minutes = None
+            
+            if age_text:
+                print(f"      [TOKEN AGE] Extracted age text: '{age_text}'")
+                # Check for "Just now" or "New" which imply 0 minutes
+                if re.search(r'(?:Just now|New)', age_text, re.IGNORECASE):
+                    token_minutes = 0
+                elif re.search(r'Unknown', age_text, re.IGNORECASE):
+                    token_minutes = None  # Explicitly unknown
+                else:
+                    # Robust regex to handle '1 day, 2 hours, 45 minutes', '1d 4h', '1hr 46min', etc.
                     d = int(re.search(r'(\d+)\s*(?:d|day)', age_text, re.IGNORECASE).group(1) if re.search(r'(\d+)\s*(?:d|day)', age_text, re.IGNORECASE) else 0)
                     h = int(re.search(r'(\d+)\s*(?:h|hr|hour)', age_text, re.IGNORECASE).group(1) if re.search(r'(\d+)\s*(?:h|hr|hour)', age_text, re.IGNORECASE) else 0)
                     m = int(re.search(r'(\d+)\s*(?:m|min|minute)', age_text, re.IGNORECASE).group(1) if re.search(r'(\d+)\s*(?:m|min|minute)', age_text, re.IGNORECASE) else 0)
-                    token_minutes = (d * 1440) + (h * 60) + m
-                    print(f"      [TOKEN AGE] Parsed: d={d}, h={h}, m={m} → {token_minutes} minutes")
-                else:
-                    # If no "Age" label is found, try to find a standalone time pattern that looks like an age
-                    standalone_match = re.search(r'(?:(\d+)\s*(?:d|day)s?)?\s*,?\s*(?:(\d+)\s*(?:h|hr|hour)s?)?\s*,?\s*(?:(\d+)\s*(?:m|min|minute)s?)', text, re.IGNORECASE)
+                    
+                    # If we parsed 0 minutes but there was no actual "0" in the text, it means it's unknown/invalid
+                    if d == 0 and h == 0 and m == 0 and not re.search(r'\b0\b', age_text):
+                        token_minutes = None
+                    else:
+                        token_minutes = (d * 1440) + (h * 60) + m
+                        print(f"      [TOKEN AGE] Parsed: d={d}, h={h}, m={m} → {token_minutes} minutes")
+            else:
+                # If no age_line found, see if we can find a standalone time pattern in the whole text (only for creation fallback)
+                if age_type != 'migration':
+                    standalone_match = re.search(r'(?:(\d+)\s*(?:d|day)s?)?\s*,?\s*(?:(\d+)\s*(?:h|hr|hour)s?)?\s*,?\s*(?:(\d+)\s*(?:m|min|minute)s?)', text, re.IGNORECASE) if text else None
                     if standalone_match and (standalone_match.group(1) or standalone_match.group(2) or standalone_match.group(3)):
                         d = int(standalone_match.group(1) or 0)
                         h = int(standalone_match.group(2) or 0)
                         m = int(standalone_match.group(3) or 0)
                         token_minutes = (d * 1440) + (h * 60) + m
-                    else:
-                        # If no token age is found at all, drop if the min_age is > 0
-                        if min_age > 0:
-                            return None, True, f"Dropped by Token Age Filter (No Age found in text, but min allowed is {min_age}m)"
-                        else:
-                            token_minutes = None # Allow it to pass if no rules are violated
-
-            if token_minutes is not None:
-                if not (min_age <= token_minutes <= max_age):
-                    print(f"      [TOKEN AGE] DROPPING: {min_age} <= {token_minutes} <= {max_age} is FALSE")
-                    return None, True, f"Dropped by Token Age Filter (Allowed: {min_age}-{max_age}m, Found: {token_minutes}m)"
-                else:
-                    print(f"      [TOKEN AGE] PASSED: {min_age} <= {token_minutes} <= {max_age}")
+                        print(f"      [TOKEN AGE] Parsed standalone: d={d}, h={h}, m={m} → {token_minutes} minutes")
+            
+            # If the age is unknown, drop the message
+            if token_minutes is None:
+                print(f"      [TOKEN AGE] DROPPING: Token age is unknown or not found")
+                return None, True, f"Dropped by Token Age Filter (Age is Unknown)"
+                
+            if not (min_age <= token_minutes <= max_age):
+                print(f"      [TOKEN AGE] DROPPING: {min_age} <= {token_minutes} <= {max_age} is FALSE")
+                return None, True, f"Dropped by Token Age Filter (Allowed: {min_age}-{max_age}m, Found: {token_minutes}m)"
+            else:
+                print(f"      [TOKEN AGE] PASSED: {min_age} <= {token_minutes} <= {max_age}")
         
         # EXTRACT CA LOGIC (Now acts purely as a filter)
         elif rule_type == 'extract_ca':
@@ -626,8 +665,10 @@ def process_message_logic(text, rules):
                     
                     if not (min_mc <= val <= max_mc):
                         return None, True, f"Dropped by Market Cap Filter (Allowed: ${min_mc}-${max_mc}, Found: ${val})"
+                else:
+                    return None, True, "Dropped by Market Cap Filter (Market Cap is Unknown)"
             except Exception as e:
-                pass
+                return None, True, f"Dropped by Market Cap Filter (Error parsing: {e})"
 
         # EXCLUDE PLATFORM LOGIC
         elif rule_type == 'exclude_platform':
@@ -1209,6 +1250,12 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
             else:
                 age_creation_str = f"{int(age_creation_minutes / 60)}h {age_creation_minutes % 60}m"
                 
+    # If market cap or creation age is unknown, skip further fetching/processing and abort
+    if mc_str == "Unknown" or age_creation_str == "Unknown":
+        token_info["status"] = "skipped"
+        token_info["reason"] = f"Skipped: Market Cap is {mc_str}, Age is {age_creation_str}"
+        return token_info
+
     # Detect if token has migrated and current location
     is_migrated, migration_detail, current_location = await check_token_migration(ca, pairs)
 
@@ -2098,7 +2145,8 @@ def get_wallet_history_transactions():
                             token_response = await asyncio.to_thread(requests.get, token_url, timeout=10)
                             
                             mc_str = "Unknown"
-                            age_string = "Unknown"
+                            age_creation_str = "Unknown"
+                            age_migration_str = "0"
                             perf_5m = 0.0
                             perf_1h = 0.0
                             perf_6h = 0.0
@@ -2139,6 +2187,12 @@ def get_wallet_history_transactions():
                                             else:
                                                 age_creation_str = f"{int(age_creation_minutes / 60)}h {age_creation_minutes % 60}m"
                                                 
+                                    # If market cap or creation age is unknown, skip further fetching/processing
+                                    if mc_str == "Unknown" or age_creation_str == "Unknown":
+                                        s["test_status"] = "dropped"
+                                        s["test_reason"] = f"Dropped: Market Cap is {mc_str}, Age is {age_creation_str}"
+                                        continue
+
                                     # migration and current location
                                     is_migrated, migration_detail, current_location = await check_token_migration(token, pairs)
                                     

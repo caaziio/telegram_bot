@@ -51,7 +51,8 @@ function renderWorkflows() {
                     let label = '';
                     let color = 'var(--accent-color)';
                     if (r.rule_type === 'token_age') {
-                        label = `⏱️ Age: ${r.time_min || 0}-${r.time_max || '∞'}m`;
+                        const type = r.search_text === 'migration' ? 'Migr' : 'Creat';
+                        label = `⏱️ Age (${type}): ${r.time_min || 0}-${r.time_max || '∞'}m`;
                         color = '#3b82f6';
                     } else if (r.rule_type === 'market_cap') {
                         let minMC = r.time_min ? (Number(r.time_min) >= 1000000 ? (Number(r.time_min)/1000000).toFixed(1) + 'M' : Number(r.time_min) >= 1000 ? (Number(r.time_min)/1000).toFixed(1) + 'K' : r.time_min) : '0';
@@ -191,7 +192,13 @@ function renderRules() {
         let fieldsHtml = '<div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; flex: 1;">';
         
         if (rule.rule_type === 'token_age') {
+            const ageType = rule.search_text || 'creation';
             fieldsHtml += `
+                <label style="font-size:0.85rem; color:var(--text-muted)">Type:</label>
+                <select class="form-input" style="width:100px" onchange="updateRule(${index}, 'search_text', this.value)">
+                    <option value="creation" ${ageType === 'creation' ? 'selected' : ''}>Creation</option>
+                    <option value="migration" ${ageType === 'migration' ? 'selected' : ''}>Migration</option>
+                </select>
                 <label style="font-size:0.85rem; color:var(--text-muted)">Min (m):</label>
                 <input type="number" class="form-input" style="width:75px" value="${(rule.time_min !== undefined && rule.time_min !== null) ? rule.time_min : ''}" placeholder="0" oninput="updateRule(${index}, 'time_min', this.value)">
                 <label style="font-size:0.85rem; color:var(--text-muted)">Max (m):</label>
@@ -263,7 +270,11 @@ function renderRules() {
 }
 
 function addRule(type) {
-    currentRules.push({ rule_type: type });
+    const newRule = { rule_type: type };
+    if (type === 'token_age') {
+        newRule.search_text = 'creation';
+    }
+    currentRules.push(newRule);
     renderRules();
 }
 
