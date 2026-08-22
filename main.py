@@ -459,11 +459,13 @@ def get_workflows():
             
         return workflows
 
-def process_message_logic(text, rules):
+def process_message_logic(text, rules, context=None):
     if not text:
         return text, False, ""
         
     processed_text = text
+    context = context or {}
+    payer_address = context.get('payer_address')
     
     for rule in rules:
         rule_type = rule.get('rule_type')
@@ -670,6 +672,19 @@ def process_message_logic(text, rules):
             except Exception as e:
                 return None, True, f"Dropped by Market Cap Filter (Error parsing: {e})"
 
+        # SHOW WALLET LOGIC
+        elif rule_type == 'show_wallet':
+            show_val = (rule.get('search_text') or 'yes').strip().lower()
+            if show_val == 'yes':
+                wallet = payer_address
+                if wallet:
+                    wallet_line = f"👛 Payer Wallet: https://solscan.io/account/{wallet}"
+                    if wallet_line not in processed_text:
+                        if "📈 Chart:" in processed_text:
+                            processed_text = processed_text.replace("📈 Chart:", f"{wallet_line}\n📈 Chart:")
+                        else:
+                            processed_text += f"\n{wallet_line}"
+
         # EXCLUDE PLATFORM LOGIC
         elif rule_type == 'exclude_platform':
             platform_to_exclude = (rule.get('search_text') or '').strip().lower()
@@ -839,7 +854,8 @@ def run_tester():
     if not wf:
         return jsonify({"dropped": True, "reason": "Workflow not found"})
         
-    result_text, dropped, reason = process_message_logic(text, wf['rules'])
+    context = {"payer_address": data.get('payer_address', '9xQeWvG816bUx9EPjFWdd5AufqSSqeM2qN1xzybapC8G')}
+    result_text, dropped, reason = process_message_logic(text, wf['rules'], context=context)
     
     return jsonify({
         "dropped": dropped,
@@ -1287,12 +1303,18 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
     perf_6h = float(price_change.get("h6", 0))
     perf_24h = float(price_change.get("h24", 0))
     
-    # Fetch DEX payment amount in USD
+    payer_address = item.get("payer_address")
+    
+    # Fetch DEX payment amount in USD & payer wallet if needed
     payment_amount_usd = item.get("amount_usd")
-    if payment_amount_usd is None or payment_amount_usd == 0.0:
+    if payment_amount_usd is None or payment_amount_usd == 0.0 or not payer_address:
         settings = get_settings()
         api_key = settings.get('helius_api_key')
-        payment_amount_usd = await asyncio.to_thread(get_dex_payment_amount_usd, ca, payment_timestamp, api_key)
+        fetched_amt, fetched_payer = await asyncio.to_thread(get_dex_payment_info, ca, payment_timestamp, api_key)
+        if payment_amount_usd is None or payment_amount_usd == 0.0:
+            payment_amount_usd = fetched_amt
+        if not payer_address:
+            payer_address = fetched_payer
 
     dex_url = f"https://dexscreener.com/{raw_chain}/{ca}"
     
@@ -1365,7 +1387,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
     if workflows_to_evaluate:
         passed_channels = []
         for wf in workflows_to_evaluate:
-            modified_text, dropped, reason = process_message_logic(msg, wf.get('rules', []))
+            modified_text, dropped, reason = process_message_logic(msg, wf.get('rules', []), context={"payer_address": payer_address})
             if dropped:
                 token_dropped_reasons.append(f"[{wf.get('name') or 'Flow'}]: {reason}")
                 continue
@@ -1509,9 +1531,9 @@ def discover_payment_wallet_logic(token_address, payment_timestamp, api_key):
     summary = "; ".join(log_messages) if log_messages else "No matching payment transaction found in analyzed history pages."
     return None, summary
 
-def get_dex_payment_amount_usd(token_address, payment_timestamp, api_key):
+def get_dex_payment_info(token_address, payment_timestamp, api_key):
     if not api_key or not token_address or not payment_timestamp:
-        return 0.0
+        return 0.0, None
     
     # Convert payment_timestamp (in ms) to seconds
     ts_seconds = int(payment_timestamp / 1000)
@@ -1548,12 +1570,15 @@ def get_dex_payment_amount_usd(token_address, payment_timestamp, api_key):
                                 continue
                                 
                             total_usd = 0.0
+                            payer_address = None
                             
                             # Check token transfers to the scan_addr
                             for transfer in tx.get("tokenTransfers", []):
                                 if transfer.get("toUserAccount") == scan_addr:
                                     mint = transfer.get("mint", "")
                                     amount = transfer.get("tokenAmount", 0)
+                                    if not payer_address:
+                                        payer_address = transfer.get("fromUserAccount")
                                     if mint in ('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'Es9vMFrzaypmko8L7jV8YW156HCfaNuDY8jNH5KB3C1d'): # USDC/USDT
                                         total_usd += amount
                                     else:
@@ -1565,10 +1590,15 @@ def get_dex_payment_amount_usd(token_address, payment_timestamp, api_key):
                                 if transfer.get("toUserAccount") == scan_addr:
                                     amount_sol = transfer.get("amount", 0) / 1e9
                                     total_usd += amount_sol * sol_price
+                                    if not payer_address:
+                                        payer_address = transfer.get("fromUserAccount")
                                     
-                            if total_usd > 0:
-                                print(f"[DEX PAYMENT FILTER] Found payment of ${total_usd:.2f} USD to {scan_addr}", flush=True)
-                                return total_usd
+                            if not payer_address and tx.get("feePayer"):
+                                payer_address = tx.get("feePayer")
+                                
+                            if total_usd > 0 or payer_address:
+                                print(f"[DEX PAYMENT FILTER] Found payment of ${total_usd:.2f} USD to {scan_addr} from payer {payer_address}", flush=True)
+                                return total_usd, payer_address
                                 
         # Final fallback: scan the token address itself if the monitored addresses scan didn't find it
         if addresses_to_scan != [token_address]:
@@ -1581,10 +1611,13 @@ def get_dex_payment_amount_usd(token_address, payment_timestamp, api_key):
                         tx_ts = tx.get("timestamp")
                         if tx_ts and abs(tx_ts - ts_seconds) <= 120:
                             total_usd = 0.0
+                            payer_address = None
                             
                             for transfer in tx.get("tokenTransfers", []):
                                 mint = transfer.get("mint", "")
                                 amount = transfer.get("tokenAmount", 0)
+                                if not payer_address:
+                                    payer_address = transfer.get("fromUserAccount")
                                 if mint in ('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'Es9vMFrzaypmko8L7jV8YW156HCfaNuDY8jNH5KB3C1d'):
                                     total_usd += amount
                                 else:
@@ -1594,15 +1627,24 @@ def get_dex_payment_amount_usd(token_address, payment_timestamp, api_key):
                             for transfer in tx.get("nativeTransfers", []):
                                 amount_sol = transfer.get("amount", 0) / 1e9
                                 total_usd += amount_sol * sol_price
+                                if not payer_address:
+                                    payer_address = transfer.get("fromUserAccount")
                                 
-                            if total_usd > 0:
-                                print(f"[DEX PAYMENT FILTER] Fallback token scan found payment of ${total_usd:.2f} USD", flush=True)
-                                return total_usd
+                            if not payer_address and tx.get("feePayer"):
+                                payer_address = tx.get("feePayer")
+                                
+                            if total_usd > 0 or payer_address:
+                                print(f"[DEX PAYMENT FILTER] Fallback token scan found payment of ${total_usd:.2f} USD from payer {payer_address}", flush=True)
+                                return total_usd, payer_address
                                 
     except Exception as e:
-        print(f"[DEX PAYMENT FILTER] Error fetching payment amount: {e}", flush=True)
+        print(f"[DEX PAYMENT FILTER] Error fetching payment info: {e}", flush=True)
         
-    return 0.0
+    return 0.0, None
+
+def get_dex_payment_amount_usd(token_address, payment_timestamp, api_key):
+    amt, _ = get_dex_payment_info(token_address, payment_timestamp, api_key)
+    return amt
 
 async def find_token_from_payer_history(payer_address, payment_timestamp, api_key, depth=0):
     if not payer_address or not api_key:
@@ -1718,7 +1760,7 @@ async def process_payment_payer_history(payer_address, payment_timestamp, api_ke
     token = await find_token_from_payer_history(payer_address, payment_timestamp, api_key)
     if token:
         print(f"[HELIUS DISCOVERY] Successfully isolated token from payer history: {token}. Proceeding to verify.", flush=True)
-        await verify_and_forward_cto_token(token, amount_usd)
+        await verify_and_forward_cto_token(token, amount_usd, payer_address=payer_address)
     else:
         print(f"[HELIUS DISCOVERY] No token isolated from payer history for {payer_address}.", flush=True)
 
@@ -2258,7 +2300,7 @@ def get_wallet_history_transactions():
                                    f"━━━━━━━━━━━\n"
                                    f"📈 Chart: https://dexscreener.com/solana/{token}")
                             
-                            _, dropped, reason = process_message_logic(msg, workflow_rules)
+                            _, dropped, reason = process_message_logic(msg, workflow_rules, context={"payer_address": s.get("address")})
                             if dropped:
                                 s["test_status"] = "dropped"
                                 s["test_reason"] = reason
@@ -2623,7 +2665,7 @@ def discover_payment_address_route():
         import traceback
         return jsonify({"success": False, "error": str(e), "trace": traceback.format_exc()})
 
-async def verify_and_forward_cto_token(ca, amount_usd=0.0):
+async def verify_and_forward_cto_token(ca, amount_usd=0.0, payer_address=None):
     try:
         settings = get_settings()
         target_channel = settings.get('cto_target_channel', '')
@@ -2655,7 +2697,8 @@ async def verify_and_forward_cto_token(ca, amount_usd=0.0):
                         "order_type": o_type,
                         "order_status": o_status,
                         "payment_timestamp": o_pay_ts,
-                        "amount_usd": amount_usd
+                        "amount_usd": amount_usd,
+                        "payer_address": payer_address
                     }
                     print(f"[REAL-TIME SCANNER] Verified matching order ({o_type}) for {ca} on DexScreener API.", flush=True)
                     await process_single_cto_item(item, target_channel, workflow_id, test_mode)
@@ -2837,7 +2880,7 @@ def helius_webhook():
                     if base_tokens:
                         # Instantly check each base token in background Telethon loop
                         for ca in base_tokens:
-                            run_async_coroutine(verify_and_forward_cto_token(ca, amount_usd))
+                            run_async_coroutine(verify_and_forward_cto_token(ca, amount_usd, payer_address=payer_address))
                     elif payer_address:
                         api_key = settings.get('helius_api_key')
                         tx_ts = tx.get("timestamp", int(time.time()))
@@ -2957,7 +3000,7 @@ async def helius_polling_loop():
                                     
                         for token in new_tokens_to_check:
                             print(f"[HELIUS POLLING] Instantly verifying token {token}...", flush=True)
-                            await verify_and_forward_cto_token(token, amount_usd)
+                            await verify_and_forward_cto_token(token, amount_usd, payer_address=payer_address)
         except Exception as e:
             print(f"[HELIUS POLLING] Loop error: {e}", flush=True)
             

@@ -71,6 +71,9 @@ function renderWorkflows() {
                     } else if (r.rule_type === 'migrated') {
                         label = `🧬 Migrated: ${r.search_text === 'no' ? 'No' : 'Yes'}`;
                         color = '#6366f1';
+                    } else if (r.rule_type === 'show_wallet') {
+                        label = `👛 Wallet: ${r.search_text === 'no' ? 'No' : 'Yes'}`;
+                        color = '#0ea5e9';
                     } else if (r.rule_type === 'exclude_platform') {
                         label = `🚫 Exclude: ${r.search_text}`;
                         color = '#ef4444';
@@ -182,6 +185,7 @@ function renderRules() {
         else if (rule.rule_type === 'dex_payment') badgeColor = '#06b6d4';
         else if (rule.rule_type === 'migrated') badgeColor = '#6366f1';
         else if (rule.rule_type === 'performance') badgeColor = '#f59e0b';
+        else if (rule.rule_type === 'show_wallet') badgeColor = '#0ea5e9';
         else if (rule.rule_type === 'exclude_platform') badgeColor = '#ef4444';
         else if (rule.rule_type === 'filter') badgeColor = '#ec4899';
         
@@ -246,6 +250,15 @@ function renderRules() {
                     <option value="no" ${isMigrated === 'no' ? 'selected' : ''}>No</option>
                 </select>
             `;
+        } else if (rule.rule_type === 'show_wallet') {
+            const isShow = (rule.search_text || 'yes').toLowerCase();
+            fieldsHtml += `
+                <label style="font-size:0.85rem; color:var(--text-muted)">Show Wallet Link:</label>
+                <select class="form-input" style="width:90px" onchange="updateRule(${index}, 'search_text', this.value)">
+                    <option value="yes" ${isShow === 'yes' ? 'selected' : ''}>Yes</option>
+                    <option value="no" ${isShow === 'no' ? 'selected' : ''}>No</option>
+                </select>
+            `;
         } else if (rule.rule_type === 'exclude_platform') {
             fieldsHtml += `
                 <input class="form-input" style="flex: 1; max-width: 250px;" placeholder="e.g. pump.fun" value="${rule.search_text || ''}" oninput="updateRule(${index}, 'search_text', this.value)">
@@ -273,6 +286,8 @@ function addRule(type) {
     const newRule = { rule_type: type };
     if (type === 'token_age') {
         newRule.search_text = 'creation';
+    } else if (type === 'show_wallet') {
+        newRule.search_text = 'yes';
     }
     currentRules.push(newRule);
     renderRules();
