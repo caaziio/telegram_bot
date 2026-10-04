@@ -1327,6 +1327,65 @@ def tg_logout():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
+def get_sorted_trading_pairs(pairs):
+    """
+    Sort pairs so the most active, liquid trading pool is first.
+    Prioritizes pairs that report non-null price changes, then highest liquidity USD, then 24h volume.
+    """
+    if not pairs:
+        return []
+    def pair_score(p):
+        liq = 0.0
+        vol = 0.0
+        try:
+            liq = float((p.get('liquidity') or {}).get('usd') or 0.0)
+        except (ValueError, TypeError):
+            pass
+        try:
+            vol = float((p.get('volume') or {}).get('h24') or 0.0)
+        except (ValueError, TypeError):
+            pass
+        pc = p.get('priceChange') or {}
+        has_pc = 1 if isinstance(pc, dict) and any(pc.get(k) is not None for k in ('m5', 'h1', 'h6', 'h24')) else 0
+        return (has_pc, liq, vol)
+    return sorted(pairs, key=pair_score, reverse=True)
+
+def extract_best_price_change(pairs):
+    """
+    Extract best m5, h1, h6, h24 price change percentages across all pairs.
+    Prioritizes the most active, liquid trading pairs, safely handling nulls and empty dicts.
+    """
+    if not pairs:
+        return 0.0, 0.0, 0.0, 0.0
+        
+    sorted_pairs = get_sorted_trading_pairs(pairs)
+    
+    m5, h1, h6, h24 = None, None, None, None
+    for p in sorted_pairs:
+        pc = p.get('priceChange')
+        if not pc or not isinstance(pc, dict):
+            continue
+            
+        if m5 is None and pc.get('m5') is not None:
+            try: m5 = float(pc['m5'])
+            except (ValueError, TypeError): pass
+        if h1 is None and pc.get('h1') is not None:
+            try: h1 = float(pc['h1'])
+            except (ValueError, TypeError): pass
+        if h6 is None and pc.get('h6') is not None:
+            try: h6 = float(pc['h6'])
+            except (ValueError, TypeError): pass
+        if h24 is None and pc.get('h24') is not None:
+            try: h24 = float(pc['h24'])
+            except (ValueError, TypeError): pass
+            
+    return (
+        m5 if m5 is not None else 0.0,
+        h1 if h1 is not None else 0.0,
+        h6 if h6 is not None else 0.0,
+        h24 if h24 is not None else 0.0
+    )
+
 async def check_token_migration(ca, pairs):
     """
     Checks if a token has migrated and identifies where it is right now.
@@ -1374,8 +1433,9 @@ async def check_token_migration(ca, pairs):
     }
     
     # 2. Determine current location (primary trading exchange)
-    if pairs:
-        primary_dex = pairs[0].get("dexId", "").lower()
+    sorted_pairs = get_sorted_trading_pairs(pairs)
+    if sorted_pairs:
+        primary_dex = sorted_pairs[0].get("dexId", "").lower()
         current_location = dex_names.get(primary_dex, primary_dex.capitalize())
     else:
         primary_dex = ""
@@ -1505,13 +1565,38 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
     if not pairs:
         token_info["status"] = "error"
         token_info["reason"] = "No active trading pairs found on Dexscreener"
+        if not test_mode:
+            sig = item.get("signature")
+            payer = item.get("payer_address")
+            if sig or payer:
+                with db_lock:
+                    conn = get_db()
+                    cursor = conn.cursor()
+                    if sig:
+                        cursor.execute("UPDATE wallet_payments SET ca=?, status='dropped', reason=? WHERE signature=?", (ca, token_info["reason"], sig))
+                    elif payer:
+                        cursor.execute("UPDATE wallet_payments SET ca=?, status='dropped', reason=? WHERE sender_address=? AND (timestamp * 1000 BETWEEN ? AND ?)", (ca, token_info["reason"], payer, payment_timestamp - 180000, payment_timestamp + 180000))
+                    conn.commit()
         return token_info
         
-    primary_pair = pairs[0]
+    sorted_pairs = get_sorted_trading_pairs(pairs)
+    primary_pair = sorted_pairs[0]
     raw_chain = primary_pair.get("chainId", "unknown").lower()
     if raw_chain != "solana":
         token_info["status"] = "skipped"
         token_info["reason"] = f"Skipped: Chain is {raw_chain} (not Solana)"
+        if not test_mode:
+            sig = item.get("signature")
+            payer = item.get("payer_address")
+            if sig or payer:
+                with db_lock:
+                    conn = get_db()
+                    cursor = conn.cursor()
+                    if sig:
+                        cursor.execute("UPDATE wallet_payments SET ca=?, status='dropped', reason=? WHERE signature=?", (ca, token_info["reason"], sig))
+                    elif payer:
+                        cursor.execute("UPDATE wallet_payments SET ca=?, status='dropped', reason=? WHERE sender_address=? AND (timestamp * 1000 BETWEEN ? AND ?)", (ca, token_info["reason"], payer, payment_timestamp - 180000, payment_timestamp + 180000))
+                    conn.commit()
         return token_info
         
     type_display_map = {
@@ -1534,7 +1619,12 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
     }
     chain_id = chain_map.get(raw_chain, raw_chain.capitalize())
     
-    raw_mc = primary_pair.get("marketCap") or primary_pair.get("fdv")
+    all_mcs = []
+    for p in pairs:
+        val = p.get("marketCap") or p.get("fdv")
+        if isinstance(val, (int, float)) and val > 0:
+            all_mcs.append(val)
+    raw_mc = max(all_mcs) if all_mcs else (primary_pair.get("marketCap") or primary_pair.get("fdv"))
     if isinstance(raw_mc, (int, float)):
         if raw_mc >= 1_000_000:
             mc_str = f"${raw_mc/1_000_000:.2f}M"
@@ -1566,6 +1656,18 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
     if mc_str == "Unknown" or age_creation_str == "Unknown":
         token_info["status"] = "skipped"
         token_info["reason"] = f"Skipped: Market Cap is {mc_str}, Age is {age_creation_str}"
+        if not test_mode:
+            sig = item.get("signature")
+            payer = item.get("payer_address")
+            if sig or payer:
+                with db_lock:
+                    conn = get_db()
+                    cursor = conn.cursor()
+                    if sig:
+                        cursor.execute("UPDATE wallet_payments SET ca=?, token_name=?, status='dropped', reason=? WHERE signature=?", (ca, project_name, token_info["reason"], sig))
+                    elif payer:
+                        cursor.execute("UPDATE wallet_payments SET ca=?, token_name=?, status='dropped', reason=? WHERE sender_address=? AND (timestamp * 1000 BETWEEN ? AND ?)", (ca, project_name, token_info["reason"], payer, payment_timestamp - 180000, payment_timestamp + 180000))
+                    conn.commit()
         return token_info
 
     # Detect if token has migrated and current location
@@ -1574,7 +1676,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
     # Age (After migration) - creation time of the standard DEX pair
     if is_migrated:
         standard_dex_pair = None
-        for p in pairs:
+        for p in sorted_pairs:
             d_id = p.get("dexId", "").lower()
             if d_id not in ["pumpfun", "moonshot", "pumpswap"]:
                 standard_dex_pair = p
@@ -1593,11 +1695,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
         else:
             age_migration_str = "0"
             
-    price_change = primary_pair.get("priceChange", {})
-    perf_5m = float(price_change.get("m5", 0))
-    perf_1h = float(price_change.get("h1", 0))
-    perf_6h = float(price_change.get("h6", 0))
-    perf_24h = float(price_change.get("h24", 0))
+    perf_5m, perf_1h, perf_6h, perf_24h = extract_best_price_change(pairs)
     
     payer_address = item.get("payer_address")
     
@@ -1737,7 +1835,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                     payment_timestamp, order_status, reason
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                ca, project_name, chain_id, mc_str, age_string, 
+                ca, project_name, chain_id, mc_str, age_creation_str, 
                 perf_5m, perf_1h, perf_6h, perf_24h, 
                 db_status, dex_url, migration_status_formatted, order_type,
                 payment_timestamp, order_status, token_info.get("reason")
@@ -1753,7 +1851,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                 'ca': ca,
                 'platform': chain_id,
                 'market_cap': mc_str,
-                'age': age_string,
+                'age': age_creation_str,
                 'migration_age': age_migration_str,
                 'perf_5m': perf_5m,
                 'perf_1h': perf_1h,
@@ -1772,7 +1870,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                     SET token_name=?, ca=?, platform=?, market_cap=?, age=?, migration_age=?, perf_5m=?, perf_1h=?, perf_6h=?, perf_24h=?, dex_url=?, migration_status=?, status=?, reason=?, formatted_message=?
                     WHERE signature=?
                 """, (
-                    project_name, ca, chain_id, mc_str, age_string, age_migration_str, perf_5m, perf_1h, perf_6h, perf_24h, dex_url, migration_status_formatted, db_status, token_info.get("reason"), send_text, sig
+                    project_name, ca, chain_id, mc_str, age_creation_str, age_migration_str, perf_5m, perf_1h, perf_6h, perf_24h, dex_url, migration_status_formatted, db_status, token_info.get("reason"), send_text, sig
                 ))
             elif payer:
                 cursor.execute("""
@@ -1780,7 +1878,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                     SET token_name=?, ca=?, platform=?, market_cap=?, age=?, migration_age=?, perf_5m=?, perf_1h=?, perf_6h=?, perf_24h=?, dex_url=?, migration_status=?, status=?, reason=?, formatted_message=?
                     WHERE sender_address=? AND (timestamp * 1000 BETWEEN ? AND ?)
                 """, (
-                    project_name, ca, chain_id, mc_str, age_string, age_migration_str, perf_5m, perf_1h, perf_6h, perf_24h, dex_url, migration_status_formatted, db_status, token_info.get("reason"), send_text, payer, payment_timestamp - 180000, payment_timestamp + 180000
+                    project_name, ca, chain_id, mc_str, age_creation_str, age_migration_str, perf_5m, perf_1h, perf_6h, perf_24h, dex_url, migration_status_formatted, db_status, token_info.get("reason"), send_text, payer, payment_timestamp - 180000, payment_timestamp + 180000
                 ))
             
             conn.commit()
@@ -1791,7 +1889,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                     'name': project_name,
                     'platform': chain_id,
                     'market_cap': mc_str,
-                    'age': age_string,
+                    'age': age_creation_str,
                     'perf_5m': perf_5m,
                     'perf_1h': perf_1h,
                     'perf_6h': perf_6h,
@@ -2042,10 +2140,10 @@ async def find_token_from_payer_history(payer_address, payment_timestamp, api_ke
         
         txs_sorted = sorted(txs, key=lambda x: x.get("timestamp", 0), reverse=True)
         
-        # 1. Primary pass: Look for positive balance changes or token transfer inflows (Buy/Swap)
+        # 1. Primary pass (Recent 2 hours): Look for positive balance changes or token transfer inflows (Buy/Swap)
         for tx in txs_sorted:
             tx_ts = tx.get("timestamp", 0)
-            if tx_ts > payment_timestamp + 30:
+            if tx_ts > payment_timestamp + 60 or tx_ts < payment_timestamp - 7200:
                 continue
                 
             candidate_mints = set()
@@ -2075,10 +2173,40 @@ async def find_token_from_payer_history(payer_address, payment_timestamp, api_ke
                 print(f"[PAYER HISTORY] Found token {mint} from positive balance/transfer in tx {tx.get('signature')} at {tx_ts} (payment ts: {payment_timestamp})", flush=True)
                 return mint
                 
-        # 2. Secondary fallback: Look for any custom token transaction activity
+        # 1b. Expanded primary pass (Past 24 hours): If nothing in 2 hours
         for tx in txs_sorted:
             tx_ts = tx.get("timestamp", 0)
-            if tx_ts > payment_timestamp + 30:
+            if tx_ts > payment_timestamp + 60 or tx_ts < payment_timestamp - 86400:
+                continue
+                
+            candidate_mints = set()
+            for transfer in tx.get("tokenTransfers", []):
+                mint = transfer.get("mint")
+                if mint and mint not in excluded_mints:
+                    if transfer.get("toUserAccount") == payer_address:
+                        candidate_mints.add(mint)
+                        
+            for change in tx.get("tokenBalanceChanges", []):
+                mint = change.get("mint")
+                user = change.get("userAccount")
+                if mint and mint not in excluded_mints and user == payer_address:
+                    raw_change = change.get("rawTokenAmount", {})
+                    try:
+                        diff = float(raw_change.get("tokenAmount", 0))
+                        if diff > 0:
+                            candidate_mints.add(mint)
+                    except Exception:
+                        pass
+                        
+            if candidate_mints:
+                mint = list(candidate_mints)[0]
+                print(f"[PAYER HISTORY] Found token {mint} from 24h positive balance/transfer in tx {tx.get('signature')} at {tx_ts} (payment ts: {payment_timestamp})", flush=True)
+                return mint
+                
+        # 2. Secondary fallback: Look for any custom token transaction activity within 24 hours
+        for tx in txs_sorted:
+            tx_ts = tx.get("timestamp", 0)
+            if tx_ts > payment_timestamp + 60 or tx_ts < payment_timestamp - 86400:
                 continue
                 
             for transfer in tx.get("tokenTransfers", []):
@@ -2093,12 +2221,12 @@ async def find_token_from_payer_history(payer_address, payment_timestamp, api_ke
                     print(f"[PAYER HISTORY] Fallback found token {mint} in balance changes in tx {tx.get('signature')} at {tx_ts} (payment ts: {payment_timestamp})", flush=True)
                     return mint
 
-        # 3. Funder trace: if no token found, check if this wallet was funded by another address
+        # 3. Funder trace: if no token found, check if this wallet was funded by another address within 24 hours
         if depth < 2:
             funders = []
             for tx in txs_sorted:
                 tx_ts = tx.get("timestamp", 0)
-                if tx_ts > payment_timestamp + 30:
+                if tx_ts > payment_timestamp + 60 or tx_ts < payment_timestamp - 86400:
                     continue
                 for transfer in tx.get("nativeTransfers", []):
                     if transfer.get("toUserAccount") == payer_address:
@@ -2186,6 +2314,16 @@ async def process_payment_and_forward(payer_address, tx_timestamp, amount_usd=0.
             await process_single_cto_item(item, target, wf_id, t_mode)
         else:
             print(f"[WALLET TRACKER] No token discovered for sender {payer_address}.", flush=True)
+            if signature:
+                with db_lock:
+                    conn = get_db()
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        UPDATE wallet_payments 
+                        SET status = 'dropped', reason = 'No token activity detected from payer within 24h'
+                        WHERE signature = ? AND status IS NULL
+                    """, (signature,))
+                    conn.commit()
     except Exception as ex:
         print(f"[WALLET TRACKER] Error processing payment sender history: {ex}", flush=True)
 
@@ -2594,12 +2732,14 @@ def get_wallet_history_transactions():
                                 token_data = token_response.json()
                                 pairs = token_data.get("pairs", [])
                                 if pairs:
-                                    primary_pair = pairs[0]
+                                    sorted_pairs = get_sorted_trading_pairs(pairs)
+                                    primary_pair = sorted_pairs[0]
                                     raw_chain = primary_pair.get("chainId", "unknown").lower()
                                     project_name = primary_pair.get("baseToken", {}).get("name", "Unknown")
                                     
                                     # mc
-                                    raw_mc = primary_pair.get("marketCap") or primary_pair.get("fdv")
+                                    all_mcs = [p.get("marketCap") or p.get("fdv") for p in pairs if isinstance(p.get("marketCap") or p.get("fdv"), (int, float)) and (p.get("marketCap") or p.get("fdv")) > 0]
+                                    raw_mc = max(all_mcs) if all_mcs else (primary_pair.get("marketCap") or primary_pair.get("fdv"))
                                     if isinstance(raw_mc, (int, float)):
                                         if raw_mc >= 1_000_000:
                                             mc_str = f"${raw_mc/1_000_000:.2f}M"
@@ -2633,7 +2773,7 @@ def get_wallet_history_transactions():
                                     # Age (After migration) - creation time of the standard DEX pair
                                     if is_migrated:
                                         standard_dex_pair = None
-                                        for p in pairs:
+                                        for p in sorted_pairs:
                                             d_id = p.get("dexId", "").lower()
                                             if d_id not in ["pumpfun", "moonshot", "pumpswap"]:
                                                 standard_dex_pair = p
@@ -2653,11 +2793,14 @@ def get_wallet_history_transactions():
                                             age_migration_str = "0"
                                             
                                     # perf
-                                    price_change = primary_pair.get("priceChange", {})
-                                    perf_5m = float(price_change.get("m5", 0))
-                                    perf_1h = float(price_change.get("h1", 0))
-                                    perf_6h = float(price_change.get("h6", 0))
-                                    perf_24h = float(price_change.get("h24", 0))
+                                    perf_5m, perf_1h, perf_6h, perf_24h = extract_best_price_change(pairs)
+                                    s["perf_5m"] = perf_5m
+                                    s["perf_1h"] = perf_1h
+                                    s["perf_6h"] = perf_6h
+                                    s["perf_24h"] = perf_24h
+                                    s["market_cap"] = mc_str
+                                    s["creation_age"] = age_creation_str
+                                    s["migration_age"] = age_migration_str
                             
                             payment_amount_usd = s["total_sent_usd"]
                             
@@ -2691,6 +2834,7 @@ def get_wallet_history_transactions():
                                    f"┃ 🟥 24h: {perf_24h:+.2f}%\n"
                                    f"━━━━━━━━━━━\n"
                                    f"📈 Chart: https://dexscreener.com/solana/{token}")
+                            s["formatted_message"] = msg
                             
                             _, dropped, reason = process_message_logic(msg, workflow_rules, context={"payer_address": s.get("address"), "token_name": project_name})
                             if dropped:
@@ -3346,6 +3490,41 @@ def get_token_wallet_data():
             item_dict['creation_age'] = c_age
             item_dict['migration_age'] = m_age
             item_dict['age'] = c_age
+
+            # Fallback extraction from formatted_message if metrics/fields are null in DB
+            if raw_msg:
+                if item_dict.get('perf_5m') is None:
+                    m5 = re.search(r'5m:\s*([+-]?\d+(?:\.\d+)?)%', raw_msg)
+                    if m5:
+                        try: item_dict['perf_5m'] = float(m5.group(1))
+                        except ValueError: pass
+                if item_dict.get('perf_1h') is None:
+                    h1 = re.search(r'1h:\s*([+-]?\d+(?:\.\d+)?)%', raw_msg)
+                    if h1:
+                        try: item_dict['perf_1h'] = float(h1.group(1))
+                        except ValueError: pass
+                if item_dict.get('perf_6h') is None:
+                    h6 = re.search(r'6h:\s*([+-]?\d+(?:\.\d+)?)%', raw_msg)
+                    if h6:
+                        try: item_dict['perf_6h'] = float(h6.group(1))
+                        except ValueError: pass
+                if item_dict.get('perf_24h') is None:
+                    h24 = re.search(r'24h:\s*([+-]?\d+(?:\.\d+)?)%', raw_msg)
+                    if h24:
+                        try: item_dict['perf_24h'] = float(h24.group(1))
+                        except ValueError: pass
+                if not item_dict.get('ca'):
+                    ca_match = re.search(r'CA:\s*([1-9A-HJ-NP-Za-km-z]{32,44})', raw_msg)
+                    if ca_match:
+                        item_dict['ca'] = ca_match.group(1)
+                if (not item_dict.get('market_cap') or item_dict.get('market_cap') == '-') and raw_msg:
+                    mc_match = re.search(r'Market Cap:\s*(\$[\d,]+(?:\.\d+)?[KMB]?)', raw_msg, re.IGNORECASE)
+                    if mc_match:
+                        item_dict['market_cap'] = mc_match.group(1)
+                if (not item_dict.get('token_name') or item_dict.get('token_name') == 'SOL') and raw_msg:
+                    name_match = re.search(r'PROJECT:\s*(.+?)\s*🚀', raw_msg, re.IGNORECASE)
+                    if name_match:
+                        item_dict['token_name'] = name_match.group(1).strip()
 
             if not item_dict.get('token_name'):
                 item_dict['token_name'] = "SOL" if mint == "SOL" else (token_metadata_cache.get(mint) or (mint[:6] + '...' if len(mint) > 10 else mint))
