@@ -1487,7 +1487,11 @@ function resetTokenFilters() {
 
 function toggleTokenDataAutoRefresh() {
     const select = document.getElementById('token-data-autorefresh');
-    const intervalMs = parseInt(select ? select.value : '60000', 10);
+    let intervalMs = parseInt(select ? select.value : '60000', 10);
+    if (isNaN(intervalMs) || intervalMs < 0) {
+        intervalMs = 60000;
+        if (select) select.value = '60000';
+    }
     
     try {
         localStorage.setItem('teleflow_token_data_refresh_pref', String(intervalMs));
@@ -2132,10 +2136,16 @@ setInterval(loadRealtimePayments, 15000);
 updateLiveScanButtonUI();
 updateTrackerStatusUI();
 // Restore saved auto-refresh preference if present
+const validIntervals = ['0', '60000', '300000', '900000', '3600000'];
 const savedRefreshPref = localStorage.getItem('teleflow_token_data_refresh_pref');
 const refreshSelect = document.getElementById('token-data-autorefresh');
-if (refreshSelect && savedRefreshPref !== null) {
-    refreshSelect.value = savedRefreshPref;
+if (refreshSelect) {
+    if (savedRefreshPref !== null && validIntervals.includes(savedRefreshPref)) {
+        refreshSelect.value = savedRefreshPref;
+    } else {
+        refreshSelect.value = '60000'; // Default to 1 min
+        try { localStorage.setItem('teleflow_token_data_refresh_pref', '60000'); } catch (e) {}
+    }
 }
 toggleTokenDataAutoRefresh();
 
