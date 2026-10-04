@@ -10,7 +10,6 @@ from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from flask import Flask, render_template, request, jsonify
 from dotenv import load_dotenv
-import turso
 
 load_dotenv()
 
@@ -170,8 +169,17 @@ if PERSISTENT_DATA_DIR:
 else:
     DB_PATH = os.path.join(current_dir, 'db/bot.sqlite')
 
-TURSO_URL = os.environ.get("TURSO_DATABASE_URL")
-TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
+SUPABASE_URL = (os.environ.get("SUPABASE_URL") or "").strip()
+SUPABASE_KEY = (os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_ANON_KEY") or "").strip()
+
+supabase_client = None
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        from supabase import create_client
+        supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        print(f"[SUPABASE] Initialized Supabase client for {SUPABASE_URL}", flush=True)
+    except Exception as e:
+        print(f"[SUPABASE] Warning: Failed to initialize Supabase client: {e}", flush=True)
 
 class CustomRow(dict):
     def __init__(self, cursor, row):
@@ -187,99 +195,225 @@ class CustomRow(dict):
 def custom_row_factory(cursor, row):
     return CustomRow(cursor, row)
 
-# Resolved above based on PERSISTENT_DATA_DIR
-
 db_lock = threading.RLock()
 global_conn = None
-last_pull_time = 0
 
-def pull_database_if_needed(conn):
-    global last_pull_time
-    if TURSO_URL and (TURSO_URL.startswith("libsql://") or TURSO_URL.startswith("https://")):
-        now = time.time()
-        if now - last_pull_time >= 60:
-            with db_lock:
-                try:
-                    conn.pull()
-                    last_pull_time = now
-                except Exception as e:
-                    if "busy" not in str(e).lower():
-                        print(f"[TURSO] Warning: Failed to pull remote updates: {e}", flush=True)
-
-def safe_sync_pull(conn):
-    # Acquire db_lock inside the thread worker so we don't hold the lock on the main event loop
-    with db_lock:
-        try:
-            conn.pull()
-        except Exception as e:
-            if "busy" not in str(e).lower():
-                print(f"[TURSO] Warning: Failed to pull remote updates in background thread: {e}", flush=True)
-
-async def turso_sync_loop():
-    if not TURSO_URL or not (TURSO_URL.startswith("libsql://") or TURSO_URL.startswith("https://")):
-        return
-    print("[TURSO] Started background periodic database sync loop.", flush=True)
-    
-    # Run the first database pull in background immediately after 1 second
-    await asyncio.sleep(1)
-    try:
-        conn = get_db()
-        await asyncio.to_thread(safe_sync_pull, conn)
-        print("[TURSO] Initial background sync complete.", flush=True)
-    except Exception as e:
-        print(f"[TURSO] Warning: Initial background sync failed: {e}", flush=True)
-
-    while True:
-        await asyncio.sleep(60)
-        try:
-            conn = get_db()
-            await asyncio.to_thread(safe_sync_pull, conn)
-        except Exception as e:
-            print(f"[TURSO] Warning: Failed to start background sync thread: {e}", flush=True)
-    
 def get_db():
-    global global_conn, last_pull_time
-    
-    # We must lock the initialization to prevent race conditions
+    global global_conn
     with db_lock:
         if global_conn is not None:
             return global_conn
             
-        # Ensure the parent directory for the local database file exists
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        
-        if TURSO_URL and (TURSO_URL.startswith("libsql://") or TURSO_URL.startswith("https://")):
-            import turso.sync
-            # turso.sync only allows ONE connection per file, so we make it global
-            global_conn = turso.sync.connect(DB_PATH, remote_url=TURSO_URL, auth_token=TURSO_TOKEN)
+        global_conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+        try:
+            global_conn.execute("PRAGMA journal_mode = WAL;")
+            global_conn.execute("PRAGMA busy_timeout = 30000;")
+        except Exception as e:
+            print(f"[SQLITE] Warning setting pragmas: {e}", flush=True)
             
-            # Set busy timeout on the local sqlite database for Turso connection
-            try:
-                cursor = global_conn.cursor()
-                cursor.execute("PRAGMA busy_timeout = 10000;")
-            except Exception as e:
-                print(f"[TURSO] Warning: Failed to set busy_timeout: {e}", flush=True)
-            
-            # Note: Startup pull has been moved to a background sync task to prevent blocking health checks
-            pass
-            
-            # Override commit to automatically push changes to the cloud safely
-            original_commit = global_conn.commit
-            def auto_push_commit():
-                with db_lock:
-                    original_commit()
-                    try:
-                        global_conn.push()
-                    except Exception as e:
-                        print(f"Warning: Failed to push to Turso: {e}")
-            global_conn.commit = auto_push_commit
-        else:
-            global_conn = sqlite3.connect(DB_PATH, timeout=20, check_same_thread=False)
-        
         global_conn.row_factory = custom_row_factory
-        
-        # In a shared connection setup, we can't let individual threads close the DB!
         return global_conn
+
+def sync_from_supabase():
+    """Pull data from Supabase REST API into local SQLite cache"""
+    if not supabase_client:
+        return
+    try:
+        with db_lock:
+            conn = get_db()
+            cursor = conn.cursor()
+            
+            # Sync Settings
+            try:
+                res = supabase_client.table('settings').select('*').execute()
+                if res.data:
+                    for row in res.data:
+                        k = row.get('key')
+                        v = row.get('value')
+                        if k is not None and v is not None:
+                            cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (k, v))
+            except Exception as e:
+                print(f"[SUPABASE] Settings pull notice: {e}", flush=True)
+                
+            # Sync Workflows & Rules
+            try:
+                wf_res = supabase_client.table('workflows').select('*').execute()
+                if wf_res.data:
+                    for wf in wf_res.data:
+                        cursor.execute("""
+                            INSERT OR REPLACE INTO workflows (id, name, source_channel, source_channel_id, target_channel, target_channel_id, is_active)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            wf.get('id'),
+                            wf.get('name'),
+                            wf.get('source_channel'),
+                            wf.get('source_channel_id'),
+                            wf.get('target_channel'),
+                            wf.get('target_channel_id'),
+                            1 if wf.get('is_active', True) else 0
+                        ))
+                
+                rules_res = supabase_client.table('rules').select('*').execute()
+                if rules_res.data:
+                    for r in rules_res.data:
+                        cursor.execute("""
+                            INSERT OR REPLACE INTO rules (id, workflow_id, rule_type, search_text, replace_text, time_min, time_max)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            r.get('id'),
+                            r.get('workflow_id'),
+                            r.get('rule_type'),
+                            r.get('search_text'),
+                            r.get('replace_text'),
+                            r.get('time_min'),
+                            r.get('time_max')
+                        ))
+            except Exception as e:
+                print(f"[SUPABASE] Workflows/Rules pull notice: {e}", flush=True)
+                
+            conn.commit()
+            
+        # Sync Wallet Payments from Supabase into SQLite
+        sync_wallet_payments_from_supabase()
+    except Exception as e:
+        print(f"[SUPABASE] Sync error: {e}", flush=True)
+
+def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
+    """Pull new and updated wallet_payments from Supabase into local SQLite cache"""
+    try:
+        direct_url = os.getenv('DIRECT_URL') or os.getenv('DATABASE_URL')
+        if direct_url:
+            try:
+                import psycopg2
+                with psycopg2.connect(direct_url, connect_timeout=8) as pg_conn:
+                    with pg_conn.cursor() as pg_cur:
+                        if full_sync:
+                            start_id = 0
+                        else:
+                            with db_lock:
+                                sq_conn = get_db()
+                                sq_cur = sq_conn.cursor()
+                                max_local_id = sq_cur.execute("SELECT COALESCE(MAX(id), 0) FROM wallet_payments").fetchone()[0]
+                                local_cnt = sq_cur.execute("SELECT COUNT(*) FROM wallet_payments").fetchone()[0]
+                            
+                            pg_cur.execute("SELECT COUNT(*), COALESCE(MAX(id), 0) FROM wallet_payments;")
+                            pg_cnt, pg_max = pg_cur.fetchone()
+                            
+                            if local_cnt < pg_cnt or pg_max > max_local_id + 500:
+                                start_id = max(0, min(max_local_id - limit_records, local_cnt))
+                            else:
+                                start_id = max(0, max_local_id - limit_records)
+                        
+                        pg_cur.execute("""
+                            SELECT id, tracked_address, sender_address, amount, mint, signature, timestamp,
+                                   token_name, ca, platform, market_cap, age, perf_5m, perf_1h, perf_6h, perf_24h,
+                                   dex_url, migration_status, status, reason, formatted_message, created_at, migration_age
+                            FROM wallet_payments 
+                            WHERE id >= %s 
+                            ORDER BY id ASC;
+                        """, (start_id,))
+                        rows = pg_cur.fetchall()
+                        if rows:
+                            cols = [
+                                "id", "tracked_address", "sender_address", "amount", "mint", "signature", "timestamp",
+                                "token_name", "ca", "platform", "market_cap", "age", "perf_5m", "perf_1h", "perf_6h", "perf_24h",
+                                "dex_url", "migration_status", "status", "reason", "formatted_message", "created_at", "migration_age"
+                            ]
+                            col_str = ", ".join(cols)
+                            ph_str = ", ".join(["?" for _ in cols])
+                            clean_rows = []
+                            for r in rows:
+                                rl = list(r)
+                                for i, v in enumerate(rl):
+                                    if hasattr(v, 'isoformat'):
+                                        rl[i] = str(v)
+                                clean_rows.append(tuple(rl))
+                            with db_lock:
+                                sq_conn = get_db()
+                                sq_cur = sq_conn.cursor()
+                                sq_cur.executemany(f"INSERT OR REPLACE INTO wallet_payments ({col_str}) VALUES ({ph_str})", clean_rows)
+                                sq_conn.commit()
+                            print(f"[SUPABASE] Synced {len(rows)} wallet_payments from Postgres (from ID {start_id} up to ID {rows[-1][0]})", flush=True)
+                            return len(rows)
+            except Exception as pg_err:
+                print(f"[SUPABASE] Direct Postgres wallet sync notice: {pg_err}", flush=True)
+
+        if supabase_client:
+            with db_lock:
+                sq_conn = get_db()
+                sq_cur = sq_conn.cursor()
+                max_local_id = sq_cur.execute("SELECT COALESCE(MAX(id), 0) FROM wallet_payments").fetchone()[0]
+                start_id = 0 if full_sync else max(0, max_local_id - limit_records)
+            
+            res = supabase_client.table('wallet_payments').select('*').gte('id', start_id).order('id', desc=False).limit(1000).execute()
+            if res.data:
+                cols = [
+                    "id", "tracked_address", "sender_address", "amount", "mint", "signature", "timestamp",
+                    "token_name", "ca", "platform", "market_cap", "age", "perf_5m", "perf_1h", "perf_6h", "perf_24h",
+                    "dex_url", "migration_status", "status", "reason", "formatted_message", "created_at", "migration_age"
+                ]
+                col_str = ", ".join(cols)
+                ph_str = ", ".join(["?" for _ in cols])
+                clean_rows = []
+                for item in res.data:
+                    clean_rows.append(tuple(item.get(c) for c in cols))
+                with db_lock:
+                    sq_conn = get_db()
+                    sq_cur = sq_conn.cursor()
+                    sq_cur.executemany(f"INSERT OR REPLACE INTO wallet_payments ({col_str}) VALUES ({ph_str})", clean_rows)
+                    sq_conn.commit()
+                print(f"[SUPABASE] Synced {len(clean_rows)} wallet_payments via REST API", flush=True)
+                return len(clean_rows)
+        return 0
+    except Exception as e:
+        print(f"[SUPABASE] wallet_payments sync error: {e}", flush=True)
+        return 0
+
+def push_to_supabase_table(table_name, record, on_conflict=None):
+    """Helper to push a single record or upsert into Supabase"""
+    if not supabase_client:
+        return
+    def _do_push():
+        try:
+            if on_conflict:
+                supabase_client.table(table_name).upsert(record, on_conflict=on_conflict).execute()
+            elif table_name == 'wallet_payments' and 'signature' in record and record.get('signature'):
+                supabase_client.table(table_name).upsert(record, on_conflict='signature').execute()
+            else:
+                supabase_client.table(table_name).upsert(record).execute()
+        except Exception as e:
+            print(f"[SUPABASE] Push error on {table_name}: {e}", flush=True)
+    threading.Thread(target=_do_push, daemon=True).start()
+
+def delete_from_supabase_table(table_name, key_col, key_val):
+    """Helper to delete records from Supabase"""
+    if not supabase_client:
+        return
+    def _do_delete():
+        try:
+            supabase_client.table(table_name).delete().eq(key_col, key_val).execute()
+        except Exception as e:
+            print(f"[SUPABASE] Delete error on {table_name}: {e}", flush=True)
+    threading.Thread(target=_do_delete, daemon=True).start()
+
+async def supabase_sync_loop():
+    if not supabase_client:
+        return
+    print("[SUPABASE] Started background Supabase synchronization loop.", flush=True)
+    await asyncio.sleep(2)
+    try:
+        await asyncio.to_thread(sync_from_supabase)
+        print("[SUPABASE] Initial sync from Supabase complete.", flush=True)
+    except Exception as e:
+        print(f"[SUPABASE] Initial sync error: {e}", flush=True)
+
+    while True:
+        await asyncio.sleep(60)
+        try:
+            await asyncio.to_thread(sync_from_supabase)
+        except Exception as e:
+            print(f"[SUPABASE] Periodic sync error: {e}", flush=True)
 
 def init_db():
     with db_lock:
@@ -413,9 +547,34 @@ def init_db():
                 mint TEXT,
                 signature TEXT UNIQUE,
                 timestamp INTEGER,
+                token_name TEXT,
+                ca TEXT,
+                platform TEXT,
+                market_cap TEXT,
+                age TEXT,
+                perf_5m REAL,
+                perf_1h REAL,
+                perf_6h REAL,
+                perf_24h REAL,
+                dex_url TEXT,
+                migration_status TEXT,
+                status TEXT,
+                reason TEXT,
+                formatted_message TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        
+        # Add new columns to wallet_payments if they don't exist yet
+        for col_def in [
+            'token_name TEXT', 'ca TEXT', 'platform TEXT', 'market_cap TEXT', 'age TEXT', 'migration_age TEXT',
+            'perf_5m REAL', 'perf_1h REAL', 'perf_6h REAL', 'perf_24h REAL',
+            'dex_url TEXT', 'migration_status TEXT', 'status TEXT', 'reason TEXT', 'formatted_message TEXT'
+        ]:
+            try:
+                cursor.execute(f'ALTER TABLE wallet_payments ADD COLUMN {col_def}')
+            except Exception:
+                pass
     
         # Add ON DELETE CASCADE support
         cursor.execute('PRAGMA foreign_keys = ON;')
@@ -610,10 +769,10 @@ def process_message_logic(text, rules, context=None):
                 min_p = float(min_p_str) if min_p_str and str(min_p_str).strip() != "" else 0.0
                 max_p = float(max_p_str) if max_p_str and str(max_p_str).strip() != "" else float('inf')
                 
-                # Extract payment from string: "DEX Payment: $12.34 USD"
-                match = re.search(r'DEX Payment:\s*\$?([\d\.]+)\s*USD', text, re.IGNORECASE)
+                # Extract payment from string: "DEX Payment: $12.34 USD" or "DEX Payment: $12 USD"
+                match = re.search(r'DEX Payment:\s*\$?([\d,]+(?:\.\d+)?)\s*(?:USD)?', text, re.IGNORECASE)
                 if match:
-                    val = float(match.group(1))
+                    val = float(match.group(1).replace(',', ''))
                     if not (min_p <= val <= max_p):
                         print(f"      [DEX PAYMENT] DROPPING: {min_p} <= {val} <= {max_p} is FALSE", flush=True)
                         return None, True, f"Dropped by DEX Payment Filter (Allowed: ${min_p}-${max_p} USD, Found: ${val} USD)"
@@ -693,6 +852,49 @@ def process_message_logic(text, rules, context=None):
                 if platform_to_exclude in text.lower():
                     return None, True, f"Dropped by Platform Exclusion (Found '{platform_to_exclude}')"
 
+        # TOKEN NAME FILTER LOGIC
+        elif rule_type == 'token_name':
+            pattern = (rule.get('search_text') or '').strip()
+            mode = (rule.get('replace_text') or 'include').strip().lower()
+            if not pattern:
+                pattern = '.*'
+                
+            # Extract token/project name
+            token_name = context.get('token_name') or context.get('project_name')
+            if not token_name:
+                proj_match = re.search(r'PROJECT:\s*([^🚀\n\r]+)', text, re.IGNORECASE)
+                if proj_match:
+                    token_name = proj_match.group(1).strip()
+                else:
+                    name_match = re.search(r'(?:Token Name|Token|Name):\s*([^\n\r]+)', text, re.IGNORECASE)
+                    if name_match:
+                        token_name = name_match.group(1).strip()
+                    else:
+                        token_name = ""
+
+            print(f"      [TOKEN NAME] token_name='{token_name}', pattern='{pattern}', mode='{mode}'", flush=True)
+
+            is_matched = False
+            try:
+                if token_name and re.search(pattern, token_name, re.IGNORECASE):
+                    is_matched = True
+            except re.error:
+                if token_name and pattern.lower() in token_name.lower():
+                    is_matched = True
+
+            if mode == 'exclude':
+                if is_matched and token_name:
+                    print(f"      [TOKEN NAME] DROPPING: Token name '{token_name}' matched excluded pattern '{pattern}'", flush=True)
+                    return None, True, f"Dropped by Token Name Filter (Token '{token_name}' matched excluded pattern '{pattern}')"
+                else:
+                    print(f"      [TOKEN NAME] PASSED: Token name '{token_name}' did not match excluded pattern '{pattern}'", flush=True)
+            else:  # mode == 'include' (default)
+                if not is_matched:
+                    print(f"      [TOKEN NAME] DROPPING: Token name '{token_name or 'Unknown'}' did not match required pattern '{pattern}'", flush=True)
+                    return None, True, f"Dropped by Token Name Filter (Token '{token_name or 'Unknown'}' did not match required pattern '{pattern}')"
+                else:
+                    print(f"      [TOKEN NAME] PASSED: Token name '{token_name}' matched required pattern '{pattern}'", flush=True)
+
         # WORD FILTER LOGIC
         elif rule_type == 'filter':
             search = rule.get('search_text', '')
@@ -759,6 +961,27 @@ def create_workflow():
                 
             conn.commit()
             
+            # Sync to Supabase
+            if supabase_client:
+                push_to_supabase_table('workflows', {
+                    'id': wf_id,
+                    'name': data.get('name'),
+                    'source_channel': data.get('source_channel'),
+                    'source_channel_id': data.get('source_channel_id'),
+                    'target_channel': data.get('target_channel'),
+                    'target_channel_id': data.get('target_channel_id'),
+                    'is_active': True
+                })
+                for rule in data.get('rules', []):
+                    push_to_supabase_table('rules', {
+                        'workflow_id': wf_id,
+                        'rule_type': rule.get('rule_type'),
+                        'search_text': rule.get('search_text'),
+                        'replace_text': rule.get('replace_text'),
+                        'time_min': rule.get('time_min'),
+                        'time_max': rule.get('time_max')
+                    })
+            
         return jsonify({"success": True, "id": wf_id})
     except Exception as e:
         import traceback
@@ -795,6 +1018,26 @@ def update_workflow(id):
                 
             conn.commit()
             
+            if supabase_client:
+                push_to_supabase_table('workflows', {
+                    'id': id,
+                    'name': data.get('name'),
+                    'source_channel': data.get('source_channel'),
+                    'source_channel_id': data.get('source_channel_id'),
+                    'target_channel': data.get('target_channel'),
+                    'target_channel_id': data.get('target_channel_id')
+                })
+                delete_from_supabase_table('rules', 'workflow_id', id)
+                for rule in data.get('rules', []):
+                    push_to_supabase_table('rules', {
+                        'workflow_id': id,
+                        'rule_type': rule.get('rule_type'),
+                        'search_text': rule.get('search_text'),
+                        'replace_text': rule.get('replace_text'),
+                        'time_min': rule.get('time_min'),
+                        'time_max': rule.get('time_max')
+                    })
+            
         return jsonify({"success": True})
     except Exception as e:
         import traceback
@@ -815,6 +1058,9 @@ def toggle_workflow(id):
         
         cursor.execute('UPDATE workflows SET is_active=? WHERE id=?', (new_status, id))
         conn.commit()
+        
+        if supabase_client:
+            push_to_supabase_table('workflows', {'id': id, 'is_active': bool(new_status)})
     return jsonify({"success": True, "is_active": bool(new_status)})
 
 @app.route('/api/workflows/<int:id>', methods=['DELETE'])
@@ -827,6 +1073,10 @@ def delete_workflow(id):
             cursor.execute('DELETE FROM rules WHERE workflow_id=?', (id,))
             cursor.execute('DELETE FROM workflows WHERE id=?', (id,))
             conn.commit()
+            
+            if supabase_client:
+                delete_from_supabase_table('rules', 'workflow_id', id)
+                delete_from_supabase_table('workflows', 'id', id)
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -839,6 +1089,8 @@ def save_settings():
         cursor = conn.cursor()
         for key, value in data.items():
             cursor.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', (key, value))
+            if supabase_client:
+                push_to_supabase_table('settings', {'key': key, 'value': str(value)})
         conn.commit()
     return jsonify({"success": True})
 
@@ -1387,7 +1639,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
     if workflows_to_evaluate:
         passed_channels = []
         for wf in workflows_to_evaluate:
-            modified_text, dropped, reason = process_message_logic(msg, wf.get('rules', []), context={"payer_address": payer_address})
+            modified_text, dropped, reason = process_message_logic(msg, wf.get('rules', []), context={"payer_address": payer_address, "token_name": project_name})
             if dropped:
                 token_dropped_reasons.append(f"[{wf.get('name') or 'Flow'}]: {reason}")
                 continue
@@ -1446,7 +1698,79 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                 db_status, dex_url, migration_status_formatted, order_type,
                 payment_timestamp, order_status, token_info.get("reason")
             ))
+            
+            # Enrich and update wallet_payments with full token & Telegram metrics
+            sig = item.get("signature")
+            payer = item.get("payer_address")
+            send_text = token_info.get("formatted_message") or msg
+            
+            enrichment_payload = {
+                'token_name': project_name,
+                'ca': ca,
+                'platform': chain_id,
+                'market_cap': mc_str,
+                'age': age_string,
+                'migration_age': age_migration_str,
+                'perf_5m': perf_5m,
+                'perf_1h': perf_1h,
+                'perf_6h': perf_6h,
+                'perf_24h': perf_24h,
+                'dex_url': dex_url,
+                'migration_status': migration_status_formatted,
+                'status': db_status,
+                'reason': token_info.get("reason"),
+                'formatted_message': send_text
+            }
+            
+            if sig:
+                cursor.execute("""
+                    UPDATE wallet_payments 
+                    SET token_name=?, ca=?, platform=?, market_cap=?, age=?, migration_age=?, perf_5m=?, perf_1h=?, perf_6h=?, perf_24h=?, dex_url=?, migration_status=?, status=?, reason=?, formatted_message=?
+                    WHERE signature=?
+                """, (
+                    project_name, ca, chain_id, mc_str, age_string, age_migration_str, perf_5m, perf_1h, perf_6h, perf_24h, dex_url, migration_status_formatted, db_status, token_info.get("reason"), send_text, sig
+                ))
+            elif payer:
+                cursor.execute("""
+                    UPDATE wallet_payments 
+                    SET token_name=?, ca=?, platform=?, market_cap=?, age=?, migration_age=?, perf_5m=?, perf_1h=?, perf_6h=?, perf_24h=?, dex_url=?, migration_status=?, status=?, reason=?, formatted_message=?
+                    WHERE sender_address=? AND (timestamp * 1000 BETWEEN ? AND ?)
+                """, (
+                    project_name, ca, chain_id, mc_str, age_string, age_migration_str, perf_5m, perf_1h, perf_6h, perf_24h, dex_url, migration_status_formatted, db_status, token_info.get("reason"), send_text, payer, payment_timestamp - 180000, payment_timestamp + 180000
+                ))
+            
             conn.commit()
+            
+            if supabase_client:
+                push_to_supabase_table('cto_signals', {
+                    'ca': ca,
+                    'name': project_name,
+                    'platform': chain_id,
+                    'market_cap': mc_str,
+                    'age': age_string,
+                    'perf_5m': perf_5m,
+                    'perf_1h': perf_1h,
+                    'perf_6h': perf_6h,
+                    'perf_24h': perf_24h,
+                    'status': db_status,
+                    'dex_url': dex_url,
+                    'migration_status': migration_status_formatted,
+                    'signal_type': order_type,
+                    'payment_timestamp': payment_timestamp,
+                    'order_status': order_status,
+                    'reason': token_info.get("reason")
+                })
+                if sig:
+                    sp_wallet_payload = dict(enrichment_payload)
+                    sp_wallet_payload['signature'] = sig
+                    push_to_supabase_table('wallet_payments', sp_wallet_payload, on_conflict='signature')
+                elif payer:
+                    def _update_supabase_wallet():
+                        try:
+                            supabase_client.table('wallet_payments').update(enrichment_payload).eq('sender_address', payer).gte('timestamp', (payment_timestamp - 180000)//1000).lte('timestamp', (payment_timestamp + 180000)//1000).execute()
+                        except Exception as e:
+                            print(f"[SUPABASE] wallet_payments update error: {e}", flush=True)
+                    threading.Thread(target=_update_supabase_wallet, daemon=True).start()
             
     return token_info
 
@@ -1789,7 +2113,7 @@ async def get_latest_signatures(address, api_key, limit=5):
     return []
 
 # Helper to trace and process payment sender history in background
-async def process_payment_and_forward(payer_address, tx_timestamp, amount_usd=0.0):
+async def process_payment_and_forward(payer_address, tx_timestamp, amount_usd=0.0, signature=None, tracked_address=None):
     try:
         print(f"[WALLET TRACKER] Tracing sender history for {payer_address}...", flush=True)
         loop_settings = get_settings()
@@ -1810,7 +2134,10 @@ async def process_payment_and_forward(payer_address, tx_timestamp, amount_usd=0.
                 "order_type": "Tracked Wallet Payment",
                 "order_status": "detected",
                 "payment_timestamp": tx_timestamp * 1000,
-                "amount_usd": amount_usd
+                "amount_usd": amount_usd,
+                "signature": signature,
+                "payer_address": payer_address,
+                "tracked_address": tracked_address
             }
             await process_single_cto_item(item, target, wf_id, t_mode)
         else:
@@ -1893,9 +2220,18 @@ async def wallet_tracker_polling_loop():
                                                     VALUES (?, ?, ?, ?, ?, ?)
                                                 ''', (tracked_address, from_addr, amount_sol, "SOL", sig, timestamp))
                                                 conn.commit()
+                                                if supabase_client:
+                                                    push_to_supabase_table('wallet_payments', {
+                                                        'tracked_address': tracked_address,
+                                                        'sender_address': from_addr,
+                                                        'amount': amount_sol,
+                                                        'mint': "SOL",
+                                                        'signature': sig,
+                                                        'timestamp': timestamp
+                                                    })
                                                 print(f"[WALLET TRACKER] Logged real-time native payment: {amount_sol} SOL from {from_addr} to {tracked_address}", flush=True)
                                                 # Trigger background history tracing and filtering
-                                                asyncio.create_task(process_payment_and_forward(from_addr, timestamp, amount_usd))
+                                                asyncio.create_task(process_payment_and_forward(from_addr, timestamp, amount_usd, signature=sig, tracked_address=tracked_address))
                                             except Exception as e:
                                                 if "unique" in str(e).lower() or "integrity" in str(e).lower():
                                                     pass
@@ -1920,6 +2256,15 @@ async def wallet_tracker_polling_loop():
                                                     VALUES (?, ?, ?, ?, ?, ?)
                                                 ''', (tracked_address, from_addr, token_amount, mint, sig, timestamp))
                                                 conn.commit()
+                                                if supabase_client:
+                                                    push_to_supabase_table('wallet_payments', {
+                                                        'tracked_address': tracked_address,
+                                                        'sender_address': from_addr,
+                                                        'amount': token_amount,
+                                                        'mint': mint,
+                                                        'signature': sig,
+                                                        'timestamp': timestamp
+                                                    })
                                                 print(f"[WALLET TRACKER] Logged real-time token payment: {token_amount} {mint[:8]}... from {from_addr} to {tracked_address}", flush=True)
                                                 
                                                 # If it is a custom token, forward it directly. Otherwise trace payer history.
@@ -1933,11 +2278,14 @@ async def wallet_tracker_polling_loop():
                                                         "order_type": "Tracked Wallet Swap",
                                                         "order_status": "detected",
                                                         "payment_timestamp": timestamp * 1000,
-                                                        "amount_usd": amount_usd
+                                                        "amount_usd": amount_usd,
+                                                        "signature": sig,
+                                                        "payer_address": from_addr,
+                                                        "tracked_address": tracked_address
                                                     }
                                                     asyncio.create_task(process_single_cto_item(item, target, wf_id, t_mode))
                                                 else:
-                                                    asyncio.create_task(process_payment_and_forward(from_addr, timestamp, amount_usd))
+                                                    asyncio.create_task(process_payment_and_forward(from_addr, timestamp, amount_usd, signature=sig, tracked_address=tracked_address))
                                             except Exception as e:
                                                 if "unique" in str(e).lower() or "integrity" in str(e).lower():
                                                     pass
@@ -2300,7 +2648,7 @@ def get_wallet_history_transactions():
                                    f"━━━━━━━━━━━\n"
                                    f"📈 Chart: https://dexscreener.com/solana/{token}")
                             
-                            _, dropped, reason = process_message_logic(msg, workflow_rules, context={"payer_address": s.get("address")})
+                            _, dropped, reason = process_message_logic(msg, workflow_rules, context={"payer_address": s.get("address"), "token_name": project_name})
                             if dropped:
                                 s["test_status"] = "dropped"
                                 s["test_reason"] = reason
@@ -2523,11 +2871,12 @@ def get_wallet_payments_log():
             conn = get_db()
             cursor = conn.cursor()
             rows = cursor.execute('''
-                SELECT id, tracked_address, sender_address, amount, mint, signature, timestamp, created_at
+                SELECT id, tracked_address, sender_address, amount, mint, signature, timestamp,
+                       token_name, ca, platform, market_cap, age, perf_5m, perf_1h, perf_6h, perf_24h,
+                       dex_url, migration_status, status, reason, formatted_message, created_at
                 FROM wallet_payments
-                ORDER BY id DESC LIMIT 50
+                ORDER BY id DESC LIMIT 100
             ''').fetchall()
-            # Convert rows to plain dicts to use outside the lock
             rows_list = [dict(r) if isinstance(r, dict) else {
                 "id": r[0],
                 "tracked_address": r[1],
@@ -2536,7 +2885,21 @@ def get_wallet_payments_log():
                 "mint": r[4],
                 "signature": r[5],
                 "timestamp": r[6],
-                "created_at": r[7]
+                "token_name": r[7],
+                "ca": r[8],
+                "platform": r[9],
+                "market_cap": r[10],
+                "age": r[11],
+                "perf_5m": r[12],
+                "perf_1h": r[13],
+                "perf_6h": r[14],
+                "perf_24h": r[15],
+                "dex_url": r[16],
+                "migration_status": r[17],
+                "status": r[18],
+                "reason": r[19],
+                "formatted_message": r[20],
+                "created_at": r[21]
             } for r in rows]
             
         results = []
@@ -2546,19 +2909,431 @@ def get_wallet_payments_log():
             price = get_token_price_usd(mint)
             amount_usd = amount * price if price else 0.0
             
-            results.append({
-                "id": r['id'],
-                "tracked_address": r['tracked_address'],
-                "sender_address": r['sender_address'],
-                "amount": amount,
-                "mint": mint,
-                "amount_usd": amount_usd,
-                "token_name": "SOL" if mint == "SOL" else get_token_metadata(mint),
-                "signature": r['signature'],
-                "timestamp": r['timestamp'],
-                "created_at": r['created_at']
-            })
+            res_dict = dict(r)
+            res_dict['amount_usd'] = amount_usd
+            if not res_dict.get('token_name'):
+                res_dict['token_name'] = "SOL" if mint == "SOL" else get_token_metadata(mint)
+            results.append(res_dict)
         return jsonify({"success": True, "payments": results})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+def parse_mc_usd(val):
+    if not val:
+        return None
+    clean_s = str(val).replace('$', '').strip()
+    m = re.search(r'([\d\.]+)\s*([KM]?)', clean_s, re.I)
+    if not m:
+        return None
+    try:
+        num = float(m.group(1))
+        suf = m.group(2).upper()
+        if suf == 'K':
+            num *= 1_000
+        elif suf == 'M':
+            num *= 1_000_000
+        return num
+    except Exception:
+        return None
+
+def parse_age_minutes(val):
+    if not val:
+        return None
+    s = str(val).lower()
+    if 'just now' in s or 'new' in s:
+        return 0.0
+    m_d = re.search(r'(\d+)\s*(?:d|day)', s)
+    m_h = re.search(r'(\d+)\s*(?:h|hr|hour)', s)
+    m_m = re.search(r'(\d+)\s*(?:m|min|minute)', s)
+    if not (m_d or m_h or m_m):
+        return None
+    total_m = 0.0
+    if m_d:
+        total_m += int(m_d.group(1)) * 1440
+    if m_h:
+        total_m += int(m_h.group(1)) * 60
+    if m_m:
+        total_m += int(m_m.group(1))
+    return total_m
+
+def extract_creation_age_str(age, formatted_message=None):
+    if age and str(age).strip() not in ('', 'None', 'Unknown'):
+        return str(age).strip()
+    if formatted_message:
+        m = re.search(r'(?:from creation|creation age)[^:\n]*:\s*([0-9a-z\s]+)', formatted_message, re.IGNORECASE)
+        if m:
+            val = m.group(1).strip()
+            if val and val != 'Unknown':
+                return val
+    return None
+
+def parse_creation_age_minutes(age, formatted_message=None):
+    s = extract_creation_age_str(age, formatted_message)
+    return parse_age_minutes(s)
+
+def extract_migration_age_str(migration_age, formatted_message=None):
+    if migration_age and str(migration_age).strip() not in ('', 'None', '0', '-'):
+        return str(migration_age).strip()
+    if formatted_message:
+        m = re.search(r'(?:after migration|migration age)[^:\n]*:\s*([0-9a-z\s]+)', formatted_message, re.IGNORECASE)
+        if m:
+            val = m.group(1).strip()
+            if val and val not in ('0', '-', 'None'):
+                return val
+    return None
+
+def parse_migration_age_minutes(migration_age, formatted_message=None):
+    s = extract_migration_age_str(migration_age, formatted_message)
+    return parse_age_minutes(s)
+
+def sqlite_regexp(expr, item):
+    if not expr:
+        return True
+    if item is None:
+        return False
+    try:
+        return bool(re.search(expr, str(item), re.IGNORECASE))
+    except re.error:
+        return expr.lower() in str(item).lower()
+
+@app.route('/api/wallet/token_payments', methods=['GET'])
+def get_token_wallet_data():
+    try:
+        page = max(1, int(request.args.get('page', 1)))
+        limit = min(max(10, int(request.args.get('limit', 25))), 500)
+        offset = (page - 1) * limit
+        
+        search = (request.args.get('search') or '').strip()
+        status = (request.args.get('status') or 'all').strip().lower()
+        platform = (request.args.get('platform') or 'all').strip().lower()
+        exclude_platform = (request.args.get('exclude_platform') or 'none').strip().lower()
+        timeframe = (request.args.get('timeframe') or 'all').strip().lower()
+        min_amount = request.args.get('min_amount')
+        max_amount = request.args.get('max_amount')
+        min_mc = request.args.get('min_mc')
+        max_mc = request.args.get('max_mc')
+        perf_tf = (request.args.get('perf_tf') or '5m').strip().lower()
+        min_perf = request.args.get('min_perf')
+        max_perf = request.args.get('max_perf')
+        min_age = request.args.get('min_age') or request.args.get('min_creation_age')
+        max_age = request.args.get('max_age') or request.args.get('max_creation_age')
+        min_migration_age = request.args.get('min_migration_age')
+        max_migration_age = request.args.get('max_migration_age')
+        migrated = (request.args.get('migrated') or 'all').strip().lower()
+        token_name_pattern = (request.args.get('token_name_pattern') or '').strip()
+        token_name_mode = (request.args.get('token_name_mode') or 'include').strip().lower()
+        word_filter = (request.args.get('word_filter') or '').strip()
+        workflow_id = request.args.get('workflow_id')
+        enriched_only = request.args.get('enriched_only', 'false').lower() == 'true'
+        sort_by = (request.args.get('sort_by') or 'id').lower()
+        sort_order = 'ASC' if (request.args.get('sort_order') or 'desc').upper() == 'ASC' else 'DESC'
+        
+        sol_price = 0.0
+        try:
+            sol_mint = "So11111111111111111111111111111111111111112"
+            if sol_mint in token_price_cache and token_price_cache[sol_mint][0] > 0:
+                sol_price = float(token_price_cache[sol_mint][0])
+            else:
+                sol_price = float(get_token_price_usd("SOL") or 0.0)
+        except Exception:
+            pass
+        if not sol_price or sol_price <= 0:
+            sol_price = 145.0
+            
+        usd_calc_sql = f"(CASE WHEN mint IN ('SOL', 'So11111111111111111111111111111111111111112') AND amount < 20 THEN amount * {sol_price} ELSE amount END)"
+        valid_sorts = {
+            'id': 'id',
+            'timestamp': 'timestamp',
+            'amount': usd_calc_sql,
+            'token_name': 'token_name',
+            'perf_5m': 'perf_5m',
+            'perf_1h': 'perf_1h',
+            'perf_6h': 'perf_6h',
+            'perf_24h': 'perf_24h',
+            'status': 'status',
+            'market_cap': 'parse_mc_usd(market_cap)',
+            'age': 'parse_creation_age_minutes(age, formatted_message)',
+            'creation_age': 'parse_creation_age_minutes(age, formatted_message)',
+            'migration_age': 'parse_migration_age_minutes(migration_age, formatted_message)'
+        }
+        order_col = valid_sorts.get(sort_by, 'id')
+        
+        where_clauses = []
+        params = []
+        
+        if search:
+            s_param = f"%{search}%"
+            where_clauses.append("(token_name LIKE ? OR ca LIKE ? OR sender_address LIKE ? OR tracked_address LIKE ? OR reason LIKE ?)")
+            params.extend([s_param, s_param, s_param, s_param, s_param])
+            
+        if status != 'all' and status:
+            where_clauses.append("LOWER(status) = ?")
+            params.append(status)
+            
+        if platform != 'all' and platform:
+            where_clauses.append("LOWER(platform) LIKE ?")
+            params.append(f"%{platform}%")
+
+        if exclude_platform != 'none' and exclude_platform:
+            where_clauses.append("LOWER(platform) NOT LIKE ?")
+            params.append(f"%{exclude_platform}%")
+            
+        if enriched_only:
+            where_clauses.append("(token_name IS NOT NULL AND token_name != '' AND token_name != 'SOL')")
+            
+        if timeframe and timeframe != 'all':
+            now_ts = int(time.time())
+            tf_seconds = {
+                '1h': 3600,
+                '6h': 21600,
+                '24h': 86400,
+                '7d': 604800,
+                '30d': 2592000
+            }.get(timeframe)
+            if tf_seconds:
+                where_clauses.append("timestamp >= ?")
+                params.append(now_ts - tf_seconds)
+                
+        usd_amount_clause = "(CASE WHEN mint IN ('SOL', 'So11111111111111111111111111111111111111112') AND amount < 20 THEN amount * ? ELSE amount END)"
+        if min_amount:
+            try:
+                where_clauses.append(f"{usd_amount_clause} >= ?")
+                params.extend([sol_price, float(min_amount)])
+            except ValueError:
+                pass
+                
+        if max_amount:
+            try:
+                where_clauses.append(f"{usd_amount_clause} <= ?")
+                params.extend([sol_price, float(max_amount)])
+            except ValueError:
+                pass
+
+        if min_mc:
+            try:
+                where_clauses.append("parse_mc_usd(market_cap) >= ?")
+                params.append(float(min_mc))
+            except ValueError:
+                pass
+
+        if max_mc:
+            try:
+                where_clauses.append("parse_mc_usd(market_cap) <= ?")
+                params.append(float(max_mc))
+            except ValueError:
+                pass
+
+        # Performance filter
+        perf_col_clean = f"perf_{perf_tf}" if perf_tf in ['5m', '1h', '6h', '24h'] else 'perf_5m'
+        if min_perf:
+            try:
+                where_clauses.append(f"{perf_col_clean} >= ?")
+                params.append(float(min_perf))
+            except ValueError:
+                pass
+
+        if max_perf:
+            try:
+                where_clauses.append(f"{perf_col_clean} <= ?")
+                params.append(float(max_perf))
+            except ValueError:
+                pass
+
+        # Creation Age filter (in minutes)
+        if min_age:
+            try:
+                where_clauses.append("parse_creation_age_minutes(age, formatted_message) >= ?")
+                params.append(float(min_age))
+            except ValueError:
+                pass
+
+        if max_age:
+            try:
+                where_clauses.append("parse_creation_age_minutes(age, formatted_message) <= ?")
+                params.append(float(max_age))
+            except ValueError:
+                pass
+
+        # Migration Age filter (in minutes)
+        if min_migration_age:
+            try:
+                where_clauses.append("parse_migration_age_minutes(migration_age, formatted_message) >= ?")
+                params.append(float(min_migration_age))
+            except ValueError:
+                pass
+
+        if max_migration_age:
+            try:
+                where_clauses.append("parse_migration_age_minutes(migration_age, formatted_message) <= ?")
+                params.append(float(max_migration_age))
+            except ValueError:
+                pass
+
+        # Migrated filter
+        if migrated == 'yes':
+            where_clauses.append("(LOWER(migration_status) LIKE '%migrated%' OR LOWER(platform) LIKE '%raydium%')")
+        elif migrated == 'no':
+            where_clauses.append("(LOWER(migration_status) NOT LIKE '%migrated%' AND LOWER(platform) NOT LIKE '%raydium%')")
+
+        # Token Name pattern / regex filter
+        if token_name_pattern and token_name_pattern.strip() not in ('', '.*'):
+            pat = token_name_pattern.strip()
+            if token_name_mode == 'exclude':
+                where_clauses.append("NOT (token_name REGEXP ?)")
+            else:
+                where_clauses.append("(token_name REGEXP ?)")
+            params.append(pat)
+
+        # Word filter (drops tokens where name, reason, or message contains forbidden word)
+        if word_filter:
+            wf_param = f"%{word_filter.strip().lower()}%"
+            where_clauses.append("(LOWER(token_name) NOT LIKE ? AND LOWER(reason) NOT LIKE ? AND LOWER(COALESCE(formatted_message, '')) NOT LIKE ?)")
+            params.extend([wf_param, wf_param, wf_param])
+
+        where_str = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+        
+        with db_lock:
+            conn = get_db()
+            conn.create_function('parse_mc_usd', 1, parse_mc_usd)
+            conn.create_function('parse_age_minutes', 1, parse_age_minutes)
+            conn.create_function('parse_creation_age_minutes', 2, parse_creation_age_minutes)
+            conn.create_function('parse_migration_age_minutes', 2, parse_migration_age_minutes)
+            conn.create_function('regexp', 2, sqlite_regexp)
+            cursor = conn.cursor()
+            
+            # Count total matching records
+            count_query = f"SELECT COUNT(*) FROM wallet_payments{where_str}"
+            total_count = cursor.execute(count_query, params).fetchone()[0]
+            
+            # Overall Stats (Volume in USD)
+            usd_sum_clause = "COALESCE(SUM(CASE WHEN mint IN ('SOL', 'So11111111111111111111111111111111111111112') AND amount < 20 THEN amount * ? ELSE amount END), 0)"
+            stats_query = f"""
+                SELECT 
+                    COUNT(*),
+                    COUNT(CASE WHEN LOWER(status) = 'forwarded' THEN 1 END),
+                    {usd_sum_clause},
+                    COUNT(DISTINCT ca)
+                FROM wallet_payments{where_str}
+            """
+            stats_params = [sol_price] + list(params)
+            stats_row = cursor.execute(stats_query, stats_params).fetchone()
+            stats = {
+                'total': stats_row[0] if stats_row else 0,
+                'forwarded': stats_row[1] if stats_row else 0,
+                'total_volume': round(stats_row[2], 2) if stats_row and stats_row[2] else 0.0,
+                'unique_tokens': stats_row[3] if stats_row else 0,
+                'sol_price': sol_price
+            }
+            
+            # Fetch Paginated Records
+            data_query = f"""
+                SELECT id, tracked_address, sender_address, amount, mint, signature, timestamp,
+                       token_name, ca, platform, market_cap, age, perf_5m, perf_1h, perf_6h, perf_24h,
+                       dex_url, migration_status, status, reason, formatted_message, created_at, migration_age
+                FROM wallet_payments
+                {where_str}
+                ORDER BY {order_col} {sort_order} NULLS LAST
+                LIMIT ? OFFSET ?
+            """
+            fetch_params = list(params) + [limit, offset]
+            rows = cursor.execute(data_query, fetch_params).fetchall()
+            
+            rows_list = [dict(r) if isinstance(r, dict) else {
+                "id": r[0],
+                "tracked_address": r[1],
+                "sender_address": r[2],
+                "amount": r[3],
+                "mint": r[4],
+                "signature": r[5],
+                "timestamp": r[6],
+                "token_name": r[7],
+                "ca": r[8],
+                "platform": r[9],
+                "market_cap": r[10],
+                "age": r[11],
+                "perf_5m": r[12],
+                "perf_1h": r[13],
+                "perf_6h": r[14],
+                "perf_24h": r[15],
+                "dex_url": r[16],
+                "migration_status": r[17],
+                "status": r[18],
+                "reason": r[19],
+                "formatted_message": r[20],
+                "created_at": r[21],
+                "migration_age": r[22] if len(r) > 22 else None
+            } for r in rows]
+
+        USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+        USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
+
+        results = []
+        for r in rows_list:
+            item_dict = dict(r)
+            mint = item_dict.get('mint') or 'SOL'
+            try:
+                amount = float(item_dict.get('amount') or 0.0)
+            except (ValueError, TypeError):
+                amount = 0.0
+            
+            raw_msg = item_dict.get('formatted_message') or ''
+            match_msg = re.search(r'DEX Payment:\s*\$?([\d,]+(?:\.\d+)?)\s*(?:USD)?', raw_msg, re.IGNORECASE)
+            if match_msg:
+                try:
+                    amount_usd = float(match_msg.group(1).replace(',', ''))
+                except ValueError:
+                    amount_usd = amount if amount >= 20 else (amount * sol_price if mint in ('SOL', 'So11111111111111111111111111111111111111112') else amount)
+            elif mint in (USDC_MINT, USDT_MINT, 'USDC', 'USDT') or amount >= 20:
+                amount_usd = round(amount, 2)
+            elif mint in ('SOL', 'So11111111111111111111111111111111111111112'):
+                amount_usd = round(amount * sol_price, 2)
+            else:
+                cached = token_price_cache.get(mint)
+                if cached and cached[0] > 0:
+                    amount_usd = round(amount * cached[0], 2)
+                else:
+                    amount_usd = round(amount, 2)
+
+            item_dict['amount_usd'] = round(amount_usd, 2)
+            item_dict['currency'] = 'USD' if (mint in (USDC_MINT, USDT_MINT, 'USDC', 'USDT') or amount >= 20) else ('SOL' if mint in ('SOL', 'So11111111111111111111111111111111111111112') else 'TOKEN')
+                
+            c_age = extract_creation_age_str(item_dict.get('age'), item_dict.get('formatted_message')) or item_dict.get('age') or '-'
+            m_age = extract_migration_age_str(item_dict.get('migration_age'), item_dict.get('formatted_message')) or item_dict.get('migration_age') or '-'
+            item_dict['creation_age'] = c_age
+            item_dict['migration_age'] = m_age
+            item_dict['age'] = c_age
+
+            if not item_dict.get('token_name'):
+                item_dict['token_name'] = "SOL" if mint == "SOL" else (token_metadata_cache.get(mint) or (mint[:6] + '...' if len(mint) > 10 else mint))
+            results.append(item_dict)
+            
+        total_pages = max(1, (total_count + limit - 1) // limit)
+        return jsonify({
+            "success": True,
+            "payments": results,
+            "total": total_count,
+            "page": page,
+            "limit": limit,
+            "total_pages": total_pages,
+            "stats": stats
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/api/wallet/sync_supabase', methods=['POST', 'GET'])
+def trigger_supabase_wallet_sync():
+    try:
+        full_sync = request.args.get('full') == 'true' or (request.is_json and request.json.get('full', False))
+        synced_count = sync_wallet_payments_from_supabase(limit_records=1000, full_sync=full_sync)
+        with db_lock:
+            conn = get_db()
+            cnt = conn.cursor().execute("SELECT COUNT(*) FROM wallet_payments").fetchone()[0]
+        return jsonify({
+            "success": True,
+            "message": f"Synced {synced_count} records from Supabase",
+            "synced_count": synced_count,
+            "count": cnt
+        })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
@@ -2760,8 +3535,17 @@ def helius_webhook():
                                     VALUES (?, ?, ?, ?, ?, ?)
                                 ''', (tracked_address, from_addr, amount_sol, "SOL", sig, timestamp))
                                 conn.commit()
+                                if supabase_client:
+                                    push_to_supabase_table('wallet_payments', {
+                                        'tracked_address': tracked_address,
+                                        'sender_address': from_addr,
+                                        'amount': amount_sol,
+                                        'mint': "SOL",
+                                        'signature': sig,
+                                        'timestamp': timestamp
+                                    })
                                 print(f"[HELIUS WEBHOOK] Logged real-time tracked native payment: {amount_sol} SOL from {from_addr} to {tracked_address}", flush=True)
-                                run_async_coroutine(process_payment_and_forward(from_addr, timestamp, amount_usd))
+                                run_async_coroutine(process_payment_and_forward(from_addr, timestamp, amount_usd, signature=sig, tracked_address=tracked_address))
                             except Exception as e:
                                 if "unique" in str(e).lower() or "integrity" in str(e).lower():
                                     pass
@@ -2787,6 +3571,15 @@ def helius_webhook():
                                     VALUES (?, ?, ?, ?, ?, ?)
                                 ''', (tracked_address, from_addr, token_amount, mint, sig, timestamp))
                                 conn.commit()
+                                if supabase_client:
+                                    push_to_supabase_table('wallet_payments', {
+                                        'tracked_address': tracked_address,
+                                        'sender_address': from_addr,
+                                        'amount': token_amount,
+                                        'mint': mint,
+                                        'signature': sig,
+                                        'timestamp': timestamp
+                                    })
                                 print(f"[HELIUS WEBHOOK] Logged real-time tracked token payment: {token_amount} {mint[:8]}... from {from_addr} to {tracked_address}", flush=True)
                                 
                                 # If it is a custom token, forward it directly. Otherwise trace payer history.
@@ -2800,11 +3593,14 @@ def helius_webhook():
                                         "order_type": "Tracked Wallet Swap",
                                         "order_status": "detected",
                                         "payment_timestamp": timestamp * 1000,
-                                        "amount_usd": amount_usd
+                                        "amount_usd": amount_usd,
+                                        "signature": sig,
+                                        "payer_address": from_addr,
+                                        "tracked_address": tracked_address
                                     }
                                     run_async_coroutine(process_single_cto_item(item, target, wf_id, t_mode))
                                 else:
-                                    run_async_coroutine(process_payment_and_forward(from_addr, timestamp, amount_usd))
+                                    run_async_coroutine(process_payment_and_forward(from_addr, timestamp, amount_usd, signature=sig, tracked_address=tracked_address))
                             except Exception as e:
                                 if "unique" in str(e).lower() or "integrity" in str(e).lower():
                                     pass
@@ -3329,7 +4125,7 @@ async def main():
     # asyncio.create_task(cto_auto_scanner_loop())
     asyncio.create_task(helius_polling_loop())
     asyncio.create_task(wallet_tracker_polling_loop())
-    asyncio.create_task(turso_sync_loop())
+    asyncio.create_task(supabase_sync_loop())
     
     try:
         while True:

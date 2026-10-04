@@ -16,3 +16,5 @@ test_close.py
 test_commit.py
 test_db.py
 test_save_workflow.py
+*.db
+*.sqlite

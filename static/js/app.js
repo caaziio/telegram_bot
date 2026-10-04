@@ -1,9 +1,23 @@
 let workflows = initialWorkflows || [];
 let settings = initialSettings || {};
 let currentRules = [];
+let currentTokenDataPage = 1;
+let tokenDataSearchTimer = null;
+let tokenDataAutoRefreshInterval = null;
+let currentTgModalRawMessage = '';
+
+function escapeHtml(text) {
+    if (text === null || text === undefined) return '';
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
 
 function switchTab(tabId) {
-    const tabs = ['workflows', 'settings', 'wallet-tracker'];
+    const tabs = ['workflows', 'settings', 'wallet-tracker', 'token-data'];
     tabs.forEach(t => {
         const tabEl = document.getElementById('tab-' + t);
         const navEl = document.getElementById('nav-' + t);
@@ -15,6 +29,11 @@ function switchTab(tabId) {
     const targetNav = document.getElementById('nav-' + tabId);
     if (targetTab) targetTab.classList.remove('hidden');
     if (targetNav) targetNav.classList.add('active');
+
+    if (tabId === 'token-data') {
+        const hasCache = renderTokenDataFromCache();
+        loadTokenWalletData(1, !hasCache);
+    }
 }
 
 function renderWorkflows() {
@@ -28,6 +47,8 @@ function renderWorkflows() {
         });
         scanSelect.value = currentVal;
     }
+
+    populateTokenWorkflowPresets();
 
     const grid = document.getElementById('workflows-grid');
     grid.innerHTML = '';
@@ -77,6 +98,10 @@ function renderWorkflows() {
                     } else if (r.rule_type === 'exclude_platform') {
                         label = `🚫 Exclude: ${r.search_text}`;
                         color = '#ef4444';
+                    } else if (r.rule_type === 'token_name') {
+                        const mode = (r.replace_text || 'include').toLowerCase() === 'exclude' ? '🚫 Excl' : '✅ Incl';
+                        label = `🏷️ Name (${mode}): "${r.search_text || '.*'}"`;
+                        color = '#ec4899';
                     } else if (r.rule_type === 'filter') {
                         label = `🔍 Drop: "${r.search_text}"`;
                         color = '#ec4899';
@@ -187,6 +212,7 @@ function renderRules() {
         else if (rule.rule_type === 'performance') badgeColor = '#f59e0b';
         else if (rule.rule_type === 'show_wallet') badgeColor = '#0ea5e9';
         else if (rule.rule_type === 'exclude_platform') badgeColor = '#ef4444';
+        else if (rule.rule_type === 'token_name') badgeColor = '#ec4899';
         else if (rule.rule_type === 'filter') badgeColor = '#ec4899';
         
         let badgeHtml = `<div style="display: flex; align-items: center;">
@@ -263,6 +289,17 @@ function renderRules() {
             fieldsHtml += `
                 <input class="form-input" style="flex: 1; max-width: 250px;" placeholder="e.g. pump.fun" value="${rule.search_text || ''}" oninput="updateRule(${index}, 'search_text', this.value)">
             `;
+        } else if (rule.rule_type === 'token_name') {
+            const mode = (rule.replace_text || 'include').toLowerCase();
+            fieldsHtml += `
+                <label style="font-size:0.85rem; color:var(--text-muted)">Mode:</label>
+                <select class="form-input" style="width:165px" onchange="updateRule(${index}, 'replace_text', this.value)">
+                    <option value="include" ${mode === 'include' ? 'selected' : ''}>Must Match (Include)</option>
+                    <option value="exclude" ${mode === 'exclude' ? 'selected' : ''}>Must Not Match (Exclude)</option>
+                </select>
+                <label style="font-size:0.85rem; color:var(--text-muted)">Word / Regex:</label>
+                <input class="form-input" style="flex: 1; min-width: 170px;" placeholder="e.g. .* or AI|SOL|PEPE" value="${rule.search_text !== undefined && rule.search_text !== null ? rule.search_text : '.*'}" oninput="updateRule(${index}, 'search_text', this.value)">
+            `;
         } else {
             fieldsHtml += `<input class="form-input" style="flex: 1; max-width: 250px;" placeholder="${rule.rule_type === 'filter' ? 'Word to drop message' : 'Word to find'}" value="${rule.search_text || ''}" oninput="updateRule(${index}, 'search_text', this.value)">`;
             if (rule.rule_type === 'replace') {
@@ -288,6 +325,9 @@ function addRule(type) {
         newRule.search_text = 'creation';
     } else if (type === 'show_wallet') {
         newRule.search_text = 'yes';
+    } else if (type === 'token_name') {
+        newRule.search_text = '.*';
+        newRule.replace_text = 'include';
     }
     currentRules.push(newRule);
     renderRules();
@@ -1234,17 +1274,876 @@ if (document.getElementById('scan-wallet-address')) {
     document.getElementById('scan-wallet-address').value = settings.tracked_wallet_address || '';
 }
 
-// Close Level 2 modal when clicking overlay
+// Close Level 2 modal or Telegram Message modal when clicking overlay
 document.addEventListener('click', function(e) {
     const modal = document.getElementById('wallet-tx-modal');
     if (modal && e.target === modal) {
         closeWalletTxModal();
     }
+    const tgModal = document.getElementById('tg-msg-modal');
+    if (tgModal && e.target === tgModal) {
+        closeTgMsgModal();
+    }
 });
 
+// ==========================================
+// Token Wallet Data & Table Management
+// ==========================================
+
+function debounceTokenSearch() {
+    clearTimeout(tokenDataSearchTimer);
+    tokenDataSearchTimer = setTimeout(() => {
+        loadTokenWalletData(1);
+    }, 300);
+}
+
+function populateTokenWorkflowPresets() {
+    const tdPresetSelect = document.getElementById('td-workflow-preset');
+    if (!tdPresetSelect) return;
+    const currentPreset = tdPresetSelect.value;
+    tdPresetSelect.innerHTML = '<option value="">No Preset (Custom Filters)</option>';
+    (workflows || []).forEach(wf => {
+        tdPresetSelect.innerHTML += `<option value="${wf.id}">${escapeHtml(wf.name)} (${(wf.rules || []).length} rules)</option>`;
+    });
+    tdPresetSelect.value = currentPreset;
+}
+
+function updateActiveFiltersCount() {
+    let count = 0;
+    const search = String(document.getElementById('td-search')?.value || '').trim();
+    const status = document.getElementById('td-status')?.value;
+    const platform = document.getElementById('td-platform')?.value;
+    const excludePlatform = document.getElementById('td-exclude-platform')?.value;
+    const timeframe = document.getElementById('td-timeframe')?.value;
+    const minAmount = String(document.getElementById('td-min-amount')?.value || '').trim();
+    const maxAmount = String(document.getElementById('td-max-amount')?.value || '').trim();
+    const minMc = String(document.getElementById('td-min-mc')?.value || '').trim();
+    const maxMc = String(document.getElementById('td-max-mc')?.value || '').trim();
+    const minPerf = String(document.getElementById('td-min-perf')?.value || '').trim();
+    const maxPerf = String(document.getElementById('td-max-perf')?.value || '').trim();
+    const minAge = String(document.getElementById('td-min-age')?.value || '').trim();
+    const maxAge = String(document.getElementById('td-max-age')?.value || '').trim();
+    const minMigrationAge = String(document.getElementById('td-min-migration-age')?.value || '').trim();
+    const maxMigrationAge = String(document.getElementById('td-max-migration-age')?.value || '').trim();
+    const migrated = document.getElementById('td-migrated')?.value;
+    const namePat = String(document.getElementById('td-token-name-pattern')?.value || '').trim();
+    const wordFilter = String(document.getElementById('td-word-filter')?.value || '').trim();
+    const enrichedOnly = document.getElementById('td-enriched-only')?.checked;
+    const preset = document.getElementById('td-workflow-preset')?.value;
+
+    if (search) count++;
+    if (status && status !== 'all') count++;
+    if (platform && platform !== 'all') count++;
+    if (excludePlatform && excludePlatform !== 'none') count++;
+    if (timeframe && timeframe !== 'all') count++;
+    if (minAmount) count++;
+    if (maxAmount) count++;
+    if (minMc) count++;
+    if (maxMc) count++;
+    if (minPerf) count++;
+    if (maxPerf) count++;
+    if (minAge) count++;
+    if (maxAge) count++;
+    if (minMigrationAge) count++;
+    if (maxMigrationAge) count++;
+    if (migrated && migrated !== 'all') count++;
+    if (namePat && namePat !== '.*') count++;
+    if (wordFilter) count++;
+    if (enrichedOnly) count++;
+    if (preset) count++;
+
+    const badge = document.getElementById('td-active-filters-count');
+    if (badge) {
+        if (count > 0) {
+            badge.innerText = `${count} filter${count > 1 ? 's' : ''} active`;
+            badge.style.display = 'inline-block';
+        } else {
+            badge.style.display = 'none';
+        }
+    }
+}
+
+function applyWorkflowPresetToFilters() {
+    const select = document.getElementById('td-workflow-preset');
+    const wfId = select ? select.value : '';
+    if (!wfId) {
+        updateActiveFiltersCount();
+        loadTokenWalletData(1);
+        return;
+    }
+
+    const wf = (workflows || []).find(w => String(w.id) === String(wfId));
+    if (!wf || !wf.rules) {
+        loadTokenWalletData(1);
+        return;
+    }
+
+    // Reset metric inputs first
+    const clearIds = ['td-min-age', 'td-max-age', 'td-min-migration-age', 'td-max-migration-age', 'td-min-mc', 'td-max-mc', 'td-min-perf', 'td-max-perf', 'td-min-amount', 'td-max-amount', 'td-token-name-pattern', 'td-word-filter'];
+    clearIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    const perfTfEl = document.getElementById('td-perf-tf');
+    if (perfTfEl) perfTfEl.value = '5m';
+    const migratedEl = document.getElementById('td-migrated');
+    if (migratedEl) migratedEl.value = 'all';
+    const excludePlatformEl = document.getElementById('td-exclude-platform');
+    if (excludePlatformEl) excludePlatformEl.value = 'none';
+    const nameModeEl = document.getElementById('td-token-name-mode');
+    if (nameModeEl) nameModeEl.value = 'include';
+
+    // Map rules to filter controls
+    wf.rules.forEach(rule => {
+        const type = rule.rule_type;
+        if (type === 'token_age') {
+            const ageType = (rule.search_text || 'creation').toLowerCase();
+            if (ageType === 'migration') {
+                const minMig = document.getElementById('td-min-migration-age');
+                const maxMig = document.getElementById('td-max-migration-age');
+                if (minMig && rule.time_min !== undefined && rule.time_min !== null) minMig.value = rule.time_min;
+                if (maxMig && rule.time_max !== undefined && rule.time_max !== null) maxMig.value = rule.time_max;
+            } else {
+                const minAge = document.getElementById('td-min-age');
+                const maxAge = document.getElementById('td-max-age');
+                if (minAge && rule.time_min !== undefined && rule.time_min !== null) minAge.value = rule.time_min;
+                if (maxAge && rule.time_max !== undefined && rule.time_max !== null) maxAge.value = rule.time_max;
+            }
+        } else if (type === 'market_cap') {
+            const minMc = document.getElementById('td-min-mc');
+            const maxMc = document.getElementById('td-max-mc');
+            if (minMc && rule.time_min !== undefined && rule.time_min !== null) minMc.value = rule.time_min;
+            if (maxMc && rule.time_max !== undefined && rule.time_max !== null) maxMc.value = rule.time_max;
+        } else if (type === 'performance') {
+            const tfClean = (rule.search_text || '5m').toLowerCase().replace('hr', 'h');
+            if (perfTfEl && ['5m', '1h', '6h', '24h'].includes(tfClean)) perfTfEl.value = tfClean;
+            const minP = document.getElementById('td-min-perf');
+            const maxP = document.getElementById('td-max-perf');
+            if (minP && rule.time_min !== undefined && rule.time_min !== null) minP.value = rule.time_min;
+            if (maxP && rule.time_max !== undefined && rule.time_max !== null) maxP.value = rule.time_max;
+        } else if (type === 'dex_payment') {
+            const minA = document.getElementById('td-min-amount');
+            const maxA = document.getElementById('td-max-amount');
+            if (minA && rule.time_min !== undefined && rule.time_min !== null) minA.value = rule.time_min;
+            if (maxA && rule.time_max !== undefined && rule.time_max !== null) maxA.value = rule.time_max;
+        } else if (type === 'migrated') {
+            if (migratedEl) migratedEl.value = (rule.search_text || 'yes').toLowerCase();
+        } else if (type === 'exclude_platform') {
+            if (excludePlatformEl) {
+                const p = (rule.search_text || '').toLowerCase();
+                if (p.includes('pump')) excludePlatformEl.value = 'pump';
+                else if (p.includes('raydium')) excludePlatformEl.value = 'raydium';
+                else if (p.includes('moon')) excludePlatformEl.value = 'moonshot';
+            }
+        } else if (type === 'token_name') {
+            const patEl = document.getElementById('td-token-name-pattern');
+            if (patEl) patEl.value = rule.search_text || '.*';
+            if (nameModeEl) nameModeEl.value = (rule.replace_text || 'include').toLowerCase();
+        } else if (type === 'filter') {
+            const wfEl = document.getElementById('td-word-filter');
+            if (wfEl) wfEl.value = rule.search_text || '';
+        }
+    });
+
+    updateActiveFiltersCount();
+    loadTokenWalletData(1);
+}
+
+function resetTokenFilters() {
+    const els = {
+        'td-workflow-preset': '',
+        'td-search': '',
+        'td-status': 'all',
+        'td-platform': 'all',
+        'td-exclude-platform': 'none',
+        'td-timeframe': 'all',
+        'td-sort-by': 'id_desc',
+        'td-min-amount': '',
+        'td-max-amount': '',
+        'td-min-mc': '',
+        'td-max-mc': '',
+        'td-perf-tf': '5m',
+        'td-min-perf': '',
+        'td-max-perf': '',
+        'td-min-age': '',
+        'td-max-age': '',
+        'td-min-migration-age': '',
+        'td-max-migration-age': '',
+        'td-migrated': 'all',
+        'td-token-name-mode': 'include',
+        'td-token-name-pattern': '',
+        'td-word-filter': ''
+    };
+    for (const [id, val] of Object.entries(els)) {
+        const el = document.getElementById(id);
+        if (el) el.value = val;
+    }
+    const enrichedEl = document.getElementById('td-enriched-only');
+    if (enrichedEl) enrichedEl.checked = false;
+
+    updateActiveFiltersCount();
+    loadTokenWalletData(1);
+}
+
+function toggleTokenDataAutoRefresh() {
+    const select = document.getElementById('token-data-autorefresh');
+    const intervalMs = parseInt(select ? select.value : '60000', 10);
+    
+    try {
+        localStorage.setItem('teleflow_token_data_refresh_pref', String(intervalMs));
+    } catch (e) {}
+
+    if (tokenDataAutoRefreshInterval) {
+        clearInterval(tokenDataAutoRefreshInterval);
+        tokenDataAutoRefreshInterval = null;
+    }
+    
+    if (intervalMs > 0) {
+        tokenDataAutoRefreshInterval = setInterval(() => {
+            const tokenTab = document.getElementById('tab-token-data');
+            if (tokenTab && !tokenTab.classList.contains('hidden')) {
+                loadTokenWalletData(currentTokenDataPage, false);
+            }
+        }, intervalMs);
+    }
+}
+
+function renderTokenDataFromCache() {
+    try {
+        const cachedStr = localStorage.getItem('teleflow_token_data_cache');
+        if (!cachedStr) return false;
+        const cached = JSON.parse(cachedStr);
+        if (!cached || !cached.payments || cached.payments.length === 0) return false;
+
+        const tbody = document.getElementById('token-data-tbody');
+        if (tbody) {
+            tbody.innerHTML = cached.payments.map(p => renderTokenRow(p)).join('');
+        }
+
+        if (cached.stats) {
+            const kpiTotal = document.getElementById('kpi-total-payments');
+            const kpiForwarded = document.getElementById('kpi-forwarded-payments');
+            const kpiTokens = document.getElementById('kpi-unique-tokens');
+            const kpiVolume = document.getElementById('kpi-total-volume');
+
+            if (kpiTotal) kpiTotal.innerText = Number(cached.stats.total || 0).toLocaleString();
+            if (kpiForwarded) kpiForwarded.innerText = Number(cached.stats.forwarded || 0).toLocaleString();
+            if (kpiTokens) kpiTokens.innerText = Number(cached.stats.unique_tokens || 0).toLocaleString();
+            if (kpiVolume) {
+                const vol = Number(cached.stats.total_volume || 0);
+                kpiVolume.innerText = `$${vol.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            }
+            if (cached.stats && cached.stats.sol_price) {
+                window.currentSolPrice = cached.stats.sol_price;
+            }
+        }
+
+        renderTokenDataPagination(cached.total || cached.payments.length, cached.payments.length, cached.page || 1, cached.total_pages || 1);
+
+        const badge = document.getElementById('td-sync-badge');
+        if (badge) {
+            badge.innerText = '⚡ Cached (Syncing fresh...)';
+            badge.style.color = '#818cf8';
+            badge.style.borderColor = 'rgba(99, 102, 241, 0.3)';
+            badge.style.background = 'rgba(99, 102, 241, 0.15)';
+        }
+        return true;
+    } catch (e) {
+        console.warn("Error rendering token cache:", e);
+        return false;
+    }
+}
+
+async function loadTokenWalletData(page = 1, showLoading = false) {
+    currentTokenDataPage = page;
+    const tbody = document.getElementById('token-data-tbody');
+    
+    // Only show loading placeholder if we don't have any cached rows showing
+    const tbodyText = tbody ? (tbody.innerText || tbody.textContent || '') : '';
+    const hasRows = tbody && tbody.children && tbody.children.length > 0 && !tbodyText.includes('Loading');
+    if (showLoading && tbody && !hasRows) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="14" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+                        <span style="font-size: 1.5rem;">🔄</span>
+                        <span>Loading token wallet data...</span>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }
+
+    const badge = document.getElementById('td-sync-badge');
+    if (badge) {
+        badge.innerText = '🔄 Syncing...';
+        badge.style.color = '#fbbf24';
+        badge.style.borderColor = 'rgba(245, 158, 11, 0.3)';
+        badge.style.background = 'rgba(245, 158, 11, 0.15)';
+    }
+
+    try {
+        const search = String(document.getElementById('td-search')?.value || '').trim();
+        const status = document.getElementById('td-status')?.value || 'all';
+        const platform = document.getElementById('td-platform')?.value || 'all';
+        const excludePlatform = document.getElementById('td-exclude-platform')?.value || 'none';
+        const timeframe = document.getElementById('td-timeframe')?.value || 'all';
+        const sortVal = document.getElementById('td-sort-by')?.value || 'id_desc';
+        const enrichedOnly = document.getElementById('td-enriched-only')?.checked || false;
+        const minAmount = String(document.getElementById('td-min-amount')?.value || '').trim();
+        const maxAmount = String(document.getElementById('td-max-amount')?.value || '').trim();
+        const minMc = String(document.getElementById('td-min-mc')?.value || '').trim();
+        const maxMc = String(document.getElementById('td-max-mc')?.value || '').trim();
+        const perfTf = document.getElementById('td-perf-tf')?.value || '5m';
+        const minPerf = String(document.getElementById('td-min-perf')?.value || '').trim();
+        const maxPerf = String(document.getElementById('td-max-perf')?.value || '').trim();
+        const minAge = String(document.getElementById('td-min-age')?.value || '').trim();
+        const maxAge = String(document.getElementById('td-max-age')?.value || '').trim();
+        const minMigrationAge = String(document.getElementById('td-min-migration-age')?.value || '').trim();
+        const maxMigrationAge = String(document.getElementById('td-max-migration-age')?.value || '').trim();
+        const migrated = document.getElementById('td-migrated')?.value || 'all';
+        const tokenNamePattern = String(document.getElementById('td-token-name-pattern')?.value || '').trim();
+        const tokenNameMode = document.getElementById('td-token-name-mode')?.value || 'include';
+        const wordFilter = String(document.getElementById('td-word-filter')?.value || '').trim();
+        const workflowId = document.getElementById('td-workflow-preset')?.value || '';
+        const limit = document.getElementById('td-limit')?.value || '100';
+
+        const lastIdx = sortVal.lastIndexOf('_');
+        const sortBy = lastIdx !== -1 ? sortVal.slice(0, lastIdx) : sortVal;
+        const sortOrder = lastIdx !== -1 ? sortVal.slice(lastIdx + 1) : 'desc';
+
+        const params = new URLSearchParams({
+            page: page,
+            limit: limit,
+            search: search,
+            status: status,
+            platform: platform,
+            exclude_platform: excludePlatform,
+            timeframe: timeframe,
+            sort_by: sortBy || 'id',
+            sort_order: sortOrder || 'desc',
+            enriched_only: enrichedOnly
+        });
+
+        if (minAmount) params.append('min_amount', minAmount);
+        if (maxAmount) params.append('max_amount', maxAmount);
+        if (minMc) params.append('min_mc', minMc);
+        if (maxMc) params.append('max_mc', maxMc);
+        if (perfTf) params.append('perf_tf', perfTf);
+        if (minPerf) params.append('min_perf', minPerf);
+        if (maxPerf) params.append('max_perf', maxPerf);
+        if (minAge) params.append('min_age', minAge);
+        if (maxAge) params.append('max_age', maxAge);
+        if (minMigrationAge) params.append('min_migration_age', minMigrationAge);
+        if (maxMigrationAge) params.append('max_migration_age', maxMigrationAge);
+        if (migrated && migrated !== 'all') params.append('migrated', migrated);
+        if (tokenNamePattern) params.append('token_name_pattern', tokenNamePattern);
+        if (tokenNameMode) params.append('token_name_mode', tokenNameMode);
+        if (wordFilter) params.append('word_filter', wordFilter);
+        if (workflowId) params.append('workflow_id', workflowId);
+
+        updateActiveFiltersCount();
+
+        const res = await fetch(`/api/wallet/token_payments?${params.toString()}`);
+        const data = await res.json();
+
+        if (!data.success) {
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="14" style="text-align: center; color: #ef4444; padding: 2rem;">Error: ${data.error || 'Failed to fetch data'}</td></tr>`;
+            }
+            if (badge) {
+                badge.innerText = '❌ Sync Failed';
+                badge.style.color = '#ef4444';
+            }
+            return;
+        }
+
+        // Update KPI Stats Cards
+        if (data.stats) {
+            if (data.stats.sol_price) {
+                window.currentSolPrice = data.stats.sol_price;
+            }
+            const kpiTotal = document.getElementById('kpi-total-payments');
+            const kpiForwarded = document.getElementById('kpi-forwarded-payments');
+            const kpiTokens = document.getElementById('kpi-unique-tokens');
+            const kpiVolume = document.getElementById('kpi-total-volume');
+
+            if (kpiTotal) kpiTotal.innerText = Number(data.stats.total || 0).toLocaleString();
+            if (kpiForwarded) kpiForwarded.innerText = Number(data.stats.forwarded || 0).toLocaleString();
+            if (kpiTokens) kpiTokens.innerText = Number(data.stats.unique_tokens || 0).toLocaleString();
+            if (kpiVolume) {
+                const vol = Number(data.stats.total_volume || 0);
+                kpiVolume.innerText = `$${vol.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            }
+        }
+
+        const payments = data.payments || [];
+        if (payments.length === 0) {
+            if (tbody) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="14" style="text-align: center; padding: 3.5rem; color: var(--text-muted);">
+                            <div style="font-size: 2rem; margin-bottom: 8px;">🔍</div>
+                            <div style="font-weight: 500; font-size: 0.95rem; color: white;">No token records found</div>
+                            <div style="font-size: 0.8rem; margin-top: 4px;">Try adjusting or resetting your filter criteria.</div>
+                        </td>
+                    </tr>
+                `;
+            }
+            renderTokenDataPagination(0, 0, page, 1);
+            if (badge) {
+                badge.innerText = '🟢 Live & Synced';
+                badge.style.color = '#34d399';
+                badge.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+                badge.style.background = 'rgba(16, 185, 129, 0.15)';
+            }
+            return;
+        }
+
+        if (tbody) {
+            tbody.innerHTML = payments.map(p => renderTokenRow(p)).join('');
+        }
+
+        renderTokenDataPagination(data.total, payments.length, data.page, data.total_pages);
+
+        // Cache first page to browser storage
+        if (page === 1 && !search && status === 'all' && platform === 'all' && timeframe === 'all' && !enrichedOnly) {
+            try {
+                localStorage.setItem('teleflow_token_data_cache', JSON.stringify({
+                    payments: data.payments,
+                    stats: data.stats,
+                    total: data.total,
+                    total_pages: data.total_pages,
+                    page: data.page,
+                    timestamp: Date.now()
+                }));
+            } catch (e) {
+                console.warn("Error caching token data:", e);
+            }
+        }
+
+        if (badge) {
+            badge.innerText = '🟢 Live & Synced';
+            badge.style.color = '#34d399';
+            badge.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+            badge.style.background = 'rgba(16, 185, 129, 0.15)';
+        }
+    } catch (err) {
+        console.error("Failed to load token wallet data:", err);
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="14" style="text-align: center; color: #ef4444; padding: 2rem;">Error loading data: ${err.message}</td></tr>`;
+        }
+        if (badge) {
+            badge.innerText = '❌ Connection Error';
+            badge.style.color = '#ef4444';
+        }
+    }
+}
+
+function renderTokenRow(p) {
+    const timeFormatted = formatRelativeTime(p.timestamp || p.created_at);
+    const fullDate = p.timestamp ? new Date(p.timestamp * 1000).toLocaleString() : (p.created_at || '');
+    
+    const tokenName = p.token_name || (p.mint === 'SOL' ? 'SOL' : 'Unknown');
+    const ca = p.ca || (p.mint !== 'SOL' ? p.mint : '');
+    const caShort = ca ? `${ca.slice(0, 4)}...${ca.slice(-4)}` : '-';
+    
+    const platform = p.platform ? p.platform.toUpperCase() : 'SOLANA';
+    const isMigrated = p.migration_status && p.migration_status.toLowerCase().includes('migrated');
+    
+    const rawAmount = Number(p.amount || 0);
+    const currLabel = p.currency || (p.mint === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' ? 'USDC' : (p.mint === 'SOL' ? 'SOL' : (p.mint ? p.mint.slice(0, 4) : 'SOL')));
+    const isStable = currLabel === 'USDC' || currLabel === 'USDT' || p.mint === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+    
+    let amountUsd = Number(p.amount_usd);
+    if (isNaN(amountUsd) || (amountUsd === 0 && rawAmount > 0)) {
+        if (currLabel === 'USD' || isStable || rawAmount >= 20) {
+            amountUsd = rawAmount;
+        } else {
+            amountUsd = rawAmount * (window.currentSolPrice || 140);
+        }
+    }
+    const amountUsdDisplay = `$${amountUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    let nativeDisplay = '';
+    if (currLabel === 'USD' || rawAmount >= 20) {
+        nativeDisplay = `$${rawAmount.toFixed(2)} USD`;
+    } else if (currLabel === 'SOL') {
+        nativeDisplay = `${rawAmount.toFixed(4)} SOL`;
+    } else {
+        nativeDisplay = `${rawAmount.toFixed(2)} ${currLabel}`;
+    }
+    const sender = p.sender_address || '';
+    const senderShort = sender ? `${sender.slice(0, 4)}...${sender.slice(-4)}` : '-';
+
+    const mc = p.market_cap || '-';
+    const creationAge = p.creation_age || p.age || '-';
+    const migrationAge = p.migration_age && p.migration_age !== '0' && p.migration_age !== '-' ? p.migration_age : null;
+
+    const perf5mBadge = formatPerfBadge(p.perf_5m);
+    const perf1hBadge = formatPerfBadge(p.perf_1h);
+    const perf6hBadge = formatPerfBadge(p.perf_6h);
+    const perf24hBadge = formatPerfBadge(p.perf_24h);
+
+    const statusPill = formatStatusPill(p.status);
+    const reasonText = p.reason || '-';
+    const reasonShort = reasonText.length > 35 ? `${reasonText.slice(0, 32)}...` : reasonText;
+
+    const dexUrl = p.dex_url || (ca ? `https://dexscreener.com/solana/${ca}` : '');
+    const solscanUrl = ca ? `https://solscan.io/token/${ca}` : (p.signature ? `https://solscan.io/tx/${p.signature}` : '');
+    
+    // Safely encode formatted message
+    const rawMsg = p.formatted_message || '';
+    const encodedMsg = encodeURIComponent(rawMsg);
+    const encodedTokenName = encodeURIComponent(tokenName);
+
+    return `
+        <tr>
+            <td title="${fullDate}">
+                <div style="color: var(--text-main); font-weight: 500;">${timeFormatted}</div>
+                <div style="font-size: 0.72rem; color: var(--text-muted);">${fullDate.split(',')[0]}</div>
+            </td>
+            <td>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <span style="font-weight: 600; color: white; font-size: 0.9rem;">${escapeHtml(tokenName)}</span>
+                    <span class="badge-platform">${escapeHtml(platform)}</span>
+                    ${isMigrated ? '<span style="background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid rgba(16,185,129,0.3); padding: 1px 4px; border-radius: 4px; font-size: 0.68rem;">Raydium</span>' : ''}
+                </div>
+            </td>
+            <td>
+                ${ca ? `
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span class="code-address" onclick="copyTextToClipboard('${ca}', this)" title="Click to copy full CA">${caShort}</span>
+                        <a href="${dexUrl}" target="_blank" title="View Chart on DexScreener" style="color: #60a5fa; text-decoration: none; font-size: 0.8rem;">📈</a>
+                        <a href="${solscanUrl}" target="_blank" title="View on Solscan" style="color: var(--text-muted); text-decoration: none; font-size: 0.8rem;">🔗</a>
+                    </div>
+                ` : '<span style="color: var(--text-muted);">-</span>'}
+            </td>
+            <td>
+                <div style="font-weight: 700; color: #10b981; font-size: 0.92rem;">${amountUsdDisplay}</div>
+                <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">${nativeDisplay}</div>
+            </td>
+            <td>
+                ${sender ? `
+                    <span class="code-address" onclick="copyTextToClipboard('${sender}', this)" title="Click to copy Sender: ${sender}">${senderShort}</span>
+                ` : '<span style="color: var(--text-muted);">-</span>'}
+            </td>
+            <td><strong style="color: #e2e8f0;">${mc}</strong></td>
+            <td>
+                <div style="font-weight: 500; color: #e2e8f0; font-size: 0.85rem;" title="Creation Age: ${escapeHtml(creationAge)}">${escapeHtml(creationAge)}</div>
+                ${migrationAge ? `<div style="font-size: 0.72rem; color: #34d399; margin-top: 1px;" title="Migration Age: ${escapeHtml(migrationAge)}">Mig: ${escapeHtml(migrationAge)}</div>` : ''}
+            </td>
+            <td>${perf5mBadge}</td>
+            <td>${perf1hBadge}</td>
+            <td>${perf6hBadge}</td>
+            <td>${perf24hBadge}</td>
+            <td>${statusPill}</td>
+            <td title="${escapeHtml(reasonText)}">
+                <span style="color: var(--text-muted); font-size: 0.78rem;">${escapeHtml(reasonShort)}</span>
+            </td>
+            <td style="text-align: right; padding-right: 1.5rem;">
+                ${dexUrl ? `
+                    <a href="${dexUrl}" target="_blank" class="btn-table-action" title="Open DexScreener Chart">
+                        Chart
+                    </a>
+                ` : '<span style="color: var(--text-muted); font-size: 0.8rem;">-</span>'}
+            </td>
+        </tr>
+    `;
+}
+
+function formatPerfBadge(val) {
+    if (val === null || val === undefined || val === '') return '<span class="badge-perf badge-perf-neu">-</span>';
+    const num = Number(val);
+    if (isNaN(num)) return '<span class="badge-perf badge-perf-neu">-</span>';
+    const formatted = `${num > 0 ? '+' : ''}${num.toFixed(1)}%`;
+    if (num > 0) return `<span class="badge-perf badge-perf-pos">${formatted}</span>`;
+    if (num < 0) return `<span class="badge-perf badge-perf-neg">${formatted}</span>`;
+    return `<span class="badge-perf badge-perf-neu">0.0%</span>`;
+}
+
+function formatStatusPill(status) {
+    const s = (status || 'detected').toLowerCase();
+    if (s === 'forwarded') return '<span class="status-pill status-pill-forwarded">Forwarded</span>';
+    if (s === 'skipped') return '<span class="status-pill status-pill-skipped">Skipped</span>';
+    if (s === 'dropped') return '<span class="status-pill status-pill-dropped">Dropped</span>';
+    return `<span class="status-pill status-pill-detected">${s}</span>`;
+}
+
+function formatRelativeTime(ts) {
+    if (!ts) return 'Just now';
+    let timeMs = typeof ts === 'number' ? ts * 1000 : new Date(ts).getTime();
+    if (isNaN(timeMs)) return String(ts);
+    const diffSec = Math.floor((Date.now() - timeMs) / 1000);
+    if (diffSec < 60) return `${Math.max(1, diffSec)}s ago`;
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+    return `${Math.floor(diffSec / 86400)}d ago`;
+}
+
+function renderTokenDataPagination(total, count, page, totalPages) {
+    const infoEl = document.getElementById('td-pagination-info');
+    const controlsEl = document.getElementById('td-pagination-controls');
+    
+    if (infoEl) {
+        const limitVal = parseInt(document.getElementById('td-limit')?.value || '100', 10);
+        const start = total === 0 ? 0 : (page - 1) * limitVal + 1;
+        const end = total === 0 ? 0 : Math.min(total, start + count - 1);
+        infoEl.innerHTML = `Showing <strong>${start.toLocaleString()}-${end.toLocaleString()}</strong> of <strong>${total.toLocaleString()}</strong> records`;
+    }
+
+    if (!controlsEl) return;
+    
+    let html = '';
+    html += `<button class="page-btn" ${page <= 1 ? 'disabled' : ''} onclick="loadTokenWalletData(${page - 1})">← Prev</button>`;
+    
+    const maxButtons = 5;
+    let startPage = Math.max(1, page - Math.floor(maxButtons / 2));
+    let endPage = Math.min(totalPages, startPage + maxButtons - 1);
+    if (endPage - startPage + 1 < maxButtons) {
+        startPage = Math.max(1, endPage - maxButtons + 1);
+    }
+
+    if (startPage > 1) {
+        html += `<button class="page-btn" onclick="loadTokenWalletData(1)">1</button>`;
+        if (startPage > 2) html += `<span style="color: var(--text-muted); padding: 0 4px;">...</span>`;
+    }
+
+    for (let p = startPage; p <= endPage; p++) {
+        html += `<button class="page-btn ${p === page ? 'active' : ''}" onclick="loadTokenWalletData(${p})">${p}</button>`;
+    }
+
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) html += `<span style="color: var(--text-muted); padding: 0 4px;">...</span>`;
+        html += `<button class="page-btn" onclick="loadTokenWalletData(${totalPages})">${totalPages}</button>`;
+    }
+
+    html += `<button class="page-btn" ${page >= totalPages ? 'disabled' : ''} onclick="loadTokenWalletData(${page + 1})">Next →</button>`;
+    controlsEl.innerHTML = html;
+}
+
+function openTgMsgModal(encodedMsg, encodedTokenName) {
+    const rawMsg = decodeURIComponent(encodedMsg || '');
+    const tokenName = decodeURIComponent(encodedTokenName || 'Token');
+    currentTgModalRawMessage = rawMsg;
+
+    const modal = document.getElementById('tg-msg-modal');
+    const title = document.getElementById('tg-msg-modal-title');
+    const content = document.getElementById('tg-msg-content');
+
+    if (title) title.innerText = `Telegram Message: ${tokenName}`;
+    if (content) content.innerText = rawMsg || '(No formatted message content available)';
+    if (modal) modal.classList.remove('hidden');
+}
+
+function closeTgMsgModal() {
+    const modal = document.getElementById('tg-msg-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function copyTgMsgContent() {
+    if (!currentTgModalRawMessage) return;
+    navigator.clipboard.writeText(currentTgModalRawMessage).then(() => {
+        alert("Telegram message copied to clipboard!");
+    }).catch(err => {
+        console.error("Copy error:", err);
+    });
+}
+
+function copyTextToClipboard(text, el) {
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+        const originalText = el.innerText;
+        el.innerText = 'Copied!';
+        el.style.borderColor = '#10b981';
+        el.style.color = '#10b981';
+        setTimeout(() => {
+            el.innerText = originalText;
+            el.style.borderColor = '';
+            el.style.color = '';
+        }, 1200);
+    });
+}
+
+function quickScanSender(senderAddress) {
+    switchTab('wallet-tracker');
+    const input = document.getElementById('scan-wallet-address');
+    if (input) input.value = senderAddress;
+    scanWalletHistory();
+}
+
+async function exportTokenDataCSV() {
+    try {
+        const search = String(document.getElementById('td-search')?.value || '').trim();
+        const status = document.getElementById('td-status')?.value || 'all';
+        const platform = document.getElementById('td-platform')?.value || 'all';
+        const excludePlatform = document.getElementById('td-exclude-platform')?.value || 'none';
+        const timeframe = document.getElementById('td-timeframe')?.value || 'all';
+        const sortVal = document.getElementById('td-sort-by')?.value || 'id_desc';
+        const enrichedOnly = document.getElementById('td-enriched-only')?.checked || false;
+        const minAmount = String(document.getElementById('td-min-amount')?.value || '').trim();
+        const maxAmount = String(document.getElementById('td-max-amount')?.value || '').trim();
+        const minMc = String(document.getElementById('td-min-mc')?.value || '').trim();
+        const maxMc = String(document.getElementById('td-max-mc')?.value || '').trim();
+        const perfTf = document.getElementById('td-perf-tf')?.value || '5m';
+        const minPerf = String(document.getElementById('td-min-perf')?.value || '').trim();
+        const maxPerf = String(document.getElementById('td-max-perf')?.value || '').trim();
+        const minAge = String(document.getElementById('td-min-age')?.value || '').trim();
+        const maxAge = String(document.getElementById('td-max-age')?.value || '').trim();
+        const minMigrationAge = String(document.getElementById('td-min-migration-age')?.value || '').trim();
+        const maxMigrationAge = String(document.getElementById('td-max-migration-age')?.value || '').trim();
+        const migrated = document.getElementById('td-migrated')?.value || 'all';
+        const tokenNamePattern = String(document.getElementById('td-token-name-pattern')?.value || '').trim();
+        const tokenNameMode = document.getElementById('td-token-name-mode')?.value || 'include';
+        const wordFilter = String(document.getElementById('td-word-filter')?.value || '').trim();
+        const workflowId = document.getElementById('td-workflow-preset')?.value || '';
+
+        const lastIdx = sortVal.lastIndexOf('_');
+        const sortBy = lastIdx !== -1 ? sortVal.slice(0, lastIdx) : sortVal;
+        const sortOrder = lastIdx !== -1 ? sortVal.slice(lastIdx + 1) : 'desc';
+
+        const params = new URLSearchParams({
+            page: 1,
+            limit: 1000,
+            search: search,
+            status: status,
+            platform: platform,
+            exclude_platform: excludePlatform,
+            timeframe: timeframe,
+            sort_by: sortBy || 'id',
+            sort_order: sortOrder || 'desc',
+            enriched_only: enrichedOnly
+        });
+
+        if (minAmount) params.append('min_amount', minAmount);
+        if (maxAmount) params.append('max_amount', maxAmount);
+        if (minMc) params.append('min_mc', minMc);
+        if (maxMc) params.append('max_mc', maxMc);
+        if (perfTf) params.append('perf_tf', perfTf);
+        if (minPerf) params.append('min_perf', minPerf);
+        if (maxPerf) params.append('max_perf', maxPerf);
+        if (minAge) params.append('min_age', minAge);
+        if (maxAge) params.append('max_age', maxAge);
+        if (minMigrationAge) params.append('min_migration_age', minMigrationAge);
+        if (maxMigrationAge) params.append('max_migration_age', maxMigrationAge);
+        if (migrated && migrated !== 'all') params.append('migrated', migrated);
+        if (tokenNamePattern) params.append('token_name_pattern', tokenNamePattern);
+        if (tokenNameMode) params.append('token_name_mode', tokenNameMode);
+        if (wordFilter) params.append('word_filter', wordFilter);
+        if (workflowId) params.append('workflow_id', workflowId);
+
+        const res = await fetch(`/api/wallet/token_payments?${params.toString()}`);
+        const data = await res.json();
+        
+        if (!data.success || !data.payments || data.payments.length === 0) {
+            alert("No data available to export.");
+            return;
+        }
+
+        const headers = ["ID", "Timestamp", "Token Name", "CA", "Platform", "Amount (SOL)", "Amount (USD)", "Sender", "Tracked Address", "Market Cap", "Creation Age", "Migration Age", "5m %", "1h %", "6h %", "24h %", "Status", "Reason", "Dex URL"];
+        const csvRows = [headers.join(",")];
+
+        data.payments.forEach(p => {
+            const row = [
+                p.id,
+                `"${p.created_at || ''}"`,
+                `"${(p.token_name || '').replace(/"/g, '""')}"`,
+                `"${p.ca || p.mint || ''}"`,
+                `"${p.platform || ''}"`,
+                p.amount || 0,
+                p.amount_usd || 0,
+                `"${p.sender_address || ''}"`,
+                `"${p.tracked_address || ''}"`,
+                `"${(p.market_cap || '').replace(/"/g, '""')}"`,
+                `"${(p.creation_age || p.age || '').replace(/"/g, '""')}"`,
+                `"${(p.migration_age || '').replace(/"/g, '""')}"`,
+                p.perf_5m || 0,
+                p.perf_1h || 0,
+                p.perf_6h || 0,
+                p.perf_24h || 0,
+                `"${p.status || ''}"`,
+                `"${(p.reason || '').replace(/"/g, '""')}"`,
+                `"${p.dex_url || ''}"`
+            ];
+            csvRows.push(row.join(","));
+        });
+
+        const blob = new Blob([csvRows.join("\n")], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `token_wallet_data_${new Date().toISOString().slice(0,10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        alert(`Export failed: ${e.message}`);
+    }
+}
+
+async function syncSupabaseData() {
+    const btn = document.getElementById('btn-sync-supabase');
+    const origText = btn ? btn.innerHTML : '⚡ Sync Supabase';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '🔄 Syncing...';
+    }
+    const badge = document.getElementById('td-sync-badge');
+    if (badge) {
+        badge.innerText = '🔄 Syncing Supabase...';
+        badge.style.color = '#fbbf24';
+        badge.style.borderColor = 'rgba(245, 158, 11, 0.3)';
+        badge.style.background = 'rgba(245, 158, 11, 0.15)';
+    }
+
+    try {
+        const res = await fetch('/api/wallet/sync_supabase', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            if (btn) btn.innerHTML = `✅ ${data.message || 'Synced!'}`;
+            // Invalidate cache so fresh data renders immediately
+            try { localStorage.removeItem(TOKEN_DATA_CACHE_KEY); } catch (e) {}
+            await loadTokenWalletData(1, false);
+        } else {
+            alert(`Sync error: ${data.error || 'Failed to sync with Supabase'}`);
+            if (btn) btn.innerHTML = '❌ Failed';
+        }
+    } catch (err) {
+        console.error('Error syncing Supabase:', err);
+        alert(`Error connecting to server for sync: ${err.message}`);
+        if (btn) btn.innerHTML = '❌ Error';
+    } finally {
+        setTimeout(() => {
+            if (btn) {
+                btn.innerHTML = origText;
+                btn.disabled = false;
+            }
+        }, 2500);
+    }
+}
+
+// ==========================================
+// Application Bootstrapping
+// ==========================================
+renderWorkflows();
+populateTokenWorkflowPresets();
 loadRealtimePayments();
 setInterval(loadRealtimePayments, 15000);
-
-renderWorkflows();
 updateLiveScanButtonUI();
 updateTrackerStatusUI();
+// Restore saved auto-refresh preference if present
+const savedRefreshPref = localStorage.getItem('teleflow_token_data_refresh_pref');
+const refreshSelect = document.getElementById('token-data-autorefresh');
+if (refreshSelect && savedRefreshPref !== null) {
+    refreshSelect.value = savedRefreshPref;
+}
+toggleTokenDataAutoRefresh();
+
+// If on Token Wallet Data tab, immediately render cache and fetch live
+const activeTokenTab = document.getElementById('tab-token-data');
+if (activeTokenTab && !activeTokenTab.classList.contains('hidden')) {
+    const hasCache = renderTokenDataFromCache();
+    loadTokenWalletData(1, !hasCache);
+} else {
+    renderTokenDataFromCache();
+}

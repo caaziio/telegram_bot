@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TeleFlow Dashboard</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/globals.css') }}?v=18">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/globals.css') }}?v=25">
     <style>
         .hidden { display: none !important; }
         
@@ -145,6 +145,12 @@
                         <circle cx="16" cy="14" r="2"></circle>
                     </svg>
                     Wallet Tracker
+                </div>
+                <div class="nav-link" id="nav-token-data" onclick="switchTab('token-data')">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                    </svg>
+                    Token Wallet Data
                 </div>
             </nav>
         </aside>
@@ -403,6 +409,331 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Token Wallet Data Tab -->
+            <div id="tab-token-data" class="hidden">
+                <div class="header">
+                    <div class="header-title">
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <h1>Token Wallet Data</h1>
+                            <div id="td-sync-badge" style="font-size: 0.75rem; padding: 3px 10px; border-radius: 20px; background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3); font-weight: 500;">
+                                ⚡ Cache Enabled
+                            </div>
+                        </div>
+                        <p>Explore real-time & historical token payments, performance analytics, and Telegram routing</p>
+                    </div>
+                    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); padding: 0.4rem 0.8rem; border-radius: 8px;">
+                            <label style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0;">Auto-Refresh:</label>
+                            <select id="token-data-autorefresh" onchange="toggleTokenDataAutoRefresh()" style="background: transparent; border: none; color: var(--text-main); font-size: 0.8rem; outline: none; cursor: pointer;">
+                                <option value="0" style="background:#1f2937;">Off</option>
+                                <option value="60000" selected style="background:#1f2937;">1 min</option>
+                                <option value="300000" style="background:#1f2937;">5 min</option>
+                                <option value="900000" style="background:#1f2937;">15 min</option>
+                                <option value="3600000" style="background:#1f2937;">60 min</option>
+                            </select>
+                        </div>
+                        <button class="btn-primary" onclick="exportTokenDataCSV()" style="background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-main); box-shadow: none;">
+                            📥 Export CSV
+                        </button>
+                        <button class="btn-primary" onclick="loadTokenWalletData(1, true)">
+                            🔄 Refresh Data
+                        </button>
+                    </div>
+                </div>
+
+                <!-- KPI Stats Grid -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon-wrapper" style="background: rgba(99, 102, 241, 0.15); color: #818cf8;">
+                            📊
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-label">Total Payments</div>
+                            <div class="stat-value" id="kpi-total-payments">-</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon-wrapper" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">
+                            🚀
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-label">Forwarded to TG</div>
+                            <div class="stat-value" id="kpi-forwarded-payments">-</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon-wrapper" style="background: rgba(236, 72, 153, 0.15); color: #f472b6;">
+                            💎
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-label">Unique Tokens</div>
+                            <div class="stat-value" id="kpi-unique-tokens">-</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon-wrapper" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24;">
+                            💰
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-label">Total Volume ($ USD)</div>
+                            <div class="stat-value" id="kpi-total-volume">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Filter Toolbar -->
+                <div class="filter-panel">
+                    <!-- Row 1: Workflow Preset & Primary Controls -->
+                    <div style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 1rem;">
+                        <div class="form-group" style="margin-bottom: 0; min-width: 250px; flex: 2;">
+                            <label style="display: flex; justify-content: space-between; align-items: center;">
+                                <span>⚡ Apply Workflow Rules Preset</span>
+                                <span style="font-size: 0.72rem; color: #818cf8;">Auto-loads workflow rules</span>
+                            </label>
+                            <select class="form-input" id="td-workflow-preset" onchange="applyWorkflowPresetToFilters()" style="-webkit-appearance: none; background: rgba(99, 102, 241, 0.12); border-color: rgba(99, 102, 241, 0.35); color: #c7d2fe; font-weight: 500;">
+                                <option value="">No Preset (Custom Filters)</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0; min-width: 260px; flex: 2.5;">
+                            <label>Search Token, CA, Sender or Reason</label>
+                            <input type="text" class="form-input" id="td-search" placeholder="Search by name, address, CA, reason..." oninput="debounceTokenSearch()" />
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0; min-width: 135px; flex: 1;">
+                            <label>Status</label>
+                            <select class="form-input" id="td-status" onchange="loadTokenWalletData(1)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white;">
+                                <option value="all">All Statuses</option>
+                                <option value="forwarded">Forwarded</option>
+                                <option value="skipped">Skipped</option>
+                                <option value="dropped">Dropped</option>
+                                <option value="detected">Detected</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0; min-width: 135px; flex: 1;">
+                            <label>Timeframe</label>
+                            <select class="form-input" id="td-timeframe" onchange="loadTokenWalletData(1)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white;">
+                                <option value="all">All Time</option>
+                                <option value="1h">Past 1 Hour</option>
+                                <option value="6h">Past 6 Hours</option>
+                                <option value="24h">Past 24 Hours</option>
+                                <option value="7d">Past 7 Days</option>
+                                <option value="30d">Past 30 Days</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0; min-width: 165px; flex: 1.2;">
+                            <label>Sort By</label>
+                            <select class="form-input" id="td-sort-by" onchange="loadTokenWalletData(1)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white;">
+                                <option value="id_desc">Newest First</option>
+                                <option value="id_asc">Oldest First</option>
+                                <option value="amount_desc">Highest Payment</option>
+                                <option value="perf_5m_desc">Top 5m Gainers</option>
+                                <option value="perf_1h_desc">Top 1h Gainers</option>
+                                <option value="perf_6h_desc">Top 6h Gainers</option>
+                                <option value="perf_24h_desc">Top 24h Gainers</option>
+                                <option value="market_cap_desc">Highest Market Cap</option>
+                                <option value="age_asc">Youngest Creation Age</option>
+                                <option value="migration_age_asc">Youngest Migration Age</option>
+                                <option value="token_name_asc">Token Name (A-Z)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Row 2: Workflow Metric Rules (Token Name, Market Cap, Performance, Age) -->
+                    <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 0.85rem 1rem; margin-bottom: 1rem;">
+                        <div style="font-size: 0.76rem; font-weight: 600; text-transform: uppercase; color: var(--accent-color); letter-spacing: 0.5px; margin-bottom: 0.6rem; display: flex; align-items: center; gap: 6px;">
+                            <span>📊 Token Metric Filters (From Workflows)</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1rem; align-items: flex-end;">
+                            <!-- Token Name Rule -->
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Token Name Match / Regex</label>
+                                <div style="display: flex; gap: 4px;">
+                                    <select id="td-token-name-mode" onchange="loadTokenWalletData(1)" style="width: 85px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 6px; font-size: 0.8rem;">
+                                        <option value="include">Match</option>
+                                        <option value="exclude">Exclude</option>
+                                    </select>
+                                    <input type="text" class="form-input" id="td-token-name-pattern" placeholder="e.g. .* or PEPE|AI" oninput="debounceTokenSearch()" style="flex: 1; padding: 6px 10px; font-size: 0.8rem;" />
+                                </div>
+                            </div>
+
+                            <!-- Market Cap Rule -->
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Market Cap Range ($ USD)</label>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <input type="number" class="form-input" id="td-min-mc" placeholder="Min $" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 10px; font-size: 0.8rem;" />
+                                    <span style="color: var(--text-muted); font-size: 0.8rem;">to</span>
+                                    <input type="number" class="form-input" id="td-max-mc" placeholder="Max $" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 10px; font-size: 0.8rem;" />
+                                </div>
+                            </div>
+
+                            <!-- Performance Rule -->
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Performance Gain/Loss (%)</label>
+                                <div style="display: flex; gap: 4px; align-items: center;">
+                                    <select id="td-perf-tf" onchange="loadTokenWalletData(1)" style="width: 65px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 6px; font-size: 0.8rem;">
+                                        <option value="5m">5m</option>
+                                        <option value="1h">1h</option>
+                                        <option value="6h">6h</option>
+                                        <option value="24h">24h</option>
+                                    </select>
+                                    <input type="number" step="any" class="form-input" id="td-min-perf" placeholder="Min %" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                    <span style="color: var(--text-muted); font-size: 0.8rem;">to</span>
+                                    <input type="number" step="any" class="form-input" id="td-max-perf" placeholder="Max %" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                </div>
+                            </div>
+
+                            <!-- Creation Age Rule -->
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Creation Age (Minutes)</label>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <input type="number" class="form-input" id="td-min-age" placeholder="Min m" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 10px; font-size: 0.8rem;" />
+                                    <span style="color: var(--text-muted); font-size: 0.8rem;">to</span>
+                                    <input type="number" class="form-input" id="td-max-age" placeholder="Max m" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 10px; font-size: 0.8rem;" />
+                                </div>
+                            </div>
+
+                            <!-- Migration Age Rule -->
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Migration Age (Minutes)</label>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <input type="number" class="form-input" id="td-min-migration-age" placeholder="Min m" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 10px; font-size: 0.8rem;" />
+                                    <span style="color: var(--text-muted); font-size: 0.8rem;">to</span>
+                                    <input type="number" class="form-input" id="td-max-migration-age" placeholder="Max m" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 10px; font-size: 0.8rem;" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Row 3: Workflow Conditions (DEX Payment, Migration, Platforms, Word Drop) -->
+                    <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 0.85rem 1rem; margin-bottom: 1rem;">
+                        <div style="font-size: 0.76rem; font-weight: 600; text-transform: uppercase; color: #10b981; letter-spacing: 0.5px; margin-bottom: 0.6rem; display: flex; align-items: center; gap: 6px;">
+                            <span>⚙️ Platform, Payment & Content Filters</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; align-items: flex-end;">
+                            <!-- DEX Payment Amount -->
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">DEX Payment ($ USD)</label>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <input type="number" step="any" class="form-input" id="td-min-amount" placeholder="Min $" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                    <span style="color: var(--text-muted); font-size: 0.8rem;">to</span>
+                                    <input type="number" step="any" class="form-input" id="td-max-amount" placeholder="Max $" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                </div>
+                            </div>
+
+                            <!-- Migration Status -->
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Migration Status</label>
+                                <select class="form-input" id="td-migrated" onchange="loadTokenWalletData(1)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white; padding: 6px 10px; font-size: 0.8rem;">
+                                    <option value="all">All Migration Status</option>
+                                    <option value="yes">Migrated Only (Raydium)</option>
+                                    <option value="no">Unmigrated (Pump.fun, etc.)</option>
+                                </select>
+                            </div>
+
+                            <!-- Platform -->
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Platform Included</label>
+                                <select class="form-input" id="td-platform" onchange="loadTokenWalletData(1)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white; padding: 6px 10px; font-size: 0.8rem;">
+                                    <option value="all">All Platforms</option>
+                                    <option value="solana">Solana (SOL)</option>
+                                    <option value="pump">Pump.fun</option>
+                                    <option value="raydium">Raydium</option>
+                                    <option value="moonshot">Moonshot</option>
+                                </select>
+                            </div>
+
+                            <!-- Exclude Platform -->
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Exclude Platform</label>
+                                <select class="form-input" id="td-exclude-platform" onchange="loadTokenWalletData(1)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white; padding: 6px 10px; font-size: 0.8rem;">
+                                    <option value="none">No Exclusion</option>
+                                    <option value="pump">Exclude Pump.fun</option>
+                                    <option value="raydium">Exclude Raydium</option>
+                                    <option value="moonshot">Exclude Moonshot</option>
+                                </select>
+                            </div>
+
+                            <!-- Word Filter (Drop text) -->
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Word Filter (Drop if found)</label>
+                                <input type="text" class="form-input" id="td-word-filter" placeholder="e.g. scam, rug..." oninput="debounceTokenSearch()" style="padding: 6px 10px; font-size: 0.8rem;" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Bottom Action Toolbar -->
+                    <div style="display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap; padding-top: 0.5rem;">
+                        <div style="display: flex; gap: 1.25rem; align-items: center; flex-wrap: wrap;">
+                            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-muted); cursor: pointer;">
+                                <input type="checkbox" id="td-enriched-only" onchange="loadTokenWalletData(1)" style="accent-color: var(--accent-color); width: 16px; height: 16px; cursor: pointer;">
+                                <span>Show Matched Tokens Only (Non-SOL)</span>
+                            </label>
+                            <span id="td-active-filters-count" style="font-size: 0.78rem; background: rgba(99, 102, 241, 0.15); color: #818cf8; padding: 2px 8px; border-radius: 12px; display: none;">0 filters active</span>
+                        </div>
+
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <button onclick="syncSupabaseData()" id="btn-sync-supabase" title="Pull latest updates from Supabase database" style="background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.4); border-radius: 6px; padding: 4px 11px; color: #a5b4fc; font-size: 0.8rem; font-weight: 500; cursor: pointer; transition: all 0.2s ease;">
+                                ⚡ Sync Supabase
+                            </button>
+                            <button onclick="resetTokenFilters()" style="background: none; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 4px 10px; color: var(--text-muted); font-size: 0.8rem; cursor: pointer; transition: all 0.2s ease;">
+                                ↺ Reset All Filters
+                            </button>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="font-size: 0.8rem; color: var(--text-muted);">Per page:</span>
+                                <select id="td-limit" onchange="loadTokenWalletData(1)" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 3px 6px; font-size: 0.8rem;">
+                                    <option value="25">25</option>
+                                    <option value="50">50</option>
+                                    <option value="100" selected>100</option>
+                                    <option value="250">250</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Token Data Table -->
+                <div class="token-table-wrapper">
+                    <div class="token-table-scroll">
+                        <table class="token-data-table">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Token</th>
+                                    <th>Contract Address</th>
+                                    <th>Payment ($)</th>
+                                    <th>Sender</th>
+                                    <th>Market Cap</th>
+                                    <th>Age (Create / Mig)</th>
+                                    <th>5m</th>
+                                    <th>1h</th>
+                                    <th>6h</th>
+                                    <th>24h</th>
+                                    <th>Status</th>
+                                    <th>Reason / Route</th>
+                                    <th style="text-align: right; padding-right: 1.5rem;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="token-data-tbody">
+                                <tr>
+                                    <td colspan="14" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                                        Loading token wallet data...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Pagination Bar -->
+                    <div class="pagination-bar">
+                        <div id="td-pagination-info" style="font-size: 0.85rem; color: var(--text-muted);">
+                            Showing 0 of 0 records
+                        </div>
+                        <div id="td-pagination-controls" style="display: flex; gap: 6px; align-items: center;">
+                            <!-- Filled dynamically by JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
         </main>
 
         <!-- Editor Modal -->
@@ -448,6 +779,7 @@
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #6366f1;" onclick="addRule('migrated')">+ Add Migration Filter</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #0ea5e9;" onclick="addRule('show_wallet')">+ Show Wallet</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #ef4444;" onclick="addRule('exclude_platform')">+ Exclude Platform</button>
+                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #ec4899;" onclick="addRule('token_name')">+ Add Token Name</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem;" onclick="addRule('filter')">+ Add Word Filter</button>
                             </div>
                         </div>
@@ -495,6 +827,32 @@
                     </div>
                 </div>
             </div>
+        <!-- Telegram Formatted Message Preview Modal -->
+        <div id="tg-msg-modal" class="modal-overlay hidden">
+            <div class="modal-content" style="max-width: 650px;">
+                <div class="header" style="margin-bottom: 1.25rem;">
+                    <div>
+                        <h2 style="font-size: 1.2rem; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                            <span>✈️</span> <span id="tg-msg-modal-title">Telegram Message</span>
+                        </h2>
+                        <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;" id="tg-msg-modal-subtitle">Exact message sent or formatted for Telegram</p>
+                    </div>
+                    <button class="btn-icon" type="button" onclick="closeTgMsgModal()">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                </div>
+                
+                <div id="tg-msg-content" class="tg-message-box"></div>
+                
+                <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 1.25rem;">
+                    <button type="button" class="btn-primary" onclick="copyTgMsgContent()" style="background: rgba(255, 255, 255, 0.08); border: 1px solid var(--border-color); color: var(--text-main); box-shadow: none;">
+                        📋 Copy Message
+                    </button>
+                    <button type="button" class="btn-primary" onclick="closeTgMsgModal()">
+                        Close
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -503,6 +861,6 @@
         const initialWorkflows = {{ workflows | tojson | safe }};
         const initialSettings = {{ settings | tojson | safe }};
     </script>
-    <script src="{{ url_for('static', filename='js/app.js') }}?v=18"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v=31"></script>
 </body>
 </html>
