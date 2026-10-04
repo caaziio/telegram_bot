@@ -282,28 +282,33 @@ def sync_from_supabase():
 def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
     """Pull new and updated wallet_payments from Supabase into local SQLite cache"""
     try:
+        cols = [
+            "id", "tracked_address", "sender_address", "amount", "mint", "signature", "timestamp",
+            "token_name", "ca", "platform", "market_cap", "age", "perf_5m", "perf_1h", "perf_6h", "perf_24h",
+            "dex_url", "migration_status", "status", "reason", "formatted_message", "created_at", "migration_age"
+        ]
+        col_str = ", ".join(cols)
+        ph_str = ", ".join(["?" for _ in cols])
+
         direct_url = os.getenv('DIRECT_URL') or os.getenv('DATABASE_URL')
         if direct_url:
             try:
                 import psycopg2
                 with psycopg2.connect(direct_url, connect_timeout=8) as pg_conn:
                     with pg_conn.cursor() as pg_cur:
-                        if full_sync:
+                        with db_lock:
+                            sq_conn = get_db()
+                            sq_cur = sq_conn.cursor()
+                            max_local_id = sq_cur.execute("SELECT COALESCE(MAX(id), 0) FROM wallet_payments").fetchone()[0]
+                            local_cnt = sq_cur.execute("SELECT COUNT(*) FROM wallet_payments").fetchone()[0]
+                        
+                        pg_cur.execute("SELECT COUNT(*), COALESCE(MAX(id), 0) FROM wallet_payments;")
+                        pg_cnt, pg_max = pg_cur.fetchone()
+                        
+                        if full_sync or local_cnt < pg_cnt or max_local_id == 0:
                             start_id = 0
                         else:
-                            with db_lock:
-                                sq_conn = get_db()
-                                sq_cur = sq_conn.cursor()
-                                max_local_id = sq_cur.execute("SELECT COALESCE(MAX(id), 0) FROM wallet_payments").fetchone()[0]
-                                local_cnt = sq_cur.execute("SELECT COUNT(*) FROM wallet_payments").fetchone()[0]
-                            
-                            pg_cur.execute("SELECT COUNT(*), COALESCE(MAX(id), 0) FROM wallet_payments;")
-                            pg_cnt, pg_max = pg_cur.fetchone()
-                            
-                            if local_cnt < pg_cnt or pg_max > max_local_id + 500:
-                                start_id = max(0, min(max_local_id - limit_records, local_cnt))
-                            else:
-                                start_id = max(0, max_local_id - limit_records)
+                            start_id = max(0, max_local_id - limit_records)
                         
                         pg_cur.execute("""
                             SELECT id, tracked_address, sender_address, amount, mint, signature, timestamp,
@@ -315,13 +320,6 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                         """, (start_id,))
                         rows = pg_cur.fetchall()
                         if rows:
-                            cols = [
-                                "id", "tracked_address", "sender_address", "amount", "mint", "signature", "timestamp",
-                                "token_name", "ca", "platform", "market_cap", "age", "perf_5m", "perf_1h", "perf_6h", "perf_24h",
-                                "dex_url", "migration_status", "status", "reason", "formatted_message", "created_at", "migration_age"
-                            ]
-                            col_str = ", ".join(cols)
-                            ph_str = ", ".join(["?" for _ in cols])
                             clean_rows = []
                             for r in rows:
                                 rl = list(r)
@@ -344,27 +342,73 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                 sq_conn = get_db()
                 sq_cur = sq_conn.cursor()
                 max_local_id = sq_cur.execute("SELECT COALESCE(MAX(id), 0) FROM wallet_payments").fetchone()[0]
-                start_id = 0 if full_sync else max(0, max_local_id - limit_records)
+                local_cnt = sq_cur.execute("SELECT COUNT(*) FROM wallet_payments").fetchone()[0]
             
-            res = supabase_client.table('wallet_payments').select('*').gte('id', start_id).order('id', desc=False).limit(1000).execute()
-            if res.data:
-                cols = [
-                    "id", "tracked_address", "sender_address", "amount", "mint", "signature", "timestamp",
-                    "token_name", "ca", "platform", "market_cap", "age", "perf_5m", "perf_1h", "perf_6h", "perf_24h",
-                    "dex_url", "migration_status", "status", "reason", "formatted_message", "created_at", "migration_age"
-                ]
-                col_str = ", ".join(cols)
-                ph_str = ", ".join(["?" for _ in cols])
-                clean_rows = []
-                for item in res.data:
-                    clean_rows.append(tuple(item.get(c) for c in cols))
-                with db_lock:
-                    sq_conn = get_db()
-                    sq_cur = sq_conn.cursor()
-                    sq_cur.executemany(f"INSERT OR REPLACE INTO wallet_payments ({col_str}) VALUES ({ph_str})", clean_rows)
-                    sq_conn.commit()
-                print(f"[SUPABASE] Synced {len(clean_rows)} wallet_payments via REST API", flush=True)
-                return len(clean_rows)
+            # Check Supabase total count
+            total_sb_count = 0
+            try:
+                cnt_res = supabase_client.table('wallet_payments').select('id', count='exact').limit(1).execute()
+                total_sb_count = cnt_res.count or 0
+            except Exception:
+                pass
+            
+            total_synced = 0
+            
+            # If production has missing data (e.g. only 1,000 rows vs 20,000+ in Supabase, or 0 rows on fresh deploy)
+            if full_sync or local_cnt < total_sb_count or max_local_id == 0:
+                print(f"[SUPABASE] Missing records detected (Local: {local_cnt}, Supabase: {total_sb_count}). Starting bulk REST pagination...", flush=True)
+                current_cursor_id = 0 if (full_sync or local_cnt == 0) else max(0, max_local_id - 50)
+                while True:
+                    res = supabase_client.table('wallet_payments').select('*').gt('id', current_cursor_id).order('id', desc=False).limit(1000).execute()
+                    if not res.data:
+                        break
+                    
+                    clean_rows = []
+                    batch_max_id = current_cursor_id
+                    for item in res.data:
+                        clean_rows.append(tuple(item.get(c) for c in cols))
+                        item_id = item.get('id')
+                        if item_id and item_id > batch_max_id:
+                            batch_max_id = item_id
+                    
+                    with db_lock:
+                        sq_conn = get_db()
+                        sq_cur = sq_conn.cursor()
+                        sq_cur.executemany(f"INSERT OR REPLACE INTO wallet_payments ({col_str}) VALUES ({ph_str})", clean_rows)
+                        sq_conn.commit()
+                    
+                    total_synced += len(clean_rows)
+                    if len(res.data) < 1000 or batch_max_id <= current_cursor_id:
+                        break
+                    current_cursor_id = batch_max_id
+
+                print(f"[SUPABASE] Bulk REST sync complete: synced {total_synced} records (up to ID {current_cursor_id})", flush=True)
+                return total_synced
+            else:
+                # Routine sync: sync recent updates and new payments
+                start_id = max(0, max_local_id - limit_records)
+                current_cursor_id = start_id
+                while True:
+                    res = supabase_client.table('wallet_payments').select('*').gte('id', current_cursor_id).order('id', desc=False).limit(1000).execute()
+                    if not res.data:
+                        break
+                    clean_rows = []
+                    batch_max_id = current_cursor_id
+                    for item in res.data:
+                        clean_rows.append(tuple(item.get(c) for c in cols))
+                        item_id = item.get('id')
+                        if item_id and item_id > batch_max_id:
+                            batch_max_id = item_id
+                    with db_lock:
+                        sq_conn = get_db()
+                        sq_cur = sq_conn.cursor()
+                        sq_cur.executemany(f"INSERT OR REPLACE INTO wallet_payments ({col_str}) VALUES ({ph_str})", clean_rows)
+                        sq_conn.commit()
+                    total_synced += len(clean_rows)
+                    if len(res.data) < 1000 or batch_max_id <= current_cursor_id:
+                        break
+                    current_cursor_id = batch_max_id + 1
+                return total_synced
         return 0
     except Exception as e:
         print(f"[SUPABASE] wallet_payments sync error: {e}", flush=True)
@@ -3000,7 +3044,7 @@ def sqlite_regexp(expr, item):
 def get_token_wallet_data():
     try:
         page = max(1, int(request.args.get('page', 1)))
-        limit = min(max(10, int(request.args.get('limit', 25))), 500)
+        limit = min(max(10, int(request.args.get('limit', 25))), 50000)
         offset = (page - 1) * limit
         
         search = (request.args.get('search') or '').strip()
