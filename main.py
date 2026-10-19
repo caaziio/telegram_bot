@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timezone
 import time
 import requests
+from collections import OrderedDict
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from flask import Flask, render_template, request, jsonify
@@ -46,6 +47,42 @@ token_metadata_cache = {}
 # Cache to avoid duplicate network requests for token USD price
 # Key: mint, Value: (price_usd, cache_timestamp)
 token_price_cache = {}
+CACHE_MAX_ENTRIES = 5_000
+
+def bounded_cache_set(cache, key, value):
+    cache[key] = value
+    while len(cache) > CACHE_MAX_ENTRIES:
+        cache.pop(next(iter(cache)), None)
+
+# Helius can deliver the same webhook more than once (and can do so concurrently).
+# Keep a small, time-bounded process-local set so duplicate deliveries do not fan
+# out into duplicate API scans and asyncio tasks.
+WEBHOOK_SIGNATURE_TTL_SECONDS = 15 * 60
+WEBHOOK_SIGNATURE_CACHE_MAX = 10_000
+processed_webhook_signatures = OrderedDict()
+processed_webhook_signatures_lock = threading.Lock()
+
+def claim_webhook_signature(signature):
+    """Return True once per webhook signature within the deduplication window."""
+    if not signature:
+        return False
+
+    now = time.monotonic()
+    with processed_webhook_signatures_lock:
+        cutoff = now - WEBHOOK_SIGNATURE_TTL_SECONDS
+        while processed_webhook_signatures:
+            _, seen_at = next(iter(processed_webhook_signatures.items()))
+            if seen_at >= cutoff:
+                break
+            processed_webhook_signatures.popitem(last=False)
+
+        if signature in processed_webhook_signatures:
+            return False
+
+        processed_webhook_signatures[signature] = now
+        while len(processed_webhook_signatures) > WEBHOOK_SIGNATURE_CACHE_MAX:
+            processed_webhook_signatures.popitem(last=False)
+        return True
 
 def get_token_price_usd(mint):
     if not mint:
@@ -83,7 +120,7 @@ def get_token_price_usd(mint):
                             price_str = p.get("priceUsd")
                             if price_str:
                                 price = float(price_str)
-                                token_price_cache[search_mint] = (price, now)
+                                bounded_cache_set(token_price_cache, search_mint, (price, now))
                                 return price
 
                     # 2. Look for any pair where search_mint is baseToken
@@ -93,7 +130,7 @@ def get_token_price_usd(mint):
                             price_str = p.get("priceUsd")
                             if price_str:
                                 price = float(price_str)
-                                token_price_cache[search_mint] = (price, now)
+                                bounded_cache_set(token_price_cache, search_mint, (price, now))
                                 return price
 
                     # 3. Fallback to first Solana pair priceUsd
@@ -101,7 +138,7 @@ def get_token_price_usd(mint):
                         price_str = p.get("priceUsd")
                         if price_str:
                             price = float(price_str)
-                            token_price_cache[search_mint] = (price, now)
+                            bounded_cache_set(token_price_cache, search_mint, (price, now))
                             return price
     except Exception as e:
         print(f"[PRICE FETCH] Error fetching price for {search_mint}: {e}", flush=True)
@@ -134,7 +171,7 @@ def get_token_metadata(mint):
                 name = base_token.get("name", "")
                 if symbol:
                     display_name = f"{symbol} ({name})" if name else symbol
-                    token_metadata_cache[mint] = display_name
+                    bounded_cache_set(token_metadata_cache, mint, display_name)
                     return display_name
     except Exception as e:
         print(f"[METADATA FETCH] Error fetching token metadata for {mint}: {e}", flush=True)
@@ -341,13 +378,11 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                             max_local_id = sq_cur.execute("SELECT COALESCE(MAX(id), 0) FROM wallet_payments").fetchone()[0]
                             local_cnt = sq_cur.execute("SELECT COUNT(*) FROM wallet_payments").fetchone()[0]
 
-                        pg_cur.execute("SELECT COUNT(*), COALESCE(MAX(id), 0) FROM wallet_payments;")
-                        pg_cnt, pg_max = pg_cur.fetchone()
-
-                        if full_sync or local_cnt < pg_cnt or max_local_id == 0:
-                            start_id = 0
-                        else:
-                            start_id = max(0, max_local_id - limit_records)
+                        # The local cache intentionally contains only enriched rows,
+                        # so its count must not be compared with the unfiltered remote
+                        # table count. That comparison caused a full-table reload every
+                        # minute. Use a bounded overlap to pick up recent updates.
+                        start_id = 0 if (full_sync or max_local_id == 0) else max(0, max_local_id - limit_records)
 
                         try:
                             pg_cur.execute("""
@@ -362,9 +397,13 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                             """)
                             pg_conn.commit()
                         except Exception as up_err:
-                            pass
+                            pg_conn.rollback()
 
-                        pg_cur.execute("""
+                        # A named cursor streams rows from Postgres instead of making
+                        # psycopg2 buffer the entire table (including message bodies).
+                        stream_cur = pg_conn.cursor(name=f"wallet_sync_{int(time.time() * 1000)}")
+                        stream_cur.itersize = 250
+                        stream_cur.execute("""
                             SELECT id, tracked_address, sender_address, amount, mint, signature, timestamp,
                                    token_name, ca, platform, market_cap, age, perf_5m, perf_1h, perf_6h, perf_24h,
                                    dex_url, migration_status, status, reason, formatted_message, created_at, migration_age
@@ -379,8 +418,12 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                               AND dex_url IS NOT NULL AND TRIM(dex_url) != ''
                             ORDER BY id ASC;
                         """, (start_id,))
-                        rows = pg_cur.fetchall()
-                        if rows:
+                        total_synced = 0
+                        last_synced_id = start_id
+                        while True:
+                            rows = stream_cur.fetchmany(250)
+                            if not rows:
+                                break
                             clean_rows = []
                             for r in rows:
                                 rl = list(r)
@@ -398,13 +441,19 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                                     if hasattr(v, 'isoformat'):
                                         rl[i] = str(v)
                                 clean_rows.append(tuple(rl))
-                            with db_lock:
-                                sq_conn = get_db()
-                                sq_cur = sq_conn.cursor()
-                                sq_cur.executemany(f"INSERT OR REPLACE INTO wallet_payments ({col_str}) VALUES ({ph_str})", clean_rows)
-                                sq_conn.commit()
-                            debug_log(f"[SUPABASE] Synced {len(clean_rows)} wallet_payments from Postgres (from ID {start_id} up to ID {rows[-1][0]})")
-                            return len(clean_rows)
+                            if clean_rows:
+                                with db_lock:
+                                    sq_conn = get_db()
+                                    sq_cur = sq_conn.cursor()
+                                    sq_cur.executemany(f"INSERT OR REPLACE INTO wallet_payments ({col_str}) VALUES ({ph_str})", clean_rows)
+                                    sq_conn.commit()
+                                total_synced += len(clean_rows)
+                            last_synced_id = rows[-1][0]
+
+                        stream_cur.close()
+                        if total_synced:
+                            debug_log(f"[SUPABASE] Synced {total_synced} wallet_payments from Postgres (from ID {start_id} up to ID {last_synced_id})")
+                        return total_synced
             except Exception as pg_err:
                 print(f"[SUPABASE] Direct Postgres wallet sync notice: {pg_err}", flush=True)
 
@@ -426,7 +475,7 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
             total_synced = 0
 
             # If production has missing data (e.g. only 1,000 rows vs 20,000+ in Supabase, or 0 rows on fresh deploy)
-            if full_sync or local_cnt < total_sb_count or max_local_id == 0:
+            if full_sync or max_local_id == 0:
                 debug_log(f"[SUPABASE] Missing records detected (Local: {local_cnt}, Supabase: {total_sb_count}). Starting bulk REST pagination...")
                 current_cursor_id = 0 if (full_sync or local_cnt == 0) else max(0, max_local_id - 50)
                 while True:
@@ -2227,6 +2276,44 @@ def run_async_coroutine(coro):
         finally:
             loop.close()
 
+MAX_PENDING_BACKGROUND_JOBS = 64
+MAX_CONCURRENT_BACKGROUND_JOBS = 8
+background_jobs_pending = 0
+background_jobs_lock = threading.Lock()
+background_job_semaphore = None
+
+async def _run_bounded_background_job(coro):
+    global background_jobs_pending
+    started = False
+    try:
+        async with background_job_semaphore:
+            started = True
+            return await coro
+    finally:
+        if not started:
+            coro.close()
+        with background_jobs_lock:
+            background_jobs_pending -= 1
+
+def run_bounded_async_coroutine(coro):
+    """Schedule external-API work without allowing an unbounded task backlog."""
+    global background_jobs_pending
+    with background_jobs_lock:
+        if background_jobs_pending >= MAX_PENDING_BACKGROUND_JOBS or background_job_semaphore is None:
+            coro.close()
+            print("[BACKGROUND JOBS] Dropping job because the bounded queue is full or not ready.", flush=True)
+            return False
+        background_jobs_pending += 1
+
+    try:
+        run_async_coroutine(_run_bounded_background_job(coro))
+        return True
+    except Exception:
+        with background_jobs_lock:
+            background_jobs_pending -= 1
+        coro.close()
+        raise
+
 def discover_payment_wallet_logic(token_address, payment_timestamp, api_key):
     if not api_key:
         return None, "Helius API Key not set."
@@ -4001,6 +4088,9 @@ def helius_webhook():
             sig = tx.get("signature")
             if not sig:
                 continue
+            if not claim_webhook_signature(sig):
+                debug_log(f"[HELIUS WEBHOOK] Ignoring duplicate transaction: {sig}")
+                continue
 
             # 1. Process tracked wallet payments
             for tracked_address in tracked_addresses:
@@ -4015,7 +4105,7 @@ def helius_webhook():
                         amount_usd = amount_sol * sol_price if sol_price else 0.0
                         timestamp = tx.get("timestamp", int(time.time()))
                         debug_log(f"[HELIUS WEBHOOK] Detected real-time tracked native payment: {amount_sol} SOL from {from_addr} to {tracked_address}. Tracing payer history...")
-                        run_async_coroutine(process_payment_and_forward(from_addr, timestamp, amount_usd, signature=sig, tracked_address=tracked_address, amount=amount_sol, mint="SOL"))
+                        run_bounded_async_coroutine(process_payment_and_forward(from_addr, timestamp, amount_usd, signature=sig, tracked_address=tracked_address, amount=amount_sol, mint="SOL"))
 
                 # Process token transfers
                 for transfer in tx.get('tokenTransfers', []):
@@ -4046,10 +4136,10 @@ def helius_webhook():
                                 "payer_address": from_addr,
                                 "tracked_address": tracked_address
                             }
-                            run_async_coroutine(process_single_cto_item(item, target, wf_id, t_mode))
+                            run_bounded_async_coroutine(process_single_cto_item(item, target, wf_id, t_mode))
                         else:
                             debug_log(f"[HELIUS WEBHOOK] Detected base token payment: {token_amount} {mint[:8]}... from {from_addr} to {tracked_address}. Tracing payer history...")
-                            run_async_coroutine(process_payment_and_forward(from_addr, timestamp, amount_usd, signature=sig, tracked_address=tracked_address, amount=token_amount, mint=mint))
+                            run_bounded_async_coroutine(process_payment_and_forward(from_addr, timestamp, amount_usd, signature=sig, tracked_address=tracked_address, amount=token_amount, mint=mint))
 
             # 2. Process DexScreener monitored payment address
             if monitored_address:
@@ -4120,12 +4210,12 @@ def helius_webhook():
                     if base_tokens:
                         # Instantly check each base token in background Telethon loop
                         for ca in base_tokens:
-                            run_async_coroutine(verify_and_forward_cto_token(ca, amount_usd, payer_address=payer_address))
+                            run_bounded_async_coroutine(verify_and_forward_cto_token(ca, amount_usd, payer_address=payer_address))
                     elif payer_address:
                         api_key = settings.get('helius_api_key')
                         tx_ts = tx.get("timestamp", int(time.time()))
                         debug_log(f"[HELIUS WEBHOOK] No base tokens in payment tx. Triggering payer history search for {payer_address}...")
-                        run_async_coroutine(process_payment_payer_history(payer_address, tx_ts, api_key, amount_usd))
+                        run_bounded_async_coroutine(process_payment_payer_history(payer_address, tx_ts, api_key, amount_usd))
 
         return jsonify({"status": "success"}), 200
     except Exception as e:
@@ -4290,7 +4380,7 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
                 if not test_mode and now - orders_check_cache.get(cache_key, 0) < 120:
                     continue
 
-                orders_check_cache[cache_key] = now
+                bounded_cache_set(orders_check_cache, cache_key, now)
                 orders_url = f"https://api.dexscreener.com/orders/v1/{chain}/{addr}"
                 orders_res = await asyncio.to_thread(requests.get, orders_url)
                 if orders_res.status_code == 200:
@@ -4555,8 +4645,9 @@ def register_handlers(client):
 
 
 async def main():
-    global telethon_loop, tg_client, current_api_id, current_api_hash, handlers_registered
+    global telethon_loop, tg_client, current_api_id, current_api_hash, handlers_registered, background_job_semaphore
     telethon_loop = asyncio.get_running_loop()
+    background_job_semaphore = asyncio.Semaphore(MAX_CONCURRENT_BACKGROUND_JOBS)
 
     # Start Flask dashboard in background immediately so health checks pass
     flask_thread = threading.Thread(target=run_flask_app, daemon=True)
