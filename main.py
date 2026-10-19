@@ -3,6 +3,7 @@ import sqlite3
 import os
 import threading
 import re
+import logging
 from datetime import datetime, timezone
 import time
 import requests
@@ -12,6 +13,14 @@ from flask import Flask, render_template, request, jsonify
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Detailed per-message and per-rule logs are useful locally, but extremely noisy
+# in production. Enable them explicitly with DEBUG_LOGGING=true.
+DEBUG_LOGGING = os.environ.get("DEBUG_LOGGING", "false").strip().lower() in ("1", "true", "yes", "on")
+
+def debug_log(message):
+    if DEBUG_LOGGING:
+        print(message, flush=True)
 
 # Set Flask to use the current dir's templates and static folders
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -394,7 +403,7 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                                 sq_cur = sq_conn.cursor()
                                 sq_cur.executemany(f"INSERT OR REPLACE INTO wallet_payments ({col_str}) VALUES ({ph_str})", clean_rows)
                                 sq_conn.commit()
-                            print(f"[SUPABASE] Synced {len(clean_rows)} wallet_payments from Postgres (from ID {start_id} up to ID {rows[-1][0]})", flush=True)
+                            debug_log(f"[SUPABASE] Synced {len(clean_rows)} wallet_payments from Postgres (from ID {start_id} up to ID {rows[-1][0]})")
                             return len(clean_rows)
             except Exception as pg_err:
                 print(f"[SUPABASE] Direct Postgres wallet sync notice: {pg_err}", flush=True)
@@ -418,7 +427,7 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
 
             # If production has missing data (e.g. only 1,000 rows vs 20,000+ in Supabase, or 0 rows on fresh deploy)
             if full_sync or local_cnt < total_sb_count or max_local_id == 0:
-                print(f"[SUPABASE] Missing records detected (Local: {local_cnt}, Supabase: {total_sb_count}). Starting bulk REST pagination...", flush=True)
+                debug_log(f"[SUPABASE] Missing records detected (Local: {local_cnt}, Supabase: {total_sb_count}). Starting bulk REST pagination...")
                 current_cursor_id = 0 if (full_sync or local_cnt == 0) else max(0, max_local_id - 50)
                 while True:
                     res = supabase_client.table('wallet_payments').select('*').gt('id', current_cursor_id).order('id', desc=False).limit(1000).execute()
@@ -447,7 +456,7 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                         break
                     current_cursor_id = batch_max_id
 
-                print(f"[SUPABASE] Bulk REST sync complete: synced {total_synced} records (up to ID {current_cursor_id})", flush=True)
+                debug_log(f"[SUPABASE] Bulk REST sync complete: synced {total_synced} records (up to ID {current_cursor_id})")
                 return total_synced
             else:
                 # Routine sync: sync recent updates and new payments
@@ -903,7 +912,7 @@ def process_message_logic(text, rules, context=None):
 
     for rule in rules:
         rule_type = rule.get('rule_type')
-        print(f"      [RULE] type={rule_type}, search_text={rule.get('search_text')}, time_min={rule.get('time_min')}, time_max={rule.get('time_max')}")
+        debug_log(f"      [RULE] type={rule_type}, search_text={rule.get('search_text')}, time_min={rule.get('time_min')}, time_max={rule.get('time_max')}")
 
         # TOKEN AGE FILTER LOGIC
         if rule_type == 'token_age':
@@ -918,7 +927,7 @@ def process_message_logic(text, rules, context=None):
 
             age_type = rule.get('search_text') or 'creation'
             age_type = age_type.lower().strip()
-            print(f"      [TOKEN AGE] type={age_type}, min_age={min_age}, max_age={max_age}")
+            debug_log(f"      [TOKEN AGE] type={age_type}, min_age={min_age}, max_age={max_age}")
 
             # Find the relevant line for age extraction
             lines = text.split('\n') if text else []
@@ -954,7 +963,7 @@ def process_message_logic(text, rules, context=None):
             token_minutes = None
 
             if age_text:
-                print(f"      [TOKEN AGE] Extracted age text: '{age_text}'")
+                debug_log(f"      [TOKEN AGE] Extracted age text: '{age_text}'")
                 # Check for "Just now" or "New" which imply 0 minutes
                 if re.search(r'(?:Just now|New)', age_text, re.IGNORECASE):
                     token_minutes = 0
@@ -971,7 +980,7 @@ def process_message_logic(text, rules, context=None):
                         token_minutes = None
                     else:
                         token_minutes = (d * 1440) + (h * 60) + m
-                        print(f"      [TOKEN AGE] Parsed: d={d}, h={h}, m={m} → {token_minutes} minutes")
+                        debug_log(f"      [TOKEN AGE] Parsed: d={d}, h={h}, m={m} → {token_minutes} minutes")
             else:
                 # If no age_line found, see if we can find a standalone time pattern in the whole text (only for creation fallback)
                 if age_type != 'migration':
@@ -981,18 +990,18 @@ def process_message_logic(text, rules, context=None):
                         h = int(standalone_match.group(2) or 0)
                         m = int(standalone_match.group(3) or 0)
                         token_minutes = (d * 1440) + (h * 60) + m
-                        print(f"      [TOKEN AGE] Parsed standalone: d={d}, h={h}, m={m} → {token_minutes} minutes")
+                        debug_log(f"      [TOKEN AGE] Parsed standalone: d={d}, h={h}, m={m} → {token_minutes} minutes")
 
             # If the age is unknown, drop the message
             if token_minutes is None:
-                print(f"      [TOKEN AGE] DROPPING: Token age is unknown or not found")
+                debug_log("      [TOKEN AGE] DROPPING: Token age is unknown or not found")
                 return None, True, f"Dropped by Token Age Filter (Age is Unknown)"
 
             if not (min_age <= token_minutes <= max_age):
-                print(f"      [TOKEN AGE] DROPPING: {min_age} <= {token_minutes} <= {max_age} is FALSE")
+                debug_log(f"      [TOKEN AGE] DROPPING: {min_age} <= {token_minutes} <= {max_age} is FALSE")
                 return None, True, f"Dropped by Token Age Filter (Allowed: {min_age}-{max_age}m, Found: {token_minutes}m)"
             else:
-                print(f"      [TOKEN AGE] PASSED: {min_age} <= {token_minutes} <= {max_age}")
+                debug_log(f"      [TOKEN AGE] PASSED: {min_age} <= {token_minutes} <= {max_age}")
 
         # EXTRACT CA LOGIC (Now acts purely as a filter)
         elif rule_type == 'extract_ca':
@@ -1001,7 +1010,7 @@ def process_message_logic(text, rules, context=None):
             if not match or not match.group(1):
                 return None, True, "Dropped by Extract CA (No Contract Address found in text)"
             else:
-                print(f"      [EXTRACT CA] PASSED: Found CA={match.group(1)[:20]}...")
+                debug_log(f"      [EXTRACT CA] PASSED: Found CA={match.group(1)[:20]}...")
 
         # PERFORMANCE FILTER LOGIC
         elif rule_type == 'performance':
@@ -1030,9 +1039,9 @@ def process_message_logic(text, rules, context=None):
                     if not (min_perf <= actual_performance <= max_perf):
                         return None, True, f"Dropped by Performance Filter ({timeframe_clean}: {actual_performance}% not between {min_perf}% and {max_perf}%)"
                     else:
-                        print(f"      [PERF] PASSED: {timeframe_clean} = {actual_performance}%")
+                        debug_log(f"      [PERF] PASSED: {timeframe_clean} = {actual_performance}%")
                 else:
-                    print(f"      [PERF] PASSED: No '{timeframe_clean}:' pattern found in text (filter skipped)")
+                    debug_log(f"      [PERF] PASSED: No '{timeframe_clean}:' pattern found in text (filter skipped)")
             except ValueError:
                 pass
 
@@ -1049,10 +1058,10 @@ def process_message_logic(text, rules, context=None):
                 if match:
                     val = float(match.group(1).replace(',', ''))
                     if not (min_p <= val <= max_p):
-                        print(f"      [DEX PAYMENT] DROPPING: {min_p} <= {val} <= {max_p} is FALSE", flush=True)
+                        debug_log(f"      [DEX PAYMENT] DROPPING: {min_p} <= {val} <= {max_p} is FALSE")
                         return None, True, f"Dropped by DEX Payment Filter (Allowed: ${min_p}-${max_p} USD, Found: ${val} USD)"
                     else:
-                        print(f"      [DEX PAYMENT] PASSED: {min_p} <= {val} <= {max_p}", flush=True)
+                        debug_log(f"      [DEX PAYMENT] PASSED: {min_p} <= {val} <= {max_p}")
                         # Override Order Type display name if a custom label is specified
                         label = (rule.get('search_text') or '').strip()
                         if label:
@@ -1071,10 +1080,10 @@ def process_message_logic(text, rules, context=None):
                 if match:
                     actual = match.group(1).lower()
                     if actual != expected:
-                        print(f"      [MIGRATION] DROPPING: expected {expected}, found {actual}", flush=True)
+                        debug_log(f"      [MIGRATION] DROPPING: expected {expected}, found {actual}")
                         return None, True, f"Dropped by Migration Filter (Expected: {expected}, Found: {actual})"
                     else:
-                        print(f"      [MIGRATION] PASSED: {actual} == {expected}", flush=True)
+                        debug_log(f"      [MIGRATION] PASSED: {actual} == {expected}")
                 else:
                     if expected == 'yes':
                         return None, True, "Dropped by Migration Filter (No migration info found in text)"
@@ -1147,22 +1156,22 @@ def process_message_logic(text, rules, context=None):
                     else:
                         token_name = ""
 
-            print(f"      [TOKEN NAME] token_name='{token_name}', pattern='{pattern}', mode='{mode}'", flush=True)
+            debug_log(f"      [TOKEN NAME] token_name='{token_name}', pattern='{pattern}', mode='{mode}'")
 
             is_matched = token_name_pattern_matches(token_name, pattern)
 
             if mode == 'exclude':
                 if is_matched and token_name:
-                    print(f"      [TOKEN NAME] DROPPING: Token name '{token_name}' matched excluded pattern '{pattern}'", flush=True)
+                    debug_log(f"      [TOKEN NAME] DROPPING: Token name '{token_name}' matched excluded pattern '{pattern}'")
                     return None, True, f"Dropped by Token Name Filter (Token '{token_name}' matched excluded pattern '{pattern}')"
                 else:
-                    print(f"      [TOKEN NAME] PASSED: Token name '{token_name}' did not match excluded pattern '{pattern}'", flush=True)
+                    debug_log(f"      [TOKEN NAME] PASSED: Token name '{token_name}' did not match excluded pattern '{pattern}'")
             else:  # mode == 'include' (default)
                 if not is_matched:
-                    print(f"      [TOKEN NAME] DROPPING: Token name '{token_name or 'Unknown'}' did not match required pattern '{pattern}'", flush=True)
+                    debug_log(f"      [TOKEN NAME] DROPPING: Token name '{token_name or 'Unknown'}' did not match required pattern '{pattern}'")
                     return None, True, f"Dropped by Token Name Filter (Token '{token_name or 'Unknown'}' did not match required pattern '{pattern}')"
                 else:
-                    print(f"      [TOKEN NAME] PASSED: Token name '{token_name}' matched required pattern '{pattern}'", flush=True)
+                    debug_log(f"      [TOKEN NAME] PASSED: Token name '{token_name}' matched required pattern '{pattern}'")
 
         # WORD FILTER LOGIC
         elif rule_type == 'filter':
@@ -1176,17 +1185,17 @@ def process_message_logic(text, rules, context=None):
                     if mode == 'exclude':
                         if found_words:
                             matched = "', '".join(found_words)
-                            print(f"      [WORD FILTER] DROPPING: Found forbidden word(s): '{matched}'", flush=True)
+                            debug_log(f"      [WORD FILTER] DROPPING: Found forbidden word(s): '{matched}'")
                             return None, True, f"Dropped by Word Filter (Found forbidden word: '{matched}')"
                         else:
-                            print(f"      [WORD FILTER] PASSED: No forbidden words from '{search}' found in text", flush=True)
+                            debug_log(f"      [WORD FILTER] PASSED: No forbidden words from '{search}' found in text")
                     else:  # mode == 'include' (default: pass if at least one word is present)
                         if found_words:
                             matched = "', '".join(found_words)
-                            print(f"      [WORD FILTER] PASSED: Message contains required word(s): '{matched}'", flush=True)
+                            debug_log(f"      [WORD FILTER] PASSED: Message contains required word(s): '{matched}'")
                         else:
                             words_preview = ", ".join(words[:5]) + ("..." if len(words) > 5 else "")
-                            print(f"      [WORD FILTER] DROPPING: None of the required words ('{words_preview}') found in message", flush=True)
+                            debug_log(f"      [WORD FILTER] DROPPING: None of the required words ('{words_preview}') found in message")
                             return None, True, f"Dropped by Word Filter (None of the required words found: '{words_preview}')"
 
         # REPLACE LOGIC
@@ -1202,7 +1211,7 @@ def process_message_logic(text, rules, context=None):
             if replace:
                 processed_text += f"\n\n{replace}"
 
-    print(f"      [RESULT] All rules passed! Message will be forwarded.")
+    debug_log("      [RESULT] All rules passed! Message will be forwarded.")
     return processed_text, False, ""
 
 def process_message(text, rules, message_date):
@@ -1222,7 +1231,7 @@ def create_workflow():
     data = None
     try:
         data = request.json
-        print(f"DEBUG: create_workflow payload: {data}")
+        debug_log(f"DEBUG: create_workflow payload: {data}")
         wf_payload = {
             'name': data.get('name'),
             'source_channel': data.get('source_channel'),
@@ -1683,7 +1692,7 @@ async def check_token_migration(ca, pairs):
                                 # complete is a bool (1 byte) at offset 48 (0x30)
                                 is_completed_on_chain = (data_bytes[48] == 1)
                                 if is_completed_on_chain:
-                                    print(f"[MIGRATION] On-chain check confirmed migration for {ca}.", flush=True)
+                                    debug_log(f"[MIGRATION] On-chain check confirmed migration for {ca}.")
                 except Exception as e:
                     print(f"[MIGRATION] Error verifying bonding curve on-chain: {e}", flush=True)
 
@@ -2005,7 +2014,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                     try:
                         await safe_send_message(tg_client, final_target, send_msg)
                         passed_channels.append(final_target)
-                        print(f"[REAL-TIME SCANNER] Token {ca} successfully forwarded to target: {final_target} via workflow {wf.get('name')}", flush=True)
+                        debug_log(f"[REAL-TIME SCANNER] Token {ca} successfully forwarded to target: {final_target} via workflow {wf.get('name')}")
                     except Exception as e:
                         send_failures.append(f"{final_target}: {e}")
                         print(f"[REAL-TIME SCANNER] Failed to send to {final_target}: {e}", flush=True)
@@ -2237,13 +2246,13 @@ def discover_payment_wallet_logic(token_address, payment_timestamp, api_key):
             r = requests.get(url, timeout=10)
             if r.status_code != 200:
                 msg = f"Helius API HTTP {r.status_code} error on page {page+1}: {r.text.strip()}"
-                print(f"[HELIUS DISCOVERY] {msg}")
+                debug_log(f"[HELIUS DISCOVERY] {msg}")
                 return None, msg
 
             txs = r.json()
             if not txs or not isinstance(txs, list):
                 msg = f"No transactions returned on page {page+1}."
-                print(f"[HELIUS DISCOVERY] {msg}")
+                debug_log(f"[HELIUS DISCOVERY] {msg}")
                 log_messages.append(msg)
                 break
 
@@ -2255,7 +2264,7 @@ def discover_payment_wallet_logic(token_address, payment_timestamp, api_key):
 
                 # Check if within 90s window of payment
                 if abs(tx_ts - ts_seconds) <= 90:
-                    print(f"[HELIUS DISCOVERY] Found matching transaction {tx.get('signature')} at {tx_ts} (target: {ts_seconds})")
+                    debug_log(f"[HELIUS DISCOVERY] Found matching transaction {tx.get('signature')} at {tx_ts} (target: {ts_seconds})")
                     # Look for token transfers (USDC)
                     for transfer in tx.get("tokenTransfers", []):
                         to_address = transfer.get("toUserAccount")
@@ -2272,7 +2281,7 @@ def discover_payment_wallet_logic(token_address, payment_timestamp, api_key):
             oldest_tx_ts = txs[-1].get("timestamp", 0)
             if oldest_tx_ts < ts_seconds - 90:
                 msg = f"Oldest transaction on page {page+1} ({oldest_tx_ts}) is older than target ({ts_seconds}). Stopping."
-                print(f"[HELIUS DISCOVERY] {msg}")
+                debug_log(f"[HELIUS DISCOVERY] {msg}")
                 log_messages.append(msg)
                 break
 
@@ -2281,7 +2290,7 @@ def discover_payment_wallet_logic(token_address, payment_timestamp, api_key):
                 break
         except Exception as e:
             msg = f"Error querying page {page+1}: {e}"
-            print(f"[HELIUS DISCOVERY] {msg}")
+            debug_log(f"[HELIUS DISCOVERY] {msg}")
             return None, msg
 
     summary = "; ".join(log_messages) if log_messages else "No matching payment transaction found in analyzed history pages."
@@ -2353,7 +2362,7 @@ def get_dex_payment_info(token_address, payment_timestamp, api_key):
                                 payer_address = tx.get("feePayer")
 
                             if total_usd > 0 or payer_address:
-                                print(f"[DEX PAYMENT FILTER] Found payment of ${total_usd:.2f} USD to {scan_addr} from payer {payer_address}", flush=True)
+                                debug_log(f"[DEX PAYMENT FILTER] Found payment of ${total_usd:.2f} USD to {scan_addr} from payer {payer_address}")
                                 return total_usd, payer_address
 
         # Final fallback: scan the token address itself if the monitored addresses scan didn't find it
@@ -2390,7 +2399,7 @@ def get_dex_payment_info(token_address, payment_timestamp, api_key):
                                 payer_address = tx.get("feePayer")
 
                             if total_usd > 0 or payer_address:
-                                print(f"[DEX PAYMENT FILTER] Fallback token scan found payment of ${total_usd:.2f} USD from payer {payer_address}", flush=True)
+                                debug_log(f"[DEX PAYMENT FILTER] Fallback token scan found payment of ${total_usd:.2f} USD from payer {payer_address}")
                                 return total_usd, payer_address
 
     except Exception as e:
@@ -2410,7 +2419,7 @@ async def find_token_from_payer_history(payer_address, payment_timestamp, api_ke
 
     url = f"https://api.helius.xyz/v0/addresses/{payer_address}/transactions?api-key={api_key}"
     try:
-        print(f"[PAYER HISTORY] Scanning history for payer {payer_address} around payment time {payment_timestamp} (depth={depth})...", flush=True)
+        debug_log(f"[PAYER HISTORY] Scanning history for payer {payer_address} around payment time {payment_timestamp} (depth={depth})...")
         r = await asyncio.to_thread(requests.get, url, timeout=10)
         if r.status_code != 200:
             print(f"[PAYER HISTORY] Helius API HTTP {r.status_code} error: {r.text.strip()}", flush=True)
@@ -2460,7 +2469,7 @@ async def find_token_from_payer_history(payer_address, payment_timestamp, api_ke
 
             if candidate_mints:
                 mint = list(candidate_mints)[0]
-                print(f"[PAYER HISTORY] Found token {mint} from positive balance/transfer in tx {tx.get('signature')} at {tx_ts} (payment ts: {payment_timestamp})", flush=True)
+                debug_log(f"[PAYER HISTORY] Found token {mint} from positive balance/transfer in tx {tx.get('signature')} at {tx_ts} (payment ts: {payment_timestamp})")
                 return mint
 
         # 1b. Expanded primary pass (Past 24 hours): If nothing in 2 hours
@@ -2490,7 +2499,7 @@ async def find_token_from_payer_history(payer_address, payment_timestamp, api_ke
 
             if candidate_mints:
                 mint = list(candidate_mints)[0]
-                print(f"[PAYER HISTORY] Found token {mint} from 24h positive balance/transfer in tx {tx.get('signature')} at {tx_ts} (payment ts: {payment_timestamp})", flush=True)
+                debug_log(f"[PAYER HISTORY] Found token {mint} from 24h positive balance/transfer in tx {tx.get('signature')} at {tx_ts} (payment ts: {payment_timestamp})")
                 return mint
 
         # 2. Secondary fallback: Look for any custom token transaction activity within 24 hours
@@ -2502,13 +2511,13 @@ async def find_token_from_payer_history(payer_address, payment_timestamp, api_ke
             for transfer in tx.get("tokenTransfers", []):
                 mint = transfer.get("mint")
                 if mint and mint not in excluded_mints:
-                    print(f"[PAYER HISTORY] Fallback found token {mint} in transfers in tx {tx.get('signature')} at {tx_ts} (payment ts: {payment_timestamp})", flush=True)
+                    debug_log(f"[PAYER HISTORY] Fallback found token {mint} in transfers in tx {tx.get('signature')} at {tx_ts} (payment ts: {payment_timestamp})")
                     return mint
 
             for change in tx.get("tokenBalanceChanges", []):
                 mint = change.get("mint")
                 if mint and mint not in excluded_mints:
-                    print(f"[PAYER HISTORY] Fallback found token {mint} in balance changes in tx {tx.get('signature')} at {tx_ts} (payment ts: {payment_timestamp})", flush=True)
+                    debug_log(f"[PAYER HISTORY] Fallback found token {mint} in balance changes in tx {tx.get('signature')} at {tx_ts} (payment ts: {payment_timestamp})")
                     return mint
 
         # 3. Funder trace: if no token found, check if this wallet was funded by another address within 24 hours
@@ -2529,14 +2538,14 @@ async def find_token_from_payer_history(payer_address, payment_timestamp, api_ke
             if funders:
                 # Sort funders by time closest to payment timestamp (newest first)
                 funders.sort(key=lambda x: x[1], reverse=True)
-                print(f"[PAYER HISTORY] Wallet {payer_address} had no custom token history. Tracing {len(funders)} funders...", flush=True)
+                debug_log(f"[PAYER HISTORY] Wallet {payer_address} had no custom token history. Tracing {len(funders)} funders...")
                 for funder_addr, funding_ts in funders:
                     token = await find_token_from_payer_history(funder_addr, funding_ts, api_key, depth=depth + 1)
                     if token:
-                        print(f"[PAYER HISTORY] Successfully identified token {token} from funding address {funder_addr}", flush=True)
+                        debug_log(f"[PAYER HISTORY] Successfully identified token {token} from funding address {funder_addr}")
                         return token
 
-        print(f"[PAYER HISTORY] Could not find any custom token activity for payer {payer_address} near payment timestamp {payment_timestamp}.", flush=True)
+        debug_log(f"[PAYER HISTORY] Could not find any custom token activity for payer {payer_address} near payment timestamp {payment_timestamp}.")
     except Exception as e:
         print(f"[PAYER HISTORY] Error looking up history for {payer_address}: {e}", flush=True)
 
@@ -2545,10 +2554,10 @@ async def find_token_from_payer_history(payer_address, payment_timestamp, api_ke
 async def process_payment_payer_history(payer_address, payment_timestamp, api_key, amount_usd=0.0):
     token = await find_token_from_payer_history(payer_address, payment_timestamp, api_key)
     if token:
-        print(f"[HELIUS DISCOVERY] Successfully isolated token from payer history: {token}. Proceeding to verify.", flush=True)
+        debug_log(f"[HELIUS DISCOVERY] Successfully isolated token from payer history: {token}. Proceeding to verify.")
         await verify_and_forward_cto_token(token, amount_usd, payer_address=payer_address)
     else:
-        print(f"[HELIUS DISCOVERY] No token isolated from payer history for {payer_address}.", flush=True)
+        debug_log(f"[HELIUS DISCOVERY] No token isolated from payer history for {payer_address}.")
 
 async def get_latest_signatures(address, api_key, limit=5):
     url = f"https://mainnet.helius-rpc.com/?api-key={api_key}"
@@ -2577,7 +2586,7 @@ async def get_latest_signatures(address, api_key, limit=5):
 # Helper to trace and process payment sender history in background
 async def process_payment_and_forward(payer_address, tx_timestamp, amount_usd=0.0, signature=None, tracked_address=None, amount=None, mint=None):
     try:
-        print(f"[WALLET TRACKER] Tracing sender history for {payer_address}...", flush=True)
+        debug_log(f"[WALLET TRACKER] Tracing sender history for {payer_address}...")
         loop_settings = get_settings()
         loop_api_key = loop_settings.get('helius_api_key')
         if not loop_api_key:
@@ -2586,7 +2595,7 @@ async def process_payment_and_forward(payer_address, tx_timestamp, amount_usd=0.
 
         token = await find_token_from_payer_history(payer_address, tx_timestamp, loop_api_key)
         if token:
-            print(f"[WALLET TRACKER] Discovered token {token} from sender {payer_address}. Forwarding to filters...", flush=True)
+            debug_log(f"[WALLET TRACKER] Discovered token {token} from sender {payer_address}. Forwarding to filters...")
             target = loop_settings.get('cto_target_channel', '')
             wf_id = loop_settings.get('cto_workflow_id')
             t_mode = loop_settings.get('cto_test_mode', 'false').lower() == 'true'
@@ -2605,7 +2614,7 @@ async def process_payment_and_forward(payer_address, tx_timestamp, amount_usd=0.
             }
             await process_single_cto_item(item, target, wf_id, t_mode)
         else:
-            print(f"[WALLET TRACKER] No token discovered for sender {payer_address}. Skipping recording.", flush=True)
+            debug_log(f"[WALLET TRACKER] No token discovered for sender {payer_address}. Skipping recording.")
             if signature:
                 with db_lock:
                     conn = get_db()
@@ -2681,7 +2690,7 @@ async def wallet_tracker_polling_loop():
                                         amount_sol = amount_lamports / 1_000_000_000.0
                                         sol_price = get_token_price_usd("SOL")
                                         amount_usd = amount_sol * sol_price if sol_price else 0.0
-                                        print(f"[WALLET TRACKER] Detected real-time native payment: {amount_sol} SOL from {from_addr} to {tracked_address}. Tracing payer history...", flush=True)
+                                        debug_log(f"[WALLET TRACKER] Detected real-time native payment: {amount_sol} SOL from {from_addr} to {tracked_address}. Tracing payer history...")
                                         # Trigger background history tracing; record to database only once a real token is confirmed
                                         asyncio.create_task(process_payment_and_forward(from_addr, timestamp, amount_usd, signature=sig, tracked_address=tracked_address, amount=amount_sol, mint="SOL"))
 
@@ -2697,7 +2706,7 @@ async def wallet_tracker_polling_loop():
 
                                         # If it is a custom token, forward it directly. Otherwise trace payer history.
                                         if mint not in ('So11111111111111111111111111111111111111112', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'Es9vMFrzaypmko8L7jV8YW156HCfaNuDY8jNH5KB3C1d', 'SOL'):
-                                            print(f"[WALLET TRACKER] Custom token detected: {mint}. Forwarding directly to filters.", flush=True)
+                                            debug_log(f"[WALLET TRACKER] Custom token detected: {mint}. Forwarding directly to filters.")
                                             target = settings.get('cto_target_channel', '')
                                             wf_id = settings.get('cto_workflow_id')
                                             t_mode = settings.get('cto_test_mode', 'false').lower() == 'true'
@@ -2715,7 +2724,7 @@ async def wallet_tracker_polling_loop():
                                             }
                                             asyncio.create_task(process_single_cto_item(item, target, wf_id, t_mode))
                                         else:
-                                            print(f"[WALLET TRACKER] Detected base token payment: {token_amount} {mint[:8]}... from {from_addr} to {tracked_address}. Tracing payer history...", flush=True)
+                                            debug_log(f"[WALLET TRACKER] Detected base token payment: {token_amount} {mint[:8]}... from {from_addr} to {tracked_address}. Tracing payer history...")
                                             asyncio.create_task(process_payment_and_forward(from_addr, timestamp, amount_usd, signature=sig, tracked_address=tracked_address, amount=token_amount, mint=mint))
                     else:
                         print(f"[WALLET TRACKER POLLING] Helius API error {r.status_code} for {tracked_address}: {r.text.strip()}", flush=True)
@@ -3097,7 +3106,7 @@ def get_wallet_history_transactions():
                                         try:
                                             send_text = _ if _ else msg
                                             await safe_send_message(tg_client, final_target, send_text)
-                                            print(f"[TEST RUNNER] Successfully forwarded passing test token {token} to {final_target}", flush=True)
+                                            debug_log(f"[TEST RUNNER] Successfully forwarded passing test token {token} to {final_target}")
                                             s["test_reason"] = f"Passed & Forwarded to Telegram!"
                                         except Exception as tg_err:
                                             print(f"[TEST RUNNER] Failed to send test token {token} to {final_target}: {tg_err}", flush=True)
@@ -3827,7 +3836,7 @@ def discover_payment_address_route():
         # 1. Fetch active Solana tokens from DexScreener profiles & boosts to find fresh CTO orders
         fresh_candidates = []
         try:
-            print("[HELIUS DISCOVERY] Querying DexScreener profiles and boosts feeds for live tokens...")
+            debug_log("[HELIUS DISCOVERY] Querying DexScreener profiles and boosts feeds for live tokens...")
             p_res = requests.get("https://api.dexscreener.com/token-profiles/latest/v1", timeout=5)
             p_data = p_res.json() if p_res.status_code == 200 else []
             b_res = requests.get("https://api.dexscreener.com/token-boosts/latest/v1", timeout=5)
@@ -3861,7 +3870,7 @@ def discover_payment_address_route():
 
         # Sort fresh candidates by paymentTimestamp descending (newest first)
         fresh_candidates.sort(key=lambda x: x["payment_timestamp"], reverse=True)
-        print(f"[HELIUS DISCOVERY] Discovered {len(fresh_candidates)} candidate CTO orders in live feed.")
+        debug_log(f"[HELIUS DISCOVERY] Discovered {len(fresh_candidates)} candidate CTO orders in live feed.")
 
         # 2. Get fallback tokens from database
         db_candidates = []
@@ -3904,7 +3913,7 @@ def discover_payment_address_route():
             ca = c["ca"]
             payment_ts = c["payment_timestamp"]
 
-            print(f"[HELIUS DISCOVERY] Attempting to discover DexScreener payment address using token {ca} at timestamp {payment_ts}...")
+            debug_log(f"[HELIUS DISCOVERY] Attempting to discover DexScreener payment address using token {ca} at timestamp {payment_ts}...")
             discovered_addr, reason = discover_payment_wallet_logic(ca, payment_ts, api_key)
             if discovered_addr:
                 print(f"[HELIUS DISCOVERY] SUCCESS! Discovered payment address: {discovered_addr}")
@@ -3954,7 +3963,7 @@ async def verify_and_forward_cto_token(ca, amount_usd=0.0, payer_address=None):
                         "amount_usd": amount_usd,
                         "payer_address": payer_address
                     }
-                    print(f"[REAL-TIME SCANNER] Verified matching order ({o_type}) for {ca} on DexScreener API.", flush=True)
+                    debug_log(f"[REAL-TIME SCANNER] Verified matching order ({o_type}) for {ca} on DexScreener API.")
                     await process_single_cto_item(item, target_channel, workflow_id, test_mode)
     except Exception as e:
         print(f"[REAL-TIME SCANNER] Error in verify_and_forward_cto_token for {ca}: {e}", flush=True)
@@ -3977,7 +3986,7 @@ def helius_webhook():
         settings = get_settings()
         is_auto = str(settings.get('cto_auto_scan', 'false')).lower() == 'true'
         if not is_auto:
-            print("[HELIUS WEBHOOK] Ignored webhook transaction because live scan is inactive.", flush=True)
+            debug_log("[HELIUS WEBHOOK] Ignored webhook transaction because live scan is inactive.")
             return jsonify({"status": "ignored", "reason": "live scan inactive"}), 200
 
         monitored_address = settings.get('cto_dex_payment_address')
@@ -4005,7 +4014,7 @@ def helius_webhook():
                         sol_price = get_token_price_usd("SOL")
                         amount_usd = amount_sol * sol_price if sol_price else 0.0
                         timestamp = tx.get("timestamp", int(time.time()))
-                        print(f"[HELIUS WEBHOOK] Detected real-time tracked native payment: {amount_sol} SOL from {from_addr} to {tracked_address}. Tracing payer history...", flush=True)
+                        debug_log(f"[HELIUS WEBHOOK] Detected real-time tracked native payment: {amount_sol} SOL from {from_addr} to {tracked_address}. Tracing payer history...")
                         run_async_coroutine(process_payment_and_forward(from_addr, timestamp, amount_usd, signature=sig, tracked_address=tracked_address, amount=amount_sol, mint="SOL"))
 
                 # Process token transfers
@@ -4021,7 +4030,7 @@ def helius_webhook():
 
                         # If it is a custom token, forward it directly. Otherwise trace payer history.
                         if mint not in ('So11111111111111111111111111111111111111112', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'Es9vMFrzaypmko8L7jV8YW156HCfaNuDY8jNH5KB3C1d', 'SOL'):
-                            print(f"[HELIUS WEBHOOK] Custom token detected: {mint}. Forwarding directly to filters.", flush=True)
+                            debug_log(f"[HELIUS WEBHOOK] Custom token detected: {mint}. Forwarding directly to filters.")
                             target = settings.get('cto_target_channel', '')
                             wf_id = settings.get('cto_workflow_id')
                             t_mode = settings.get('cto_test_mode', 'false').lower() == 'true'
@@ -4039,7 +4048,7 @@ def helius_webhook():
                             }
                             run_async_coroutine(process_single_cto_item(item, target, wf_id, t_mode))
                         else:
-                            print(f"[HELIUS WEBHOOK] Detected base token payment: {token_amount} {mint[:8]}... from {from_addr} to {tracked_address}. Tracing payer history...", flush=True)
+                            debug_log(f"[HELIUS WEBHOOK] Detected base token payment: {token_amount} {mint[:8]}... from {from_addr} to {tracked_address}. Tracing payer history...")
                             run_async_coroutine(process_payment_and_forward(from_addr, timestamp, amount_usd, signature=sig, tracked_address=tracked_address, amount=token_amount, mint=mint))
 
             # 2. Process DexScreener monitored payment address
@@ -4086,7 +4095,7 @@ def helius_webhook():
                     }
                     base_tokens = [m for m in mints if m and m not in excluded_mints]
 
-                    print(f"[HELIUS WEBHOOK] DexScreener payment transaction detected: {sig} | Discovered tokens: {base_tokens}", flush=True)
+                    debug_log(f"[HELIUS WEBHOOK] DexScreener payment transaction detected: {sig} | Discovered tokens: {base_tokens}")
 
                     # Calculate amount_usd for DexScreener payment if possible
                     amount_usd = 0.0
@@ -4115,7 +4124,7 @@ def helius_webhook():
                     elif payer_address:
                         api_key = settings.get('helius_api_key')
                         tx_ts = tx.get("timestamp", int(time.time()))
-                        print(f"[HELIUS WEBHOOK] No base tokens in payment tx. Triggering payer history search for {payer_address}...", flush=True)
+                        debug_log(f"[HELIUS WEBHOOK] No base tokens in payment tx. Triggering payer history search for {payer_address}...")
                         run_async_coroutine(process_payment_payer_history(payer_address, tx_ts, api_key, amount_usd))
 
         return jsonify({"status": "success"}), 200
@@ -4226,11 +4235,11 @@ async def helius_polling_loop():
 
                             if not has_custom_token and is_payment and payer_address:
                                 tx_ts = tx.get("timestamp", int(time.time()))
-                                print(f"[HELIUS POLLING] No base tokens in payment tx. Triggering payer history search for {payer_address}...", flush=True)
+                                debug_log(f"[HELIUS POLLING] No base tokens in payment tx. Triggering payer history search for {payer_address}...")
                                 asyncio.create_task(process_payment_payer_history(payer_address, tx_ts, api_key, amount_usd))
 
                         for token in new_tokens_to_check:
-                            print(f"[HELIUS POLLING] Instantly verifying token {token}...", flush=True)
+                            debug_log(f"[HELIUS POLLING] Instantly verifying token {token}...")
                             await verify_and_forward_cto_token(token, amount_usd, payer_address=payer_address)
         except Exception as e:
             print(f"[HELIUS POLLING] Loop error: {e}", flush=True)
@@ -4336,7 +4345,7 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
         passed_count = sum(1 for r in results if r.get("status") == "passed")
         duplicate_count = sum(1 for r in results if r.get("status") == "duplicate")
         dropped_count = sum(1 for r in results if r.get("status") == "dropped")
-        print(f"[CTO SCANNER] Done. Scanned: {scanned_count} | Forwarded: {passed_count} | Duplicates: {duplicate_count} | Dropped: {dropped_count}", flush=True)
+        debug_log(f"[CTO SCANNER] Done. Scanned: {scanned_count} | Forwarded: {passed_count} | Duplicates: {duplicate_count} | Dropped: {dropped_count}")
 
         db_results = []
         try:
@@ -4437,7 +4446,7 @@ async def cto_auto_scanner_loop():
                 interval = 60
 
             if is_auto and tg_client and await tg_client.is_user_authorized():
-                print(f"Running auto CTO scan (Interval: {interval}s)...", flush=True)
+                debug_log(f"Running auto CTO scan (Interval: {interval}s)...")
                 await perform_cto_scan(target, workflow_id)
         except Exception as e:
             print(f"Error in cto_auto_scanner_loop: {e}", flush=True)
@@ -4447,6 +4456,8 @@ async def cto_auto_scanner_loop():
 def run_flask_app():
     port = int(os.environ.get("PORT", 5000))
     print(f"Starting Web Dashboard on http://localhost:{port}")
+    if not DEBUG_LOGGING:
+        logging.getLogger("werkzeug").setLevel(logging.ERROR)
     app.run(host='0.0.0.0', port=port, use_reloader=False, threaded=True)
 
 def normalize_channel_id(raw_id):
@@ -4480,10 +4491,10 @@ def register_handlers(client):
 
         chat_username = getattr(chat, 'username', '') or ''
 
-        print(f"\n--- [NEW MESSAGE] ---")
-        print(f"From Chat ID: '{actual_chat_id}' (normalized: '{normalized_actual_id}')")
-        print(f"From Username: '{chat_username}'")
-        print(f"Message Text: {repr(event.text[:200] if event.text else '')}")
+        debug_log("\n--- [NEW MESSAGE] ---")
+        debug_log(f"From Chat ID: '{actual_chat_id}' (normalized: '{normalized_actual_id}')")
+        debug_log(f"From Username: '{chat_username}'")
+        debug_log(f"Message Text: {repr(event.text[:200] if event.text else '')}")
 
         for wf in workflows:
             if not wf.get('is_active'):
@@ -4493,18 +4504,18 @@ def register_handlers(client):
             s_id = str(wf.get('source_channel_id') or '').strip()
             normalized_s_id = normalize_channel_id(s_id) if s_id else ''
 
-            print(f"  Checking Workflow '{wf.get('name')}':")
-            print(f"    Expected Source ID: '{s_id}' (normalized: '{normalized_s_id}')")
-            print(f"    Expected Source Username: '{s_username}'")
+            debug_log(f"  Checking Workflow '{wf.get('name')}':")
+            debug_log(f"    Expected Source ID: '{s_id}' (normalized: '{normalized_s_id}')")
+            debug_log(f"    Expected Source Username: '{s_username}'")
 
             match = False
             # Match by normalized ID (handles -100 prefix mismatch)
             if normalized_s_id and normalized_actual_id == normalized_s_id:
                 match = True
-                print("    -> Match by ID!")
+                debug_log("    -> Match by ID!")
             elif s_username and chat_username and chat_username.lower() == s_username.lower():
                 match = True
-                print("    -> Match by Username!")
+                debug_log("    -> Match by Username!")
 
             # If the user saved a channel/chat NAME instead of username in the 'source_channel' field
             # We can also check if the name matches the chat title or user display name!
@@ -4519,28 +4530,28 @@ def register_handlers(client):
 
             if not match and chat_title and s_username and chat_title.lower() == s_username.lower():
                 match = True
-                print("    -> Match by Chat Title/Name!")
+                debug_log("    -> Match by Chat Title/Name!")
 
             if match:
-                print(f"    Proceeding to process message with {len(wf['rules'])} rules...")
+                debug_log(f"    Proceeding to process message with {len(wf['rules'])} rules...")
                 modified_text, dropped, reason = process_message_logic(event.text, wf['rules'])
 
                 if dropped:
-                    print(f"    Message dropped due to filter rules. Reason: {reason}")
+                    debug_log(f"    Message dropped due to filter rules. Reason: {reason}")
                 elif modified_text:
                     t_username = wf.get('target_channel') or ''
                     t_id = str(wf.get('target_channel_id') or '').strip()
                     target = t_id if t_id else t_username
 
                     if target:
-                        print(f"    Sending to target: '{target}'")
+                        debug_log(f"    Sending to target: '{target}'")
                         try:
                             await safe_send_message(client, target, modified_text)
-                            print(f"    Successfully forwarded to {target}")
+                            debug_log(f"    Successfully forwarded to {target}")
                         except Exception as e:
                             print(f"    Failed to forward message to {target}: {e}")
                 else:
-                    print("    Message text was empty after processing.")
+                    debug_log("    Message text was empty after processing.")
 
 
 async def main():
