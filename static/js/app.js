@@ -103,8 +103,9 @@ function renderWorkflows() {
                         label = `🏷️ Name (${mode}): "${r.search_text || '.*'}"`;
                         color = '#ec4899';
                     } else if (r.rule_type === 'filter') {
-                        label = `🔍 Drop: "${r.search_text}"`;
-                        color = '#ec4899';
+                        const mode = (r.replace_text || 'include').toLowerCase() === 'exclude' ? '🚫 Drop' : '✅ Pass';
+                        label = `💬 Words (${mode}): "${r.search_text || ''}"`;
+                        color = '#f43f5e';
                     } else if (r.rule_type === 'replace') {
                         label = `🔄 Replace: "${r.search_text}" -> "${r.replace_text}"`;
                         color = '#8b5cf6';
@@ -213,7 +214,7 @@ function renderRules() {
         else if (rule.rule_type === 'show_wallet') badgeColor = '#0ea5e9';
         else if (rule.rule_type === 'exclude_platform') badgeColor = '#ef4444';
         else if (rule.rule_type === 'token_name') badgeColor = '#ec4899';
-        else if (rule.rule_type === 'filter') badgeColor = '#ec4899';
+        else if (rule.rule_type === 'filter') badgeColor = '#f43f5e';
         
         let badgeHtml = `<div style="display: flex; align-items: center;">
             <span class="status-badge" style="background: ${badgeColor}; color: white; width: 100%; text-align: center; justify-content: center; display: inline-flex;">${rule.rule_type.toUpperCase()}</span>
@@ -297,11 +298,22 @@ function renderRules() {
                     <option value="include" ${mode === 'include' ? 'selected' : ''}>Must Match (Include)</option>
                     <option value="exclude" ${mode === 'exclude' ? 'selected' : ''}>Must Not Match (Exclude)</option>
                 </select>
-                <label style="font-size:0.85rem; color:var(--text-muted)">Word / Regex:</label>
-                <input class="form-input" style="flex: 1; min-width: 170px;" placeholder="e.g. .* or AI|SOL|PEPE" value="${rule.search_text !== undefined && rule.search_text !== null ? rule.search_text : '.*'}" oninput="updateRule(${index}, 'search_text', this.value)">
+                <label style="font-size:0.85rem; color:var(--text-muted)">Keywords / Regex:</label>
+                <input class="form-input" style="flex: 1; min-width: 170px;" placeholder="e.g. AI, SOL, PEPE (matches any)" value="${rule.search_text !== undefined && rule.search_text !== null ? rule.search_text : '.*'}" oninput="updateRule(${index}, 'search_text', this.value)" title="Separate keywords with commas. Any one keyword is a match. A single value may be a regular expression.">
+            `;
+        } else if (rule.rule_type === 'filter') {
+            const mode = (rule.replace_text || 'include').toLowerCase();
+            fieldsHtml += `
+                <label style="font-size:0.85rem; color:var(--text-muted)">Mode:</label>
+                <select class="form-input" style="width:185px" onchange="updateRule(${index}, 'replace_text', this.value)">
+                    <option value="include" ${mode === 'include' ? 'selected' : ''}>Must Contain (Pass if any found)</option>
+                    <option value="exclude" ${mode === 'exclude' ? 'selected' : ''}>Must Not Contain (Drop if found)</option>
+                </select>
+                <label style="font-size:0.85rem; color:var(--text-muted)">Words:</label>
+                <input class="form-input" style="flex: 1; min-width: 240px;" placeholder="e.g. sol, ai, trump, pepe, doge (comma-separated)" value="${rule.search_text || ''}" oninput="updateRule(${index}, 'search_text', this.value)" title="Enter words separated by commas. If 'Must Contain' is selected, having any one word will pass.">
             `;
         } else {
-            fieldsHtml += `<input class="form-input" style="flex: 1; max-width: 250px;" placeholder="${rule.rule_type === 'filter' ? 'Word to drop message' : 'Word to find'}" value="${rule.search_text || ''}" oninput="updateRule(${index}, 'search_text', this.value)">`;
+            fieldsHtml += `<input class="form-input" style="flex: 1; max-width: 250px;" placeholder="Word to find" value="${rule.search_text || ''}" oninput="updateRule(${index}, 'search_text', this.value)">`;
             if (rule.rule_type === 'replace') {
                 fieldsHtml += `<input class="form-input" style="flex: 1; max-width: 250px;" placeholder="Replace with..." value="${rule.replace_text || ''}" oninput="updateRule(${index}, 'replace_text', this.value)">`;
             }
@@ -327,6 +339,9 @@ function addRule(type) {
         newRule.search_text = 'yes';
     } else if (type === 'token_name') {
         newRule.search_text = '.*';
+        newRule.replace_text = 'include';
+    } else if (type === 'filter') {
+        newRule.search_text = '';
         newRule.replace_text = 'include';
     }
     currentRules.push(newRule);
@@ -1385,7 +1400,10 @@ function applyWorkflowPresetToFilters() {
         if (el) el.value = '';
     });
     const perfTfEl = document.getElementById('td-perf-tf');
-    if (perfTfEl) perfTfEl.value = '5m';
+    if (perfTfEl) {
+        perfTfEl.value = '5m';
+        delete perfTfEl.dataset.appliedTf;
+    }
     const migratedEl = document.getElementById('td-migrated');
     if (migratedEl) migratedEl.value = 'all';
     const excludePlatformEl = document.getElementById('td-exclude-platform');
@@ -1416,11 +1434,17 @@ function applyWorkflowPresetToFilters() {
             if (maxMc && rule.time_max !== undefined && rule.time_max !== null) maxMc.value = rule.time_max;
         } else if (type === 'performance') {
             const tfClean = (rule.search_text || '5m').toLowerCase().replace('hr', 'h');
-            if (perfTfEl && ['5m', '1h', '6h', '24h'].includes(tfClean)) perfTfEl.value = tfClean;
-            const minP = document.getElementById('td-min-perf');
-            const maxP = document.getElementById('td-max-perf');
-            if (minP && rule.time_min !== undefined && rule.time_min !== null) minP.value = rule.time_min;
-            if (maxP && rule.time_max !== undefined && rule.time_max !== null) maxP.value = rule.time_max;
+            const currentAppliedTf = perfTfEl ? perfTfEl.dataset.appliedTf : null;
+            if (!currentAppliedTf || tfClean === '5m' || (tfClean === '1h' && currentAppliedTf !== '5m')) {
+                if (perfTfEl && ['5m', '1h', '6h', '24h'].includes(tfClean)) {
+                    perfTfEl.value = tfClean;
+                    perfTfEl.dataset.appliedTf = tfClean;
+                }
+                const minP = document.getElementById('td-min-perf');
+                const maxP = document.getElementById('td-max-perf');
+                if (minP && rule.time_min !== undefined && rule.time_min !== null) minP.value = rule.time_min;
+                if (maxP && rule.time_max !== undefined && rule.time_max !== null) maxP.value = rule.time_max;
+            }
         } else if (type === 'dex_payment') {
             const minA = document.getElementById('td-min-amount');
             const maxA = document.getElementById('td-max-amount');
@@ -1593,7 +1617,7 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
         const excludePlatform = document.getElementById('td-exclude-platform')?.value || 'none';
         const timeframe = document.getElementById('td-timeframe')?.value || 'all';
         const sortVal = document.getElementById('td-sort-by')?.value || 'id_desc';
-        const enrichedOnly = document.getElementById('td-enriched-only')?.checked || false;
+        const enrichedOnly = document.getElementById('td-enriched-only') ? document.getElementById('td-enriched-only').checked : true;
         const minAmount = String(document.getElementById('td-min-amount')?.value || '').trim();
         const maxAmount = String(document.getElementById('td-max-amount')?.value || '').trim();
         const minMc = String(document.getElementById('td-min-mc')?.value || '').trim();
@@ -1869,6 +1893,7 @@ function formatStatusPill(status) {
     const s = (status || 'detected').toLowerCase();
     if (s === 'forwarded') return '<span class="status-pill status-pill-forwarded">Forwarded</span>';
     if (s === 'skipped') return '<span class="status-pill status-pill-skipped">Skipped</span>';
+    if (s === 'send_failed') return '<span class="status-pill status-pill-dropped">Send Failed</span>';
     if (s === 'dropped') return '<span class="status-pill status-pill-dropped">Dropped</span>';
     return `<span class="status-pill status-pill-detected">${s}</span>`;
 }
@@ -1983,7 +2008,7 @@ async function exportTokenDataCSV() {
         const excludePlatform = document.getElementById('td-exclude-platform')?.value || 'none';
         const timeframe = document.getElementById('td-timeframe')?.value || 'all';
         const sortVal = document.getElementById('td-sort-by')?.value || 'id_desc';
-        const enrichedOnly = document.getElementById('td-enriched-only')?.checked || false;
+        const enrichedOnly = document.getElementById('td-enriched-only') ? document.getElementById('td-enriched-only').checked : true;
         const minAmount = String(document.getElementById('td-min-amount')?.value || '').trim();
         const maxAmount = String(document.getElementById('td-max-amount')?.value || '').trim();
         const minMc = String(document.getElementById('td-min-mc')?.value || '').trim();

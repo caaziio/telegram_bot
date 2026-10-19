@@ -15,7 +15,7 @@ load_dotenv()
 
 # Set Flask to use the current dir's templates and static folders
 current_dir = os.path.dirname(os.path.abspath(__file__))
-app = Flask(__name__, 
+app = Flask(__name__,
             template_folder=os.path.join(current_dir, 'templates'),
             static_folder=os.path.join(current_dir, 'static'))
 
@@ -41,21 +41,21 @@ token_price_cache = {}
 def get_token_price_usd(mint):
     if not mint:
         return 0.0
-        
+
     search_mint = mint
     if mint == "SOL":
         search_mint = "So11111111111111111111111111111111111111112"
-        
+
     # Stablecoins USDC/USDT are $1.0
     if search_mint in ('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'Es9vMFrzaypmko8L7jV8YW156HCfaNuDY8jNH5KB3C1d'):
         return 1.0
-        
+
     now = time.time()
     if search_mint in token_price_cache:
         price, ts = token_price_cache[search_mint]
         if now - ts < 60:
             return price
-            
+
     try:
         url = f"https://api.dexscreener.com/latest/dex/tokens/{search_mint}"
         r = requests.get(url, timeout=5)
@@ -76,7 +76,7 @@ def get_token_price_usd(mint):
                                 price = float(price_str)
                                 token_price_cache[search_mint] = (price, now)
                                 return price
-                    
+
                     # 2. Look for any pair where search_mint is baseToken
                     for p in solana_pairs:
                         base_addr = p.get("baseToken", {}).get("address")
@@ -86,7 +86,7 @@ def get_token_price_usd(mint):
                                 price = float(price_str)
                                 token_price_cache[search_mint] = (price, now)
                                 return price
-                                
+
                     # 3. Fallback to first Solana pair priceUsd
                     for p in solana_pairs:
                         price_str = p.get("priceUsd")
@@ -96,15 +96,15 @@ def get_token_price_usd(mint):
                             return price
     except Exception as e:
         print(f"[PRICE FETCH] Error fetching price for {search_mint}: {e}", flush=True)
-        
+
     # Fallback to expired cache
     if search_mint in token_price_cache:
         return token_price_cache[search_mint][0]
-        
+
     # If SOL price fetch failed entirely, fallback to a sensible baseline
     if search_mint == "So11111111111111111111111111111111111111112":
         return 140.0
-        
+
     return 0.0
 
 def get_token_metadata(mint):
@@ -112,7 +112,7 @@ def get_token_metadata(mint):
         return ""
     if mint in token_metadata_cache:
         return token_metadata_cache[mint]
-    
+
     try:
         url = f"https://api.dexscreener.com/latest/dex/tokens/{mint}"
         r = requests.get(url, timeout=5)
@@ -129,7 +129,7 @@ def get_token_metadata(mint):
                     return display_name
     except Exception as e:
         print(f"[METADATA FETCH] Error fetching token metadata for {mint}: {e}", flush=True)
-        
+
     return ""
 
 async def safe_send_message(client, target, message):
@@ -138,9 +138,9 @@ async def safe_send_message(client, target, message):
     """
     if not client or not target:
         return
-        
+
     target_entity = int(target) if str(target).lstrip('-').isdigit() else target
-    
+
     try:
         # Try to send message directly using current entity cache
         await client.send_message(target_entity, message)
@@ -196,6 +196,7 @@ def custom_row_factory(cursor, row):
     return CustomRow(cursor, row)
 
 db_lock = threading.RLock()
+workflow_sync_lock = threading.RLock()
 global_conn = None
 
 def get_db():
@@ -203,7 +204,7 @@ def get_db():
     with db_lock:
         if global_conn is not None:
             return global_conn
-            
+
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         global_conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
         try:
@@ -211,7 +212,7 @@ def get_db():
             global_conn.execute("PRAGMA busy_timeout = 30000;")
         except Exception as e:
             print(f"[SQLITE] Warning setting pragmas: {e}", flush=True)
-            
+
         global_conn.row_factory = custom_row_factory
         return global_conn
 
@@ -223,7 +224,7 @@ def sync_from_supabase():
         with db_lock:
             conn = get_db()
             cursor = conn.cursor()
-            
+
             # Sync Settings
             try:
                 res = supabase_client.table('settings').select('*').execute()
@@ -235,45 +236,62 @@ def sync_from_supabase():
                             cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (k, v))
             except Exception as e:
                 print(f"[SUPABASE] Settings pull notice: {e}", flush=True)
-                
-            # Sync Workflows & Rules
+
+            # Sync Workflows & Rules. Serialize this with cloud-first writes so a
+            # periodic pull can never overwrite an in-flight workflow save.
             try:
-                wf_res = supabase_client.table('workflows').select('*').execute()
-                if wf_res.data:
-                    for wf in wf_res.data:
-                        cursor.execute("""
-                            INSERT OR REPLACE INTO workflows (id, name, source_channel, source_channel_id, target_channel, target_channel_id, is_active)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """, (
-                            wf.get('id'),
-                            wf.get('name'),
-                            wf.get('source_channel'),
-                            wf.get('source_channel_id'),
-                            wf.get('target_channel'),
-                            wf.get('target_channel_id'),
-                            1 if wf.get('is_active', True) else 0
-                        ))
-                
-                rules_res = supabase_client.table('rules').select('*').execute()
-                if rules_res.data:
-                    for r in rules_res.data:
-                        cursor.execute("""
-                            INSERT OR REPLACE INTO rules (id, workflow_id, rule_type, search_text, replace_text, time_min, time_max)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """, (
-                            r.get('id'),
-                            r.get('workflow_id'),
-                            r.get('rule_type'),
-                            r.get('search_text'),
-                            r.get('replace_text'),
-                            r.get('time_min'),
-                            r.get('time_max')
-                        ))
+                with workflow_sync_lock:
+                    wf_res = supabase_client.table('workflows').select('*').execute()
+                    rules_res = supabase_client.table('rules').select('*').execute()
+                    if wf_res.data:
+                        rules_by_wf = {}
+                        if rules_res.data:
+                            for r in rules_res.data:
+                                w_id = r.get('workflow_id')
+                                if w_id is not None:
+                                    rules_by_wf.setdefault(w_id, []).append(r)
+
+                        for wf in wf_res.data:
+                            wf_id = wf.get('id')
+                            is_active_val = 1 if wf.get('is_active') is not False else 0
+                            cursor.execute("""
+                                INSERT INTO workflows (id, name, source_channel, source_channel_id, target_channel, target_channel_id, is_active)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                                ON CONFLICT(id) DO UPDATE SET
+                                    name=excluded.name,
+                                    source_channel=excluded.source_channel,
+                                    source_channel_id=excluded.source_channel_id,
+                                    target_channel=excluded.target_channel,
+                                    target_channel_id=excluded.target_channel_id,
+                                    is_active=excluded.is_active
+                            """, (
+                                wf_id,
+                                wf.get('name'),
+                                wf.get('source_channel'),
+                                wf.get('source_channel_id'),
+                                wf.get('target_channel'),
+                                wf.get('target_channel_id'),
+                                is_active_val
+                            ))
+
+                            cursor.execute("DELETE FROM rules WHERE workflow_id = ?", (wf_id,))
+                            for r in rules_by_wf.get(wf_id, []):
+                                cursor.execute("""
+                                    INSERT INTO rules (workflow_id, rule_type, search_text, replace_text, time_min, time_max)
+                                    VALUES (?, ?, ?, ?, ?, ?)
+                                """, (
+                                    wf_id,
+                                    r.get('rule_type'),
+                                    r.get('search_text'),
+                                    r.get('replace_text'),
+                                    r.get('time_min'),
+                                    r.get('time_max')
+                                ))
             except Exception as e:
                 print(f"[SUPABASE] Workflows/Rules pull notice: {e}", flush=True)
-                
+
             conn.commit()
-            
+
         # Sync Wallet Payments from Supabase into SQLite
         sync_wallet_payments_from_supabase()
     except Exception as e:
@@ -290,6 +308,18 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
         col_str = ", ".join(cols)
         ph_str = ", ".join(["?" for _ in cols])
 
+        def is_fully_enriched(item):
+            token_name = str(item.get('token_name') or '').strip()
+            market_cap = str(item.get('market_cap') or '').strip()
+            age = str(item.get('age') or '').strip()
+            return (
+                token_name.upper() not in ('', 'SOL', 'USDT', 'USDC', 'WSOL', 'WRAPPED SOL', 'UNKNOWN')
+                and bool(str(item.get('ca') or '').strip())
+                and market_cap.upper() not in ('', 'UNKNOWN')
+                and age.upper() not in ('', 'UNKNOWN')
+                and bool(str(item.get('dex_url') or '').strip())
+            )
+
         direct_url = os.getenv('DIRECT_URL') or os.getenv('DATABASE_URL')
         if direct_url:
             try:
@@ -301,21 +331,43 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                             sq_cur = sq_conn.cursor()
                             max_local_id = sq_cur.execute("SELECT COALESCE(MAX(id), 0) FROM wallet_payments").fetchone()[0]
                             local_cnt = sq_cur.execute("SELECT COUNT(*) FROM wallet_payments").fetchone()[0]
-                        
+
                         pg_cur.execute("SELECT COUNT(*), COALESCE(MAX(id), 0) FROM wallet_payments;")
                         pg_cnt, pg_max = pg_cur.fetchone()
-                        
+
                         if full_sync or local_cnt < pg_cnt or max_local_id == 0:
                             start_id = 0
                         else:
                             start_id = max(0, max_local_id - limit_records)
-                        
+
+                        try:
+                            pg_cur.execute("""
+                                UPDATE wallet_payments
+                                SET migration_status = 'Migrated'
+                                WHERE (formatted_message ILIKE '%Migrated: Yes%' OR formatted_message ILIKE '%Status: ✅ Migrated%')
+                                  AND (migration_status NOT ILIKE '%migrated%' OR migration_status IS NULL);
+                                UPDATE wallet_payments
+                                SET migration_status = 'Not Migrated'
+                                WHERE formatted_message ILIKE '%Migrated: No%'
+                                  AND (migration_status NOT ILIKE '%migrated%' OR migration_status IS NULL);
+                            """)
+                            pg_conn.commit()
+                        except Exception as up_err:
+                            pass
+
                         pg_cur.execute("""
                             SELECT id, tracked_address, sender_address, amount, mint, signature, timestamp,
                                    token_name, ca, platform, market_cap, age, perf_5m, perf_1h, perf_6h, perf_24h,
                                    dex_url, migration_status, status, reason, formatted_message, created_at, migration_age
-                            FROM wallet_payments 
-                            WHERE id >= %s 
+                            FROM wallet_payments
+                            WHERE id >= %s
+                              AND token_name IS NOT NULL
+                              AND TRIM(token_name) != ''
+                              AND token_name NOT IN ('SOL', 'USDT', 'USDC', 'WSOL', 'Wrapped SOL', 'Unknown')
+                              AND ca IS NOT NULL AND TRIM(ca) != ''
+                              AND market_cap IS NOT NULL AND TRIM(market_cap) != '' AND UPPER(TRIM(market_cap)) != 'UNKNOWN'
+                              AND age IS NOT NULL AND TRIM(age) != '' AND UPPER(TRIM(age)) != 'UNKNOWN'
+                              AND dex_url IS NOT NULL AND TRIM(dex_url) != ''
                             ORDER BY id ASC;
                         """, (start_id,))
                         rows = pg_cur.fetchall()
@@ -323,6 +375,16 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                             clean_rows = []
                             for r in rows:
                                 rl = list(r)
+                                # Normalize migration_status if it is raw DETECTED or missing
+                                m_status = str(rl[17] or '')
+                                fmt_msg = str(rl[20] or '')
+                                if 'migrated: yes' in fmt_msg.lower() or 'status: ✅ migrated' in fmt_msg.lower():
+                                    if not m_status.lower().startswith('migrated') and not m_status.lower().startswith('✅ migrated'):
+                                        rl[17] = 'Migrated'
+                                elif 'migrated: no' in fmt_msg.lower():
+                                    if m_status != 'Not Migrated':
+                                        rl[17] = 'Not Migrated'
+
                                 for i, v in enumerate(rl):
                                     if hasattr(v, 'isoformat'):
                                         rl[i] = str(v)
@@ -332,8 +394,8 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                                 sq_cur = sq_conn.cursor()
                                 sq_cur.executemany(f"INSERT OR REPLACE INTO wallet_payments ({col_str}) VALUES ({ph_str})", clean_rows)
                                 sq_conn.commit()
-                            print(f"[SUPABASE] Synced {len(rows)} wallet_payments from Postgres (from ID {start_id} up to ID {rows[-1][0]})", flush=True)
-                            return len(rows)
+                            print(f"[SUPABASE] Synced {len(clean_rows)} wallet_payments from Postgres (from ID {start_id} up to ID {rows[-1][0]})", flush=True)
+                            return len(clean_rows)
             except Exception as pg_err:
                 print(f"[SUPABASE] Direct Postgres wallet sync notice: {pg_err}", flush=True)
 
@@ -343,7 +405,7 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                 sq_cur = sq_conn.cursor()
                 max_local_id = sq_cur.execute("SELECT COALESCE(MAX(id), 0) FROM wallet_payments").fetchone()[0]
                 local_cnt = sq_cur.execute("SELECT COUNT(*) FROM wallet_payments").fetchone()[0]
-            
+
             # Check Supabase total count
             total_sb_count = 0
             try:
@@ -351,9 +413,9 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                 total_sb_count = cnt_res.count or 0
             except Exception:
                 pass
-            
+
             total_synced = 0
-            
+
             # If production has missing data (e.g. only 1,000 rows vs 20,000+ in Supabase, or 0 rows on fresh deploy)
             if full_sync or local_cnt < total_sb_count or max_local_id == 0:
                 print(f"[SUPABASE] Missing records detected (Local: {local_cnt}, Supabase: {total_sb_count}). Starting bulk REST pagination...", flush=True)
@@ -362,21 +424,24 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                     res = supabase_client.table('wallet_payments').select('*').gt('id', current_cursor_id).order('id', desc=False).limit(1000).execute()
                     if not res.data:
                         break
-                    
+
                     clean_rows = []
                     batch_max_id = current_cursor_id
                     for item in res.data:
-                        clean_rows.append(tuple(item.get(c) for c in cols))
                         item_id = item.get('id')
                         if item_id and item_id > batch_max_id:
                             batch_max_id = item_id
-                    
-                    with db_lock:
-                        sq_conn = get_db()
-                        sq_cur = sq_conn.cursor()
-                        sq_cur.executemany(f"INSERT OR REPLACE INTO wallet_payments ({col_str}) VALUES ({ph_str})", clean_rows)
-                        sq_conn.commit()
-                    
+                        if not is_fully_enriched(item):
+                            continue
+                        clean_rows.append(tuple(item.get(c) for c in cols))
+
+                    if clean_rows:
+                        with db_lock:
+                            sq_conn = get_db()
+                            sq_cur = sq_conn.cursor()
+                            sq_cur.executemany(f"INSERT OR REPLACE INTO wallet_payments ({col_str}) VALUES ({ph_str})", clean_rows)
+                            sq_conn.commit()
+
                     total_synced += len(clean_rows)
                     if len(res.data) < 1000 or batch_max_id <= current_cursor_id:
                         break
@@ -395,15 +460,18 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                     clean_rows = []
                     batch_max_id = current_cursor_id
                     for item in res.data:
-                        clean_rows.append(tuple(item.get(c) for c in cols))
                         item_id = item.get('id')
                         if item_id and item_id > batch_max_id:
                             batch_max_id = item_id
-                    with db_lock:
-                        sq_conn = get_db()
-                        sq_cur = sq_conn.cursor()
-                        sq_cur.executemany(f"INSERT OR REPLACE INTO wallet_payments ({col_str}) VALUES ({ph_str})", clean_rows)
-                        sq_conn.commit()
+                        if not is_fully_enriched(item):
+                            continue
+                        clean_rows.append(tuple(item.get(c) for c in cols))
+                    if clean_rows:
+                        with db_lock:
+                            sq_conn = get_db()
+                            sq_cur = sq_conn.cursor()
+                            sq_cur.executemany(f"INSERT OR REPLACE INTO wallet_payments ({col_str}) VALUES ({ph_str})", clean_rows)
+                            sq_conn.commit()
                     total_synced += len(clean_rows)
                     if len(res.data) < 1000 or batch_max_id <= current_cursor_id:
                         break
@@ -441,6 +509,115 @@ def delete_from_supabase_table(table_name, key_col, key_val):
             print(f"[SUPABASE] Delete error on {table_name}: {e}", flush=True)
     threading.Thread(target=_do_delete, daemon=True).start()
 
+def _workflow_rules_payload(wf_id, rules_list):
+    return [{
+        'workflow_id': wf_id,
+        'rule_type': rule.get('rule_type'),
+        'search_text': rule.get('search_text'),
+        'replace_text': rule.get('replace_text'),
+        'time_min': rule.get('time_min'),
+        'time_max': rule.get('time_max')
+    } for rule in (rules_list or [])]
+
+
+def save_workflow_to_supabase(wf_payload, rules_list, wf_id=None):
+    """Persist a workflow to Supabase synchronously and return its cloud ID.
+
+    The caller must not update SQLite or report success until this returns.
+    Existing cloud data is restored on a failed update where possible.
+    """
+    if not supabase_client:
+        raise RuntimeError("Supabase is not configured; workflow was not saved.")
+
+    with workflow_sync_lock:
+        if wf_id is None:
+            # Older imports used explicit IDs without advancing Postgres's identity
+            # sequence. Allocate from the actual cloud maximum and retry if another
+            # writer claims the same ID concurrently.
+            latest = supabase_client.table('workflows').select('id').order('id', desc=True).limit(1).execute()
+            candidate_id = (latest.data[0]['id'] if latest.data else 0) + 1
+            created = None
+            for _ in range(5):
+                try:
+                    created = supabase_client.table('workflows').insert({
+                        **wf_payload,
+                        'id': candidate_id
+                    }).execute()
+                    break
+                except Exception as exc:
+                    if '23505' not in str(exc) and 'duplicate key' not in str(exc).lower():
+                        raise
+                    candidate_id += 1
+            if not created or not created.data or created.data[0].get('id') is None:
+                raise RuntimeError("Supabase could not allocate an ID for the new workflow.")
+            wf_id = created.data[0]['id']
+            try:
+                cloud_rules = _workflow_rules_payload(wf_id, rules_list)
+                if cloud_rules:
+                    supabase_client.table('rules').insert(cloud_rules).execute()
+            except Exception:
+                supabase_client.table('workflows').delete().eq('id', wf_id).execute()
+                raise
+            return wf_id
+
+        old_wf_res = supabase_client.table('workflows').select('*').eq('id', wf_id).execute()
+        if not old_wf_res.data:
+            raise RuntimeError(f"Workflow {wf_id} does not exist in Supabase.")
+        old_wf = old_wf_res.data[0]
+        old_rules = supabase_client.table('rules').select('*').eq('workflow_id', wf_id).execute().data or []
+
+        try:
+            supabase_client.table('workflows').update(wf_payload).eq('id', wf_id).execute()
+            supabase_client.table('rules').delete().eq('workflow_id', wf_id).execute()
+            cloud_rules = _workflow_rules_payload(wf_id, rules_list)
+            if cloud_rules:
+                supabase_client.table('rules').insert(cloud_rules).execute()
+        except Exception:
+            restore_wf = {key: value for key, value in old_wf.items() if key != 'id'}
+            supabase_client.table('workflows').update(restore_wf).eq('id', wf_id).execute()
+            supabase_client.table('rules').delete().eq('workflow_id', wf_id).execute()
+            restore_rules = [
+                {key: value for key, value in rule.items() if key != 'id'}
+                for rule in old_rules
+            ]
+            if restore_rules:
+                supabase_client.table('rules').insert(restore_rules).execute()
+            raise
+        return wf_id
+
+
+def mirror_workflow_to_sqlite(wf_id, wf_payload, rules_list):
+    """Refresh the local runtime cache only after Supabase confirms the save."""
+    with db_lock:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO workflows (id, name, source_channel, source_channel_id, target_channel, target_channel_id, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name=excluded.name,
+                source_channel=excluded.source_channel,
+                source_channel_id=excluded.source_channel_id,
+                target_channel=excluded.target_channel,
+                target_channel_id=excluded.target_channel_id,
+                is_active=excluded.is_active
+        """, (
+            wf_id,
+            wf_payload.get('name'),
+            wf_payload.get('source_channel'),
+            wf_payload.get('source_channel_id'),
+            wf_payload.get('target_channel'),
+            wf_payload.get('target_channel_id'),
+            1 if wf_payload.get('is_active', True) else 0
+        ))
+        cursor.execute('DELETE FROM rules WHERE workflow_id=?', (wf_id,))
+        for rule in rules_list or []:
+            cursor.execute('''
+                INSERT INTO rules (workflow_id, rule_type, search_text, replace_text, time_min, time_max)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (wf_id, rule.get('rule_type'), rule.get('search_text'), rule.get('replace_text'), rule.get('time_min'), rule.get('time_max')))
+        conn.commit()
+
 async def supabase_sync_loop():
     if not supabase_client:
         return
@@ -463,7 +640,7 @@ def init_db():
     with db_lock:
         conn = get_db()
         cursor = conn.cursor()
-        
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
@@ -516,7 +693,7 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        
+
         # Add columns if they were missing from an older schema version
         try:
             cursor.execute('ALTER TABLE rules ADD COLUMN time_min TEXT')
@@ -526,7 +703,7 @@ def init_db():
             cursor.execute('ALTER TABLE rules ADD COLUMN time_max TEXT')
         except Exception:
             pass
-            
+
         try:
             cursor.execute('ALTER TABLE workflows ADD COLUMN name TEXT')
         except Exception:
@@ -539,7 +716,7 @@ def init_db():
             cursor.execute('ALTER TABLE workflows ADD COLUMN target_channel_id TEXT')
         except Exception:
             pass
-    
+
         # Add new cto_signals columns if they are missing from an older schema version
         try:
             cursor.execute('ALTER TABLE cto_signals ADD COLUMN name TEXT')
@@ -581,7 +758,7 @@ def init_db():
             cursor.execute('ALTER TABLE cto_signals ADD COLUMN reason TEXT')
         except Exception:
             pass
-    
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS wallet_payments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -608,7 +785,7 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        
+
         # Add new columns to wallet_payments if they don't exist yet
         for col_def in [
             'token_name TEXT', 'ca TEXT', 'platform TEXT', 'market_cap TEXT', 'age TEXT', 'migration_age TEXT',
@@ -619,18 +796,33 @@ def init_db():
                 cursor.execute(f'ALTER TABLE wallet_payments ADD COLUMN {col_def}')
             except Exception:
                 pass
-    
+
         # Add ON DELETE CASCADE support
         cursor.execute('PRAGMA foreign_keys = ON;')
-        
+
         # Migrate invalid cto_workflow_id '1' setting to 'active_all'
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('cto_workflow_id', 'active_all')")
         cursor.execute("UPDATE settings SET value = 'active_all' WHERE key = 'cto_workflow_id' AND value = '1'")
-        
+
         # Set defaults for polling options to false as webhooks are preferred to save Helius credits
         cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('wallet_tracker_poll_enabled', 'false')")
         cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('helius_poll_enabled', 'false')")
-        
+
+        # Ensure only real tokens with confirmed names exist in wallet_payments
+        try:
+            cursor.execute("""
+                DELETE FROM wallet_payments
+                WHERE token_name IS NULL
+                   OR TRIM(token_name) = ''
+                   OR UPPER(TRIM(token_name)) IN ('SOL', 'USDT', 'USDC', 'WSOL', 'WRAPPED SOL', 'UNKNOWN')
+                   OR ca IS NULL OR TRIM(ca) = ''
+                   OR market_cap IS NULL OR TRIM(market_cap) = '' OR UPPER(TRIM(market_cap)) = 'UNKNOWN'
+                   OR age IS NULL OR TRIM(age) = '' OR UPPER(TRIM(age)) = 'UNKNOWN'
+                   OR dex_url IS NULL OR TRIM(dex_url) = ''
+            """)
+        except Exception:
+            pass
+
         conn.commit()
 
 def get_settings():
@@ -640,40 +832,79 @@ def get_settings():
         settings = {}
         for row in cursor.execute('SELECT key, value FROM settings').fetchall():
             settings[row[0]] = row[1]
-            
+
         # Fallback to environment variables if not set in DB settings
         if 'helius_api_key' not in settings and os.environ.get('HELIUS_API_KEY'):
             settings['helius_api_key'] = os.environ.get('HELIUS_API_KEY')
-            
+
         return settings
+
+
+def token_name_pattern_matches(token_name, pattern):
+    """Match a token name against one regex or a comma/newline keyword list.
+
+    Keyword lists use OR semantics and are matched case-insensitively as literal
+    text. A single value remains a regex for backwards compatibility.
+    """
+    token_name = str(token_name or '')
+    pattern = str(pattern or '').strip()
+    if not token_name or not pattern:
+        return False
+
+    if ',' in pattern or '\n' in pattern or '\r' in pattern:
+        keywords = [
+            keyword.strip()
+            for keyword in re.split(r'[,\r\n]+', pattern)
+            if keyword.strip()
+        ]
+        token_name_lower = token_name.casefold()
+        return any(keyword.casefold() in token_name_lower for keyword in keywords)
+
+    try:
+        return re.search(pattern, token_name, re.IGNORECASE) is not None
+    except re.error:
+        return pattern.casefold() in token_name.casefold()
+
+
+def token_name_pattern_for_sql(pattern):
+    """Return a SQLite REGEXP pattern with the same semantics as the live filter."""
+    pattern = str(pattern or '').strip()
+    if ',' in pattern or '\n' in pattern or '\r' in pattern:
+        keywords = [
+            re.escape(keyword.strip())
+            for keyword in re.split(r'[,\r\n]+', pattern)
+            if keyword.strip()
+        ]
+        return f"({'|'.join(keywords)})" if keywords else ''
+    return pattern
 
 def get_workflows():
     with db_lock:
         conn = get_db()
         conn.row_factory = custom_row_factory
         cursor = conn.cursor()
-        
+
         workflows = []
         for wf in cursor.execute('SELECT * FROM workflows').fetchall():
             wf_dict = dict(wf)
             rules = cursor.execute('SELECT * FROM rules WHERE workflow_id = ?', (wf['id'],)).fetchall()
             wf_dict['rules'] = [dict(r) for r in rules]
             workflows.append(wf_dict)
-            
+
         return workflows
 
 def process_message_logic(text, rules, context=None):
     if not text:
         return text, False, ""
-        
+
     processed_text = text
     context = context or {}
     payer_address = context.get('payer_address')
-    
+
     for rule in rules:
         rule_type = rule.get('rule_type')
         print(f"      [RULE] type={rule_type}, search_text={rule.get('search_text')}, time_min={rule.get('time_min')}, time_max={rule.get('time_max')}")
-        
+
         # TOKEN AGE FILTER LOGIC
         if rule_type == 'token_age':
             try:
@@ -684,15 +915,15 @@ def process_message_logic(text, rules, context=None):
             except (ValueError, TypeError):
                 min_age = 0
                 max_age = 5256000
-            
+
             age_type = rule.get('search_text') or 'creation'
             age_type = age_type.lower().strip()
             print(f"      [TOKEN AGE] type={age_type}, min_age={min_age}, max_age={max_age}")
-            
+
             # Find the relevant line for age extraction
             lines = text.split('\n') if text else []
             age_line = None
-            
+
             if age_type == 'migration':
                 # Look for migration age line
                 for line in lines:
@@ -711,7 +942,7 @@ def process_message_logic(text, rules, context=None):
                         if 'age' in line.lower() and 'migration' not in line.lower():
                             age_line = line
                             break
-            
+
             age_text = None
             if age_line:
                 # Try to get text after colon
@@ -719,9 +950,9 @@ def process_message_logic(text, rules, context=None):
                     age_text = age_line.split(':', 1)[1].strip()
                 else:
                     age_text = age_line.strip()
-            
+
             token_minutes = None
-            
+
             if age_text:
                 print(f"      [TOKEN AGE] Extracted age text: '{age_text}'")
                 # Check for "Just now" or "New" which imply 0 minutes
@@ -734,7 +965,7 @@ def process_message_logic(text, rules, context=None):
                     d = int(re.search(r'(\d+)\s*(?:d|day)', age_text, re.IGNORECASE).group(1) if re.search(r'(\d+)\s*(?:d|day)', age_text, re.IGNORECASE) else 0)
                     h = int(re.search(r'(\d+)\s*(?:h|hr|hour)', age_text, re.IGNORECASE).group(1) if re.search(r'(\d+)\s*(?:h|hr|hour)', age_text, re.IGNORECASE) else 0)
                     m = int(re.search(r'(\d+)\s*(?:m|min|minute)', age_text, re.IGNORECASE).group(1) if re.search(r'(\d+)\s*(?:m|min|minute)', age_text, re.IGNORECASE) else 0)
-                    
+
                     # If we parsed 0 minutes but there was no actual "0" in the text, it means it's unknown/invalid
                     if d == 0 and h == 0 and m == 0 and not re.search(r'\b0\b', age_text):
                         token_minutes = None
@@ -751,18 +982,18 @@ def process_message_logic(text, rules, context=None):
                         m = int(standalone_match.group(3) or 0)
                         token_minutes = (d * 1440) + (h * 60) + m
                         print(f"      [TOKEN AGE] Parsed standalone: d={d}, h={h}, m={m} → {token_minutes} minutes")
-            
+
             # If the age is unknown, drop the message
             if token_minutes is None:
                 print(f"      [TOKEN AGE] DROPPING: Token age is unknown or not found")
                 return None, True, f"Dropped by Token Age Filter (Age is Unknown)"
-                
+
             if not (min_age <= token_minutes <= max_age):
                 print(f"      [TOKEN AGE] DROPPING: {min_age} <= {token_minutes} <= {max_age} is FALSE")
                 return None, True, f"Dropped by Token Age Filter (Allowed: {min_age}-{max_age}m, Found: {token_minutes}m)"
             else:
                 print(f"      [TOKEN AGE] PASSED: {min_age} <= {token_minutes} <= {max_age}")
-        
+
         # EXTRACT CA LOGIC (Now acts purely as a filter)
         elif rule_type == 'extract_ca':
             ca_regex = r'(?:CA|Contract|ca)[\s:]*([1-9A-HJ-NP-Za-km-z]{32,44}|0x[a-fA-F0-9]{40})'
@@ -775,7 +1006,7 @@ def process_message_logic(text, rules, context=None):
         # PERFORMANCE FILTER LOGIC
         elif rule_type == 'performance':
             timeframe = rule.get('search_text') or '5m'
-            
+
             # Normalize timeframe to match message output format (e.g. 1hr/1h -> 1h, 6hr/6h -> 6h, 24hr/24h -> 24h)
             timeframe_clean = timeframe.lower().strip()
             if timeframe_clean in ['1hr', '1h']:
@@ -784,13 +1015,13 @@ def process_message_logic(text, rules, context=None):
                 timeframe_clean = '6h'
             elif timeframe_clean in ['24hr', '24h']:
                 timeframe_clean = '24h'
-                
+
             min_str = rule.get('time_min')
             max_str = rule.get('time_max')
             try:
                 min_perf = float(min_str) if min_str and str(min_str).strip() != "" else float('-inf')
                 max_perf = float(max_str) if max_str and str(max_str).strip() != "" else float('inf')
-                
+
                 # Look for e.g., '5m: +67%' or '1h: -27%'
                 pattern = rf'{timeframe_clean}:\s*([+\-]?\d+(?:\.\d+)?)%'
                 match = re.search(pattern, text, re.IGNORECASE)
@@ -812,7 +1043,7 @@ def process_message_logic(text, rules, context=None):
                 max_p_str = rule.get('time_max')
                 min_p = float(min_p_str) if min_p_str and str(min_p_str).strip() != "" else 0.0
                 max_p = float(max_p_str) if max_p_str and str(max_p_str).strip() != "" else float('inf')
-                
+
                 # Extract payment from string: "DEX Payment: $12.34 USD" or "DEX Payment: $12 USD"
                 match = re.search(r'DEX Payment:\s*\$?([\d,]+(?:\.\d+)?)\s*(?:USD)?', text, re.IGNORECASE)
                 if match:
@@ -857,7 +1088,7 @@ def process_message_logic(text, rules, context=None):
                 max_mc_str = rule.get('time_max')
                 min_mc = float(min_mc_str) if min_mc_str and str(min_mc_str).strip() != "" else 0
                 max_mc = float(max_mc_str) if max_mc_str and str(max_mc_str).strip() != "" else float('inf')
-                
+
                 # Extract MC from string: "💰 Market Cap: $1.20M" or "$500.5K" or "$500"
                 mc_match = re.search(r'Market Cap:\s*\$?([\d\.]+)([KM]?)', text, re.IGNORECASE)
                 if mc_match:
@@ -867,7 +1098,7 @@ def process_message_logic(text, rules, context=None):
                         val *= 1_000
                     elif suffix == 'M':
                         val *= 1_000_000
-                    
+
                     if not (min_mc <= val <= max_mc):
                         return None, True, f"Dropped by Market Cap Filter (Allowed: ${min_mc}-${max_mc}, Found: ${val})"
                 else:
@@ -902,7 +1133,7 @@ def process_message_logic(text, rules, context=None):
             mode = (rule.get('replace_text') or 'include').strip().lower()
             if not pattern:
                 pattern = '.*'
-                
+
             # Extract token/project name
             token_name = context.get('token_name') or context.get('project_name')
             if not token_name:
@@ -918,13 +1149,7 @@ def process_message_logic(text, rules, context=None):
 
             print(f"      [TOKEN NAME] token_name='{token_name}', pattern='{pattern}', mode='{mode}'", flush=True)
 
-            is_matched = False
-            try:
-                if token_name and re.search(pattern, token_name, re.IGNORECASE):
-                    is_matched = True
-            except re.error:
-                if token_name and pattern.lower() in token_name.lower():
-                    is_matched = True
+            is_matched = token_name_pattern_matches(token_name, pattern)
 
             if mode == 'exclude':
                 if is_matched and token_name:
@@ -941,23 +1166,42 @@ def process_message_logic(text, rules, context=None):
 
         # WORD FILTER LOGIC
         elif rule_type == 'filter':
-            search = rule.get('search_text', '')
-            if search and search.lower() in text.lower():
-                return None, True, f"Dropped by Word Filter (Found forbidden word: '{search}')"
-                
+            search = (rule.get('search_text') or '').strip()
+            mode = (rule.get('replace_text') or 'include').strip().lower()
+            if search:
+                # Split search words by comma, pipe, or newline
+                words = [w.strip().lower() for w in re.split(r'[,|\n]+', search) if w.strip()]
+                if words:
+                    found_words = [w for w in words if w in text.lower()]
+                    if mode == 'exclude':
+                        if found_words:
+                            matched = "', '".join(found_words)
+                            print(f"      [WORD FILTER] DROPPING: Found forbidden word(s): '{matched}'", flush=True)
+                            return None, True, f"Dropped by Word Filter (Found forbidden word: '{matched}')"
+                        else:
+                            print(f"      [WORD FILTER] PASSED: No forbidden words from '{search}' found in text", flush=True)
+                    else:  # mode == 'include' (default: pass if at least one word is present)
+                        if found_words:
+                            matched = "', '".join(found_words)
+                            print(f"      [WORD FILTER] PASSED: Message contains required word(s): '{matched}'", flush=True)
+                        else:
+                            words_preview = ", ".join(words[:5]) + ("..." if len(words) > 5 else "")
+                            print(f"      [WORD FILTER] DROPPING: None of the required words ('{words_preview}') found in message", flush=True)
+                            return None, True, f"Dropped by Word Filter (None of the required words found: '{words_preview}')"
+
         # REPLACE LOGIC
         elif rule_type == 'replace':
             search = rule.get('search_text', '')
             replace = rule.get('replace_text', '')
             if search:
                 processed_text = processed_text.replace(search, replace)
-                
+
         # APPEND LOGIC
         elif rule_type == 'append':
             replace = rule.get('replace_text', '')
             if replace:
                 processed_text += f"\n\n{replace}"
-                
+
     print(f"      [RESULT] All rules passed! Message will be forwarded.")
     return processed_text, False, ""
 
@@ -979,53 +1223,18 @@ def create_workflow():
     try:
         data = request.json
         print(f"DEBUG: create_workflow payload: {data}")
-        with db_lock:
-            conn = get_db()
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO workflows (name, source_channel, source_channel_id, target_channel, target_channel_id, is_active)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (data.get('name'), data.get('source_channel'), data.get('source_channel_id'), data.get('target_channel'), data.get('target_channel_id'), 1))
-            # Commit the workflow immediately to assign a permanent ID and bypass any driver transaction buffering
-            conn.commit()
-            
-            # Retrieve the newly inserted workflow ID safely (thread-safe under global db_lock)
-            cursor.execute('SELECT max(id) FROM workflows')
-            row = cursor.fetchone()
-            wf_id = row[0] if row else None
-            
-            if not wf_id:
-                raise Exception("Failed to retrieve the new workflow ID from the database.")
-            
-            for rule in data.get('rules', []):
-                cursor.execute('''
-                    INSERT INTO rules (workflow_id, rule_type, search_text, replace_text, time_min, time_max)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (wf_id, rule.get('rule_type'), rule.get('search_text'), rule.get('replace_text'), rule.get('time_min'), rule.get('time_max')))
-                
-            conn.commit()
-            
-            # Sync to Supabase
-            if supabase_client:
-                push_to_supabase_table('workflows', {
-                    'id': wf_id,
-                    'name': data.get('name'),
-                    'source_channel': data.get('source_channel'),
-                    'source_channel_id': data.get('source_channel_id'),
-                    'target_channel': data.get('target_channel'),
-                    'target_channel_id': data.get('target_channel_id'),
-                    'is_active': True
-                })
-                for rule in data.get('rules', []):
-                    push_to_supabase_table('rules', {
-                        'workflow_id': wf_id,
-                        'rule_type': rule.get('rule_type'),
-                        'search_text': rule.get('search_text'),
-                        'replace_text': rule.get('replace_text'),
-                        'time_min': rule.get('time_min'),
-                        'time_max': rule.get('time_max')
-                    })
-            
+        wf_payload = {
+            'name': data.get('name'),
+            'source_channel': data.get('source_channel'),
+            'source_channel_id': data.get('source_channel_id'),
+            'target_channel': data.get('target_channel'),
+            'target_channel_id': data.get('target_channel_id'),
+            'is_active': True
+        }
+        rules = data.get('rules', [])
+        wf_id = save_workflow_to_supabase(wf_payload, rules)
+        mirror_workflow_to_sqlite(wf_id, wf_payload, rules)
+
         return jsonify({"success": True, "id": wf_id})
     except Exception as e:
         import traceback
@@ -1045,43 +1254,27 @@ def update_workflow(id):
         with db_lock:
             conn = get_db()
             cursor = conn.cursor()
-            
-            cursor.execute('''
-                UPDATE workflows 
-                SET name=?, source_channel=?, source_channel_id=?, target_channel=?, target_channel_id=?
-                WHERE id=?
-            ''', (data.get('name'), data.get('source_channel'), data.get('source_channel_id'), data.get('target_channel'), data.get('target_channel_id'), id))
-            
-            cursor.execute('DELETE FROM rules WHERE workflow_id=?', (id,))
-            
-            for rule in data.get('rules', []):
-                cursor.execute('''
-                    INSERT INTO rules (workflow_id, rule_type, search_text, replace_text, time_min, time_max)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (id, rule.get('rule_type'), rule.get('search_text'), rule.get('replace_text'), rule.get('time_min'), rule.get('time_max')))
-                
-            conn.commit()
-            
-            if supabase_client:
-                push_to_supabase_table('workflows', {
-                    'id': id,
-                    'name': data.get('name'),
-                    'source_channel': data.get('source_channel'),
-                    'source_channel_id': data.get('source_channel_id'),
-                    'target_channel': data.get('target_channel'),
-                    'target_channel_id': data.get('target_channel_id')
-                })
-                delete_from_supabase_table('rules', 'workflow_id', id)
-                for rule in data.get('rules', []):
-                    push_to_supabase_table('rules', {
-                        'workflow_id': id,
-                        'rule_type': rule.get('rule_type'),
-                        'search_text': rule.get('search_text'),
-                        'replace_text': rule.get('replace_text'),
-                        'time_min': rule.get('time_min'),
-                        'time_max': rule.get('time_max')
-                    })
-            
+
+            # Fetch current is_active so we preserve it unless explicitly provided
+            curr_wf = cursor.execute('SELECT is_active FROM workflows WHERE id=?', (id,)).fetchone()
+            curr_is_active = 1
+            if curr_wf:
+                curr_is_active = curr_wf.get('is_active') if isinstance(curr_wf, dict) else curr_wf[0]
+
+            new_is_active = 1 if data.get('is_active', curr_is_active) else 0
+
+        wf_payload = {
+            'name': data.get('name'),
+            'source_channel': data.get('source_channel'),
+            'source_channel_id': data.get('source_channel_id'),
+            'target_channel': data.get('target_channel'),
+            'target_channel_id': data.get('target_channel_id'),
+            'is_active': bool(new_is_active)
+        }
+        rules = data.get('rules', [])
+        save_workflow_to_supabase(wf_payload, rules, wf_id=id)
+        mirror_workflow_to_sqlite(id, wf_payload, rules)
+
         return jsonify({"success": True})
     except Exception as e:
         import traceback
@@ -1095,32 +1288,42 @@ def toggle_workflow(id):
         wf = cursor.execute('SELECT is_active FROM workflows WHERE id=?', (id,)).fetchone()
         if not wf:
             return jsonify({"success": False})
-        
+
         # Try accessing by column name first for dict/CustomRow, fallback to index for tuple safety
         is_active_val = wf.get('is_active') if isinstance(wf, dict) else wf[0]
         new_status = 0 if is_active_val else 1
-        
-        cursor.execute('UPDATE workflows SET is_active=? WHERE id=?', (new_status, id))
-        conn.commit()
-        
-        if supabase_client:
-            push_to_supabase_table('workflows', {'id': id, 'is_active': bool(new_status)})
+
+    if not supabase_client:
+        return jsonify({"success": False, "error": "Supabase is not configured."}), 503
+    try:
+        with workflow_sync_lock:
+            result = supabase_client.table('workflows').update({'is_active': bool(new_status)}).eq('id', id).execute()
+            if not result.data:
+                raise RuntimeError(f"Workflow {id} does not exist in Supabase.")
+        with db_lock:
+            conn = get_db()
+            conn.execute('UPDATE workflows SET is_active=? WHERE id=?', (new_status, id))
+            conn.commit()
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 502
     return jsonify({"success": True, "is_active": bool(new_status)})
 
 @app.route('/api/workflows/<int:id>', methods=['DELETE'])
 def delete_workflow(id):
     try:
+        if not supabase_client:
+            return jsonify({"success": False, "error": "Supabase is not configured."}), 503
+        with workflow_sync_lock:
+            result = supabase_client.table('workflows').delete().eq('id', id).execute()
+            if not result.data:
+                raise RuntimeError(f"Workflow {id} does not exist in Supabase.")
+
         with db_lock:
             conn = get_db()
             cursor = conn.cursor()
-            # Explicitly delete rules first just in case
             cursor.execute('DELETE FROM rules WHERE workflow_id=?', (id,))
             cursor.execute('DELETE FROM workflows WHERE id=?', (id,))
             conn.commit()
-            
-            if supabase_client:
-                delete_from_supabase_table('rules', 'workflow_id', id)
-                delete_from_supabase_table('workflows', 'id', id)
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -1143,16 +1346,16 @@ def run_tester():
     data = request.json
     wf_id = data.get('workflow_id')
     text = data.get('text')
-    
+
     workflows = get_workflows()
     wf = next((w for w in workflows if w['id'] == int(wf_id)), None)
-    
+
     if not wf:
         return jsonify({"dropped": True, "reason": "Workflow not found"})
-        
+
     context = {"payer_address": data.get('payer_address', '9xQeWvG816bUx9EPjFWdd5AufqSSqeM2qN1xzybapC8G')}
     result_text, dropped, reason = process_message_logic(text, wf['rules'], context=context)
-    
+
     return jsonify({
         "dropped": dropped,
         "reason": reason,
@@ -1174,11 +1377,11 @@ def tg_send_code():
     phone = request.json.get('phone')
     if not tg_client or not telethon_loop:
         return jsonify({"success": False, "error": "Bot is initializing. Please wait a few seconds and try again."})
-        
+
     async def _send():
         if not tg_client.is_connected():
             await tg_client.connect()
-        
+
         try:
             result = await tg_client.send_code_request(phone)
             # Save hash to DB so it survives restart
@@ -1206,16 +1409,16 @@ def tg_verify_code():
     phone = request.json.get('phone')
     if not tg_client or not telethon_loop:
         return jsonify({"success": False, "error": "Client not ready"})
-        
+
     async def _verify():
         # Retrieve hash from DB
         settings = get_settings()
         phone_code_hash = settings.get('phone_code_hash')
         if not phone_code_hash:
             raise Exception("Code hash missing. Please request the code again.")
-            
+
         await tg_client.sign_in(phone, code, phone_code_hash=phone_code_hash)
-        
+
         # Save session string immediately upon successful verification
         try:
             new_session_str = tg_client.session.save()
@@ -1228,7 +1431,7 @@ def tg_verify_code():
                 print("[AUTH] Successfully saved Telegram StringSession to database after verification.")
         except Exception as e:
             print(f"[AUTH] Error saving StringSession after verification: {e}")
-            
+
         return True
 
     try:
@@ -1247,13 +1450,13 @@ def tg_reset():
 def tg_dialogs():
     if not tg_client or not telethon_loop:
         return jsonify({"success": False, "error": "Client not ready"})
-        
+
     async def _get_dialogs():
         if not await tg_client.is_user_authorized():
             return []
         dialogs = await tg_client.get_dialogs(limit=20)
         return [{"id": str(d.id), "name": d.name} for d in dialogs]
-        
+
     try:
         dialogs = asyncio.run_coroutine_threadsafe(_get_dialogs(), telethon_loop).result(timeout=15)
         return jsonify({"success": True, "dialogs": dialogs})
@@ -1264,15 +1467,15 @@ def tg_dialogs():
 def tg_channels():
     if not tg_client or not telethon_loop:
         return jsonify({"success": False, "error": "Client not ready"})
-        
+
     async def _get_channels():
         try:
             if not await tg_client.is_user_authorized():
                 return []
-            
+
             # Fetch dialogs with a limit to avoid timeouts
             dialogs = await tg_client.get_dialogs(limit=100)
-            
+
             channels = []
             for d in dialogs:
                 if d.is_channel or d.is_group or d.is_user:
@@ -1280,13 +1483,13 @@ def tg_channels():
                     uname = ""
                     if hasattr(d.entity, 'username') and d.entity.username:
                         uname = d.entity.username
-                    
+
                     chat_type = "Channel"
                     if d.is_group:
                         chat_type = "Group"
                     elif d.is_user:
                         chat_type = "User"
-                    
+
                     channels.append({
                         "id": str(d.id),
                         "name": d.name or "Unnamed",
@@ -1297,7 +1500,7 @@ def tg_channels():
         except Exception as e:
             print(f"Error in _get_channels: {e}")
             return []
-        
+
     try:
         channels = asyncio.run_coroutine_threadsafe(_get_channels(), telethon_loop).result(timeout=25)
         return jsonify({"success": True, "channels": channels})
@@ -1308,7 +1511,7 @@ def tg_channels():
 def tg_logout():
     if not tg_client or not telethon_loop:
         return jsonify({"success": False, "error": "Client not ready"})
-        
+
     async def _logout():
         try:
             await tg_client.log_out()
@@ -1357,15 +1560,15 @@ def extract_best_price_change(pairs):
     """
     if not pairs:
         return 0.0, 0.0, 0.0, 0.0
-        
+
     sorted_pairs = get_sorted_trading_pairs(pairs)
-    
+
     m5, h1, h6, h24 = None, None, None, None
     for p in sorted_pairs:
         pc = p.get('priceChange')
         if not pc or not isinstance(pc, dict):
             continue
-            
+
         if m5 is None and pc.get('m5') is not None:
             try: m5 = float(pc['m5'])
             except (ValueError, TypeError): pass
@@ -1378,7 +1581,7 @@ def extract_best_price_change(pairs):
         if h24 is None and pc.get('h24') is not None:
             try: h24 = float(pc['h24'])
             except (ValueError, TypeError): pass
-            
+
     return (
         m5 if m5 is not None else 0.0,
         h1 if h1 is not None else 0.0,
@@ -1397,7 +1600,7 @@ async def check_token_migration(ca, pairs):
     # 1. Determine if token originated on a bonding curve platform
     is_bonding_curve = False
     origin_platform = "pump.fun"
-    
+
     if ca.lower().endswith("pump"):
         is_bonding_curve = True
         origin_platform = "pump.fun"
@@ -1431,7 +1634,7 @@ async def check_token_migration(ca, pairs):
         "lifinity": "Lifinity",
         "pancakeswap": "Pancakeswap"
     }
-    
+
     # 2. Determine current location (primary trading exchange)
     sorted_pairs = get_sorted_trading_pairs(pairs)
     if sorted_pairs:
@@ -1440,7 +1643,7 @@ async def check_token_migration(ca, pairs):
     else:
         primary_dex = ""
         current_location = "Unknown"
-        
+
     # 3. Check for pump.fun bonding curve completion on-chain to handle DexScreener lag.
     is_completed_on_chain = False
     if is_bonding_curve and origin_platform == "pump.fun":
@@ -1449,7 +1652,7 @@ async def check_token_migration(ca, pairs):
             if p.get("dexId", "").lower() == "pumpfun":
                 bonding_curve_address = p.get("pairAddress")
                 break
-        
+
         if bonding_curve_address:
             settings = get_settings()
             api_key = settings.get('helius_api_key')
@@ -1498,7 +1701,7 @@ async def check_token_migration(ca, pairs):
     else:
         is_migrated = True
         migration_detail = f"Yes (to {current_location})"
-        
+
     return is_migrated, migration_detail, current_location
 
 async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
@@ -1508,7 +1711,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
     payment_timestamp = item.get("payment_timestamp")
     if not ca:
         return None
-        
+
     token_info = {
         "ca": ca,
         "name": "Unknown",
@@ -1528,7 +1731,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
         "order_status": order_status,
         "payment_timestamp": payment_timestamp
     }
-    
+
     # Skip if we already sent this exact signal (same status and timestamp, unless in test mode)
     is_duplicate = False
     if not test_mode:
@@ -1536,17 +1739,17 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
             conn = get_db()
             cursor = conn.cursor()
             existing = cursor.execute('''
-                SELECT id FROM cto_signals 
+                SELECT id FROM cto_signals
                 WHERE ca = ? AND signal_type = ? AND payment_timestamp = ? AND order_status = ?
             ''', (ca, order_type, payment_timestamp, order_status)).fetchone()
             if existing:
                 is_duplicate = True
-                
+
     if is_duplicate:
         token_info["status"] = "duplicate"
         token_info["reason"] = f"Skipped: Already processed ({order_type} - {order_status})"
         return token_info
-        
+
     token_url = f"https://api.dexscreener.com/latest/dex/tokens/{ca}"
     try:
         token_response = await asyncio.to_thread(requests.get, token_url, timeout=10)
@@ -1558,10 +1761,10 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
         token_info["status"] = "error"
         token_info["reason"] = f"Failed to fetch token details: {e}"
         return token_info
-        
+
     token_data = token_response.json()
     pairs = token_data.get("pairs", [])
-    
+
     if not pairs:
         token_info["status"] = "error"
         token_info["reason"] = "No active trading pairs found on Dexscreener"
@@ -1578,7 +1781,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                         cursor.execute("UPDATE wallet_payments SET ca=?, status='dropped', reason=? WHERE sender_address=? AND (timestamp * 1000 BETWEEN ? AND ?)", (ca, token_info["reason"], payer, payment_timestamp - 180000, payment_timestamp + 180000))
                     conn.commit()
         return token_info
-        
+
     sorted_pairs = get_sorted_trading_pairs(pairs)
     primary_pair = sorted_pairs[0]
     raw_chain = primary_pair.get("chainId", "unknown").lower()
@@ -1598,7 +1801,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                         cursor.execute("UPDATE wallet_payments SET ca=?, status='dropped', reason=? WHERE sender_address=? AND (timestamp * 1000 BETWEEN ? AND ?)", (ca, token_info["reason"], payer, payment_timestamp - 180000, payment_timestamp + 180000))
                     conn.commit()
         return token_info
-        
+
     type_display_map = {
         "tokenProfile": "Token Profile",
         "communityTakeover": "Community Takeover",
@@ -1607,18 +1810,18 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
     }
     type_display = type_display_map.get(order_type, order_type)
     migration_status_formatted = f"{type_display} ({order_status.upper()})"
-    
+
     project_name = primary_pair.get("baseToken", {}).get("name", "Unknown")
     chain_map = {
-        "solana": "Solana (SOL)", 
-        "ethereum": "Ethereum (ETH)", 
-        "bsc": "BSC (BNB)", 
-        "base": "Base (ETH)", 
-        "arbitrum": "Arbitrum (ETH)", 
+        "solana": "Solana (SOL)",
+        "ethereum": "Ethereum (ETH)",
+        "bsc": "BSC (BNB)",
+        "base": "Base (ETH)",
+        "arbitrum": "Arbitrum (ETH)",
         "polygon": "Polygon (MATIC)"
     }
     chain_id = chain_map.get(raw_chain, raw_chain.capitalize())
-    
+
     all_mcs = []
     for p in pairs:
         val = p.get("marketCap") or p.get("fdv")
@@ -1634,11 +1837,11 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
             mc_str = f"${raw_mc:.2f}"
     else:
         mc_str = "Unknown"
-    
+
     # Calculate Age (From creation) and Age (After migration)
     age_creation_str = "Unknown"
     age_migration_str = "0"
-    
+
     # Age (From creation) - oldest pair creation time
     creation_times = [p.get("pairCreatedAt") for p in pairs if p.get("pairCreatedAt")]
     if creation_times:
@@ -1651,7 +1854,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                 age_creation_str = f"{age_creation_minutes}m"
             else:
                 age_creation_str = f"{int(age_creation_minutes / 60)}h {age_creation_minutes % 60}m"
-                
+
     # If market cap or creation age is unknown, skip further fetching/processing and abort
     if mc_str == "Unknown" or age_creation_str == "Unknown":
         token_info["status"] = "skipped"
@@ -1681,7 +1884,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
             if d_id not in ["pumpfun", "moonshot", "pumpswap"]:
                 standard_dex_pair = p
                 break
-        
+
         if standard_dex_pair and standard_dex_pair.get("pairCreatedAt"):
             migration_created_at = standard_dex_pair.get("pairCreatedAt")
             current_time_ms = int(time.time() * 1000)
@@ -1694,11 +1897,11 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                     age_migration_str = f"{int(age_migration_minutes / 60)}h {age_migration_minutes % 60}m"
         else:
             age_migration_str = "0"
-            
+
     perf_5m, perf_1h, perf_6h, perf_24h = extract_best_price_change(pairs)
-    
+
     payer_address = item.get("payer_address")
-    
+
     # Fetch DEX payment amount in USD & payer wallet if needed
     payment_amount_usd = item.get("amount_usd")
     if payment_amount_usd is None or payment_amount_usd == 0.0 or not payer_address:
@@ -1711,7 +1914,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
             payer_address = fetched_payer
 
     dex_url = f"https://dexscreener.com/{raw_chain}/{ca}"
-    
+
     token_info["name"] = project_name
     token_info["platform"] = chain_id
     token_info["migration_status"] = migration_status_formatted
@@ -1722,7 +1925,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
     token_info["perf_6h"] = perf_6h
     token_info["perf_24h"] = perf_24h
     token_info["dex_url"] = dex_url
-    
+
     status_emoji_map = {
         "approved": "✅",
         "processing": "⏳",
@@ -1731,7 +1934,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
         "rejected": "🚫"
     }
     status_emoji = status_emoji_map.get(order_status.lower(), "❓")
-    
+
     payment_time_str = "Unknown"
     if payment_timestamp:
         try:
@@ -1762,10 +1965,10 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
            f"┃ 🟥 24h: {perf_24h:+.2f}%\n"
            f"━━━━━━━━━━━\n"
            f"📈 Chart: {dex_url}")
-    
+
     passed_any = False
     token_dropped_reasons = []
-    
+
     workflows_to_evaluate = []
     if workflow_id and str(workflow_id).strip() != "" and str(workflow_id) != "active_all":
         workflows = get_workflows()
@@ -1777,40 +1980,49 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
             workflows_to_evaluate = [w for w in workflows if w.get('is_active')]
     else:
         workflows_to_evaluate = [w for w in get_workflows() if w.get('is_active')]
-        
+
     if workflows_to_evaluate:
         passed_channels = []
+        attempted_channels = []
+        send_failures = []
         for wf in workflows_to_evaluate:
             modified_text, dropped, reason = process_message_logic(msg, wf.get('rules', []), context={"payer_address": payer_address, "token_name": project_name})
             if dropped:
                 token_dropped_reasons.append(f"[{wf.get('name') or 'Flow'}]: {reason}")
                 continue
-            
+
             passed_any = True
             send_msg = modified_text if modified_text else msg
-            
+
             t_id = str(wf.get('target_channel_id') or '').strip()
             t_username = wf.get('target_channel') or ''
             wf_target = t_id if t_id else t_username
             final_target = wf_target
-            
+
             if final_target:
-                passed_channels.append(final_target)
+                attempted_channels.append(final_target)
                 if tg_client:
                     try:
                         await safe_send_message(tg_client, final_target, send_msg)
+                        passed_channels.append(final_target)
                         print(f"[REAL-TIME SCANNER] Token {ca} successfully forwarded to target: {final_target} via workflow {wf.get('name')}", flush=True)
                     except Exception as e:
+                        send_failures.append(f"{final_target}: {e}")
                         print(f"[REAL-TIME SCANNER] Failed to send to {final_target}: {e}", flush=True)
                 else:
+                    send_failures.append(f"{final_target}: Telegram client is not running/authorized")
                     print(f"[REAL-TIME SCANNER] WARNING: Token {ca} passed filters, but Telegram client is not running/authorized! Cannot send to {final_target}.", flush=True)
             else:
                 print(f"[REAL-TIME SCANNER] Workflow '{wf.get('name')}' matched but has no target channel configured. Skipping.", flush=True)
-        
+
         if passed_any:
             if passed_channels:
                 token_info["status"] = "passed"
                 token_info["reason"] = f"Sent via workflows to: {', '.join(passed_channels)}"
+                token_info["formatted_message"] = msg
+            elif attempted_channels:
+                token_info["status"] = "send_failed"
+                token_info["reason"] = f"Telegram send failed: {'; '.join(send_failures)}"
                 token_info["formatted_message"] = msg
             else:
                 token_info["status"] = "skipped"
@@ -1821,32 +2033,59 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
     else:
         token_info["status"] = "dropped"
         token_info["reason"] = "Dropped: No active workflows configured"
-    
+
     if not test_mode:
-        db_status = "forwarded" if token_info.get("status") == "passed" else "skipped"
+        result_status = token_info.get("status")
+        if result_status == "passed":
+            db_status = "forwarded"
+        elif result_status == "dropped":
+            db_status = "dropped"
+        elif result_status == "send_failed":
+            db_status = "send_failed"
+        else:
+            db_status = "skipped"
         with db_lock:
             conn = get_db()
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT INTO cto_signals (
-                    ca, name, platform, market_cap, age, 
-                    perf_5m, perf_1h, perf_6h, perf_24h, 
+                    ca, name, platform, market_cap, age,
+                    perf_5m, perf_1h, perf_6h, perf_24h,
                     status, dex_url, migration_status, signal_type,
                     payment_timestamp, order_status, reason
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                ca, project_name, chain_id, mc_str, age_creation_str, 
-                perf_5m, perf_1h, perf_6h, perf_24h, 
+                ca, project_name, chain_id, mc_str, age_creation_str,
+                perf_5m, perf_1h, perf_6h, perf_24h,
                 db_status, dex_url, migration_status_formatted, order_type,
                 payment_timestamp, order_status, token_info.get("reason")
             ))
-            
-            # Enrich and update wallet_payments with full token & Telegram metrics
+
+            # Only record to wallet_payments if we have a real, confirmed project token name (not SOL/USDT/USDC/Unknown)
+            is_valid_token_name = (
+                project_name
+                and str(project_name).strip() != ''
+                and str(project_name).strip().upper() not in ('UNKNOWN', 'SOL', 'USDT', 'USDC', 'WSOL', 'WRAPPED SOL')
+                and ca not in ('So11111111111111111111111111111111111111112', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'Es9vMFrzaypmko8L7jV8YW156HCfaNuDY8jNH5KB3C1d')
+                and mc_str != 'Unknown'
+                and age_creation_str != 'Unknown'
+                and bool(dex_url)
+            )
+
             sig = item.get("signature")
             payer = item.get("payer_address")
             send_text = token_info.get("formatted_message") or msg
-            
+            amt_val = item.get("amount") if item.get("amount") is not None else (item.get("amount_usd") or payment_amount_usd or 0.0)
+            mint_val = item.get("mint") or "SOL"
+            ts_val = (payment_timestamp // 1000) if payment_timestamp else int(time.time())
+            tracked_val = item.get("tracked_address") or ""
+
             enrichment_payload = {
+                'tracked_address': tracked_val,
+                'sender_address': payer,
+                'amount': amt_val,
+                'mint': mint_val,
+                'timestamp': ts_val,
                 'token_name': project_name,
                 'ca': ca,
                 'platform': chain_id,
@@ -1863,26 +2102,88 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                 'reason': token_info.get("reason"),
                 'formatted_message': send_text
             }
-            
-            if sig:
-                cursor.execute("""
-                    UPDATE wallet_payments 
-                    SET token_name=?, ca=?, platform=?, market_cap=?, age=?, migration_age=?, perf_5m=?, perf_1h=?, perf_6h=?, perf_24h=?, dex_url=?, migration_status=?, status=?, reason=?, formatted_message=?
-                    WHERE signature=?
-                """, (
-                    project_name, ca, chain_id, mc_str, age_creation_str, age_migration_str, perf_5m, perf_1h, perf_6h, perf_24h, dex_url, migration_status_formatted, db_status, token_info.get("reason"), send_text, sig
-                ))
-            elif payer:
-                cursor.execute("""
-                    UPDATE wallet_payments 
-                    SET token_name=?, ca=?, platform=?, market_cap=?, age=?, migration_age=?, perf_5m=?, perf_1h=?, perf_6h=?, perf_24h=?, dex_url=?, migration_status=?, status=?, reason=?, formatted_message=?
-                    WHERE sender_address=? AND (timestamp * 1000 BETWEEN ? AND ?)
-                """, (
-                    project_name, ca, chain_id, mc_str, age_creation_str, age_migration_str, perf_5m, perf_1h, perf_6h, perf_24h, dex_url, migration_status_formatted, db_status, token_info.get("reason"), send_text, payer, payment_timestamp - 180000, payment_timestamp + 180000
-                ))
-            
-            conn.commit()
-            
+
+            if is_valid_token_name:
+                if sig:
+                    cursor.execute("""
+                        INSERT INTO wallet_payments (
+                            tracked_address, sender_address, amount, mint, signature, timestamp,
+                            token_name, ca, platform, market_cap, age, migration_age,
+                            perf_5m, perf_1h, perf_6h, perf_24h, dex_url, migration_status,
+                            status, reason, formatted_message
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(signature) DO UPDATE SET
+                            tracked_address=COALESCE(excluded.tracked_address, wallet_payments.tracked_address),
+                            sender_address=COALESCE(excluded.sender_address, wallet_payments.sender_address),
+                            amount=COALESCE(excluded.amount, wallet_payments.amount),
+                            token_name=excluded.token_name,
+                            ca=excluded.ca,
+                            platform=excluded.platform,
+                            market_cap=excluded.market_cap,
+                            age=excluded.age,
+                            migration_age=excluded.migration_age,
+                            perf_5m=excluded.perf_5m,
+                            perf_1h=excluded.perf_1h,
+                            perf_6h=excluded.perf_6h,
+                            perf_24h=excluded.perf_24h,
+                            dex_url=excluded.dex_url,
+                            migration_status=excluded.migration_status,
+                            status=excluded.status,
+                            reason=excluded.reason,
+                            formatted_message=excluded.formatted_message
+                    """, (
+                        tracked_val, payer, amt_val, mint_val, sig, ts_val,
+                        project_name, ca, chain_id, mc_str, age_creation_str, age_migration_str,
+                        perf_5m, perf_1h, perf_6h, perf_24h, dex_url, migration_status_formatted,
+                        db_status, token_info.get("reason"), send_text
+                    ))
+                elif payer:
+                    existing = cursor.execute("SELECT id FROM wallet_payments WHERE sender_address=? AND (timestamp * 1000 BETWEEN ? AND ?)", (payer, payment_timestamp - 180000, payment_timestamp + 180000)).fetchone()
+                    if existing:
+                        cursor.execute("""
+                            UPDATE wallet_payments
+                            SET token_name=?, ca=?, platform=?, market_cap=?, age=?, migration_age=?, perf_5m=?, perf_1h=?, perf_6h=?, perf_24h=?, dex_url=?, migration_status=?, status=?, reason=?, formatted_message=?
+                            WHERE id=?
+                        """, (
+                            project_name, ca, chain_id, mc_str, age_creation_str, age_migration_str, perf_5m, perf_1h, perf_6h, perf_24h, dex_url, migration_status_formatted, db_status, token_info.get("reason"), send_text, existing[0]
+                        ))
+                    else:
+                        cursor.execute("""
+                            INSERT INTO wallet_payments (
+                                tracked_address, sender_address, amount, mint, signature, timestamp,
+                                token_name, ca, platform, market_cap, age, migration_age,
+                                perf_5m, perf_1h, perf_6h, perf_24h, dex_url, migration_status,
+                                status, reason, formatted_message
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            tracked_val, payer, amt_val, mint_val, None, ts_val,
+                            project_name, ca, chain_id, mc_str, age_creation_str, age_migration_str,
+                            perf_5m, perf_1h, perf_6h, perf_24h, dex_url, migration_status_formatted,
+                            db_status, token_info.get("reason"), send_text
+                        ))
+
+                conn.commit()
+
+                if supabase_client:
+                    if sig:
+                        sp_wallet_payload = dict(enrichment_payload)
+                        sp_wallet_payload['signature'] = sig
+                        push_to_supabase_table('wallet_payments', sp_wallet_payload, on_conflict='signature')
+                    elif payer:
+                        def _update_supabase_wallet():
+                            try:
+                                result = supabase_client.table('wallet_payments').update(enrichment_payload).eq('sender_address', payer).gte('timestamp', (payment_timestamp - 180000)//1000).lte('timestamp', (payment_timestamp + 180000)//1000).execute()
+                                if not result.data:
+                                    supabase_client.table('wallet_payments').insert(enrichment_payload).execute()
+                            except Exception as e:
+                                print(f"[SUPABASE] wallet_payments update error: {e}", flush=True)
+                        threading.Thread(target=_update_supabase_wallet, daemon=True).start()
+            else:
+                # If a row was previously created for this signature without a token name, delete it
+                if sig:
+                    cursor.execute("DELETE FROM wallet_payments WHERE signature=?", (sig,))
+                    conn.commit()
+
             if supabase_client:
                 push_to_supabase_table('cto_signals', {
                     'ca': ca,
@@ -1902,18 +2203,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                     'order_status': order_status,
                     'reason': token_info.get("reason")
                 })
-                if sig:
-                    sp_wallet_payload = dict(enrichment_payload)
-                    sp_wallet_payload['signature'] = sig
-                    push_to_supabase_table('wallet_payments', sp_wallet_payload, on_conflict='signature')
-                elif payer:
-                    def _update_supabase_wallet():
-                        try:
-                            supabase_client.table('wallet_payments').update(enrichment_payload).eq('sender_address', payer).gte('timestamp', (payment_timestamp - 180000)//1000).lte('timestamp', (payment_timestamp + 180000)//1000).execute()
-                        except Exception as e:
-                            print(f"[SUPABASE] wallet_payments update error: {e}", flush=True)
-                    threading.Thread(target=_update_supabase_wallet, daemon=True).start()
-            
+
     return token_info
 
 def run_async_coroutine(coro):
@@ -1931,10 +2221,10 @@ def run_async_coroutine(coro):
 def discover_payment_wallet_logic(token_address, payment_timestamp, api_key):
     if not api_key:
         return None, "Helius API Key not set."
-    
+
     # payment_timestamp is in ms, convert to seconds
     ts_seconds = int(payment_timestamp / 1000)
-    
+
     last_sig = None
     log_messages = []
     # Scan up to 10 pages of transaction history from Helius to find the payment
@@ -1942,27 +2232,27 @@ def discover_payment_wallet_logic(token_address, payment_timestamp, api_key):
         url = f"https://api.helius.xyz/v0/addresses/{token_address}/transactions?api-key={api_key}"
         if last_sig:
             url += f"&before={last_sig}"
-            
+
         try:
             r = requests.get(url, timeout=10)
             if r.status_code != 200:
                 msg = f"Helius API HTTP {r.status_code} error on page {page+1}: {r.text.strip()}"
                 print(f"[HELIUS DISCOVERY] {msg}")
                 return None, msg
-            
+
             txs = r.json()
             if not txs or not isinstance(txs, list):
                 msg = f"No transactions returned on page {page+1}."
                 print(f"[HELIUS DISCOVERY] {msg}")
                 log_messages.append(msg)
                 break
-                
+
             # Scan transactions on current page
             for tx in txs:
                 tx_ts = tx.get("timestamp")
                 if not tx_ts:
                     continue
-                
+
                 # Check if within 90s window of payment
                 if abs(tx_ts - ts_seconds) <= 90:
                     print(f"[HELIUS DISCOVERY] Found matching transaction {tx.get('signature')} at {tx_ts} (target: {ts_seconds})")
@@ -1971,13 +2261,13 @@ def discover_payment_wallet_logic(token_address, payment_timestamp, api_key):
                         to_address = transfer.get("toUserAccount")
                         if to_address and to_address != token_address:
                             return to_address, "Success"
-                    
+
                     # Look for native transfers (SOL)
                     for transfer in tx.get("nativeTransfers", []):
                         to_address = transfer.get("toUserAccount")
                         if to_address and to_address != token_address:
                             return to_address, "Success"
-            
+
             # Check if oldest transaction on this page is older than the search window
             oldest_tx_ts = txs[-1].get("timestamp", 0)
             if oldest_tx_ts < ts_seconds - 90:
@@ -1985,7 +2275,7 @@ def discover_payment_wallet_logic(token_address, payment_timestamp, api_key):
                 print(f"[HELIUS DISCOVERY] {msg}")
                 log_messages.append(msg)
                 break
-                
+
             last_sig = txs[-1].get("signature")
             if not last_sig:
                 break
@@ -1993,33 +2283,33 @@ def discover_payment_wallet_logic(token_address, payment_timestamp, api_key):
             msg = f"Error querying page {page+1}: {e}"
             print(f"[HELIUS DISCOVERY] {msg}")
             return None, msg
-            
+
     summary = "; ".join(log_messages) if log_messages else "No matching payment transaction found in analyzed history pages."
     return None, summary
 
 def get_dex_payment_info(token_address, payment_timestamp, api_key):
     if not api_key or not token_address or not payment_timestamp:
         return 0.0, None
-    
+
     # Convert payment_timestamp (in ms) to seconds
     ts_seconds = int(payment_timestamp / 1000)
-    
+
     settings = get_settings()
     monitored_addresses = []
-    
+
     # Get only the cto_dex_payment_address (where DEX payments are actually sent)
     # to avoid sequential loop timeouts when querying user wallets.
     cto_addr = settings.get('cto_dex_payment_address')
     if cto_addr and len(cto_addr.strip()) >= 32:
         monitored_addresses.append(cto_addr.strip())
-                
+
     # We will try scanning the transaction history of the cto_dex_payment_address first.
     # If none are configured, fallback to scanning the token address.
     addresses_to_scan = monitored_addresses if monitored_addresses else [token_address]
-    
+
     try:
         sol_price = get_token_price_usd("SOL")
-        
+
         for scan_addr in addresses_to_scan:
             url = f"https://api.helius.xyz/v0/addresses/{scan_addr}/transactions?api-key={api_key}"
             r = requests.get(url, timeout=10)
@@ -2034,10 +2324,10 @@ def get_dex_payment_info(token_address, payment_timestamp, api_key):
                             tx_str = str(tx)
                             if token_address not in tx_str:
                                 continue
-                                
+
                             total_usd = 0.0
                             payer_address = None
-                            
+
                             # Check token transfers to the scan_addr
                             for transfer in tx.get("tokenTransfers", []):
                                 if transfer.get("toUserAccount") == scan_addr:
@@ -2050,7 +2340,7 @@ def get_dex_payment_info(token_address, payment_timestamp, api_key):
                                     else:
                                         t_price = get_token_price_usd(mint)
                                         total_usd += amount * t_price if t_price else 0.0
-                                        
+
                             # Check native transfers to the scan_addr
                             for transfer in tx.get("nativeTransfers", []):
                                 if transfer.get("toUserAccount") == scan_addr:
@@ -2058,14 +2348,14 @@ def get_dex_payment_info(token_address, payment_timestamp, api_key):
                                     total_usd += amount_sol * sol_price
                                     if not payer_address:
                                         payer_address = transfer.get("fromUserAccount")
-                                    
+
                             if not payer_address and tx.get("feePayer"):
                                 payer_address = tx.get("feePayer")
-                                
+
                             if total_usd > 0 or payer_address:
                                 print(f"[DEX PAYMENT FILTER] Found payment of ${total_usd:.2f} USD to {scan_addr} from payer {payer_address}", flush=True)
                                 return total_usd, payer_address
-                                
+
         # Final fallback: scan the token address itself if the monitored addresses scan didn't find it
         if addresses_to_scan != [token_address]:
             url = f"https://api.helius.xyz/v0/addresses/{token_address}/transactions?api-key={api_key}"
@@ -2078,7 +2368,7 @@ def get_dex_payment_info(token_address, payment_timestamp, api_key):
                         if tx_ts and abs(tx_ts - ts_seconds) <= 120:
                             total_usd = 0.0
                             payer_address = None
-                            
+
                             for transfer in tx.get("tokenTransfers", []):
                                 mint = transfer.get("mint", "")
                                 amount = transfer.get("tokenAmount", 0)
@@ -2089,23 +2379,23 @@ def get_dex_payment_info(token_address, payment_timestamp, api_key):
                                 else:
                                     t_price = get_token_price_usd(mint)
                                     total_usd += amount * t_price if t_price else 0.0
-                                    
+
                             for transfer in tx.get("nativeTransfers", []):
                                 amount_sol = transfer.get("amount", 0) / 1e9
                                 total_usd += amount_sol * sol_price
                                 if not payer_address:
                                     payer_address = transfer.get("fromUserAccount")
-                                
+
                             if not payer_address and tx.get("feePayer"):
                                 payer_address = tx.get("feePayer")
-                                
+
                             if total_usd > 0 or payer_address:
                                 print(f"[DEX PAYMENT FILTER] Fallback token scan found payment of ${total_usd:.2f} USD from payer {payer_address}", flush=True)
                                 return total_usd, payer_address
-                                
+
     except Exception as e:
         print(f"[DEX PAYMENT FILTER] Error fetching payment info: {e}", flush=True)
-        
+
     return 0.0, None
 
 def get_dex_payment_amount_usd(token_address, payment_timestamp, api_key):
@@ -2117,7 +2407,7 @@ async def find_token_from_payer_history(payer_address, payment_timestamp, api_ke
         return None
     if depth > 2:
         return None
-    
+
     url = f"https://api.helius.xyz/v0/addresses/{payer_address}/transactions?api-key={api_key}"
     try:
         print(f"[PAYER HISTORY] Scanning history for payer {payer_address} around payment time {payment_timestamp} (depth={depth})...", flush=True)
@@ -2125,36 +2415,36 @@ async def find_token_from_payer_history(payer_address, payment_timestamp, api_ke
         if r.status_code != 200:
             print(f"[PAYER HISTORY] Helius API HTTP {r.status_code} error: {r.text.strip()}", flush=True)
             return None
-            
+
         txs = r.json()
         if not txs or not isinstance(txs, list):
             print(f"[PAYER HISTORY] No transactions found for {payer_address}.", flush=True)
             return None
-            
+
         excluded_mints = {
             'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', # USDC
             'So11111111111111111111111111111111111111112', # WSOL
             'Es9vMFrzaypmko8L7jV8YW156HCfaNuDY8jNH5KB3C1d', # USDT
             '11111111111111111111111111111111'
         }
-        
+
         txs_sorted = sorted(txs, key=lambda x: x.get("timestamp", 0), reverse=True)
-        
+
         # 1. Primary pass (Recent 2 hours): Look for positive balance changes or token transfer inflows (Buy/Swap)
         for tx in txs_sorted:
             tx_ts = tx.get("timestamp", 0)
             if tx_ts > payment_timestamp + 60 or tx_ts < payment_timestamp - 7200:
                 continue
-                
+
             candidate_mints = set()
-            
+
             # Check token transfers where payer is recipient
             for transfer in tx.get("tokenTransfers", []):
                 mint = transfer.get("mint")
                 if mint and mint not in excluded_mints:
                     if transfer.get("toUserAccount") == payer_address:
                         candidate_mints.add(mint)
-                        
+
             # Check token balance changes where balance increased
             for change in tx.get("tokenBalanceChanges", []):
                 mint = change.get("mint")
@@ -2167,25 +2457,25 @@ async def find_token_from_payer_history(payer_address, payment_timestamp, api_ke
                             candidate_mints.add(mint)
                     except Exception:
                         pass
-                        
+
             if candidate_mints:
                 mint = list(candidate_mints)[0]
                 print(f"[PAYER HISTORY] Found token {mint} from positive balance/transfer in tx {tx.get('signature')} at {tx_ts} (payment ts: {payment_timestamp})", flush=True)
                 return mint
-                
+
         # 1b. Expanded primary pass (Past 24 hours): If nothing in 2 hours
         for tx in txs_sorted:
             tx_ts = tx.get("timestamp", 0)
             if tx_ts > payment_timestamp + 60 or tx_ts < payment_timestamp - 86400:
                 continue
-                
+
             candidate_mints = set()
             for transfer in tx.get("tokenTransfers", []):
                 mint = transfer.get("mint")
                 if mint and mint not in excluded_mints:
                     if transfer.get("toUserAccount") == payer_address:
                         candidate_mints.add(mint)
-                        
+
             for change in tx.get("tokenBalanceChanges", []):
                 mint = change.get("mint")
                 user = change.get("userAccount")
@@ -2197,24 +2487,24 @@ async def find_token_from_payer_history(payer_address, payment_timestamp, api_ke
                             candidate_mints.add(mint)
                     except Exception:
                         pass
-                        
+
             if candidate_mints:
                 mint = list(candidate_mints)[0]
                 print(f"[PAYER HISTORY] Found token {mint} from 24h positive balance/transfer in tx {tx.get('signature')} at {tx_ts} (payment ts: {payment_timestamp})", flush=True)
                 return mint
-                
+
         # 2. Secondary fallback: Look for any custom token transaction activity within 24 hours
         for tx in txs_sorted:
             tx_ts = tx.get("timestamp", 0)
             if tx_ts > payment_timestamp + 60 or tx_ts < payment_timestamp - 86400:
                 continue
-                
+
             for transfer in tx.get("tokenTransfers", []):
                 mint = transfer.get("mint")
                 if mint and mint not in excluded_mints:
                     print(f"[PAYER HISTORY] Fallback found token {mint} in transfers in tx {tx.get('signature')} at {tx_ts} (payment ts: {payment_timestamp})", flush=True)
                     return mint
-                    
+
             for change in tx.get("tokenBalanceChanges", []):
                 mint = change.get("mint")
                 if mint and mint not in excluded_mints:
@@ -2235,7 +2525,7 @@ async def find_token_from_payer_history(payer_address, payment_timestamp, api_ke
                             amount_sol = transfer.get("amount", 0) / 1e9
                             if amount_sol >= 0.001:  # filter out dust/spam
                                 funders.append((from_addr, tx_ts))
-                                
+
             if funders:
                 # Sort funders by time closest to payment timestamp (newest first)
                 funders.sort(key=lambda x: x[1], reverse=True)
@@ -2249,7 +2539,7 @@ async def find_token_from_payer_history(payer_address, payment_timestamp, api_ke
         print(f"[PAYER HISTORY] Could not find any custom token activity for payer {payer_address} near payment timestamp {payment_timestamp}.", flush=True)
     except Exception as e:
         print(f"[PAYER HISTORY] Error looking up history for {payer_address}: {e}", flush=True)
-        
+
     return None
 
 async def process_payment_payer_history(payer_address, payment_timestamp, api_key, amount_usd=0.0):
@@ -2285,7 +2575,7 @@ async def get_latest_signatures(address, api_key, limit=5):
     return []
 
 # Helper to trace and process payment sender history in background
-async def process_payment_and_forward(payer_address, tx_timestamp, amount_usd=0.0, signature=None, tracked_address=None):
+async def process_payment_and_forward(payer_address, tx_timestamp, amount_usd=0.0, signature=None, tracked_address=None, amount=None, mint=None):
     try:
         print(f"[WALLET TRACKER] Tracing sender history for {payer_address}...", flush=True)
         loop_settings = get_settings()
@@ -2293,36 +2583,34 @@ async def process_payment_and_forward(payer_address, tx_timestamp, amount_usd=0.
         if not loop_api_key:
             print("[WALLET TRACKER] Helius API key not found in settings. Skipping history trace.", flush=True)
             return
-            
+
         token = await find_token_from_payer_history(payer_address, tx_timestamp, loop_api_key)
         if token:
             print(f"[WALLET TRACKER] Discovered token {token} from sender {payer_address}. Forwarding to filters...", flush=True)
             target = loop_settings.get('cto_target_channel', '')
             wf_id = loop_settings.get('cto_workflow_id')
             t_mode = loop_settings.get('cto_test_mode', 'false').lower() == 'true'
-            
+
             item = {
                 "tokenAddress": token,
                 "order_type": "Tracked Wallet Payment",
                 "order_status": "detected",
                 "payment_timestamp": tx_timestamp * 1000,
                 "amount_usd": amount_usd,
+                "amount": amount if amount is not None else amount_usd,
+                "mint": mint or "SOL",
                 "signature": signature,
                 "payer_address": payer_address,
                 "tracked_address": tracked_address
             }
             await process_single_cto_item(item, target, wf_id, t_mode)
         else:
-            print(f"[WALLET TRACKER] No token discovered for sender {payer_address}.", flush=True)
+            print(f"[WALLET TRACKER] No token discovered for sender {payer_address}. Skipping recording.", flush=True)
             if signature:
                 with db_lock:
                     conn = get_db()
                     cursor = conn.cursor()
-                    cursor.execute("""
-                        UPDATE wallet_payments 
-                        SET status = 'dropped', reason = 'No token activity detected from payer within 24h'
-                        WHERE signature = ? AND status IS NULL
-                    """, (signature,))
+                    cursor.execute("DELETE FROM wallet_payments WHERE signature = ?", (signature,))
                     conn.commit()
     except Exception as ex:
         print(f"[WALLET TRACKER] Error processing payment sender history: {ex}", flush=True)
@@ -2331,39 +2619,39 @@ async def wallet_tracker_polling_loop():
     processed_signatures = set()
     initialized_addresses = set()
     print("[WALLET TRACKER POLLING] Started background payment monitoring loop.", flush=True)
-    
+
     while True:
         try:
             settings = get_settings()
             is_auto = str(settings.get('cto_auto_scan', 'false')).lower() == 'true'
             poll_enabled = settings.get('wallet_tracker_poll_enabled', 'false').lower() == 'true'
             poll_interval = int(settings.get('polling_interval', '10'))
-            
+
             if not is_auto or not poll_enabled:
                 await asyncio.sleep(poll_interval)
                 continue
-                
+
             api_key = settings.get('helius_api_key')
             tracked_address_str = settings.get('tracked_wallet_address')
-            
+
             if api_key and tracked_address_str:
                 addresses = [a.strip() for a in tracked_address_str.split(',') if len(a.strip()) >= 32]
-                
+
                 for tracked_address in addresses:
                     # Check signatures first (1 credit RPC request)
                     sigs = await get_latest_signatures(tracked_address, api_key, limit=10)
-                    
+
                     if tracked_address not in initialized_addresses:
                         for s in sigs:
                             processed_signatures.add(s)
                         initialized_addresses.add(tracked_address)
                         continue
-                        
+
                     # Check if there are any new signatures
                     has_new = any(s not in processed_signatures for s in sigs)
                     if not has_new:
                         continue
-                        
+
                     # Only poll Enhanced Transactions when a new signature is detected
                     url = f"https://api.helius.xyz/v0/addresses/{tracked_address}/transactions?api-key={api_key}"
                     r = await asyncio.to_thread(requests.get, url, timeout=10)
@@ -2374,16 +2662,16 @@ async def wallet_tracker_polling_loop():
                                 sig = tx.get("signature")
                                 if not sig or sig in processed_signatures:
                                     continue
-                                
+
                                 processed_signatures.add(sig)
                                 if len(processed_signatures) > 5000:
                                     processed_signatures.clear()
                                     initialized_addresses.clear()
                                     processed_signatures.add(sig)
                                     initialized_addresses.add(tracked_address)
-                                
+
                                 timestamp = tx.get("timestamp", int(time.time()))
-                                
+
                                 # Process native transfers
                                 for transfer in tx.get('nativeTransfers', []):
                                     to_addr = transfer.get('toUserAccount')
@@ -2393,33 +2681,10 @@ async def wallet_tracker_polling_loop():
                                         amount_sol = amount_lamports / 1_000_000_000.0
                                         sol_price = get_token_price_usd("SOL")
                                         amount_usd = amount_sol * sol_price if sol_price else 0.0
-                                        with db_lock:
-                                            conn = get_db()
-                                            cursor = conn.cursor()
-                                            try:
-                                                cursor.execute('''
-                                                    INSERT INTO wallet_payments (tracked_address, sender_address, amount, mint, signature, timestamp)
-                                                    VALUES (?, ?, ?, ?, ?, ?)
-                                                ''', (tracked_address, from_addr, amount_sol, "SOL", sig, timestamp))
-                                                conn.commit()
-                                                if supabase_client:
-                                                    push_to_supabase_table('wallet_payments', {
-                                                        'tracked_address': tracked_address,
-                                                        'sender_address': from_addr,
-                                                        'amount': amount_sol,
-                                                        'mint': "SOL",
-                                                        'signature': sig,
-                                                        'timestamp': timestamp
-                                                    })
-                                                print(f"[WALLET TRACKER] Logged real-time native payment: {amount_sol} SOL from {from_addr} to {tracked_address}", flush=True)
-                                                # Trigger background history tracing and filtering
-                                                asyncio.create_task(process_payment_and_forward(from_addr, timestamp, amount_usd, signature=sig, tracked_address=tracked_address))
-                                            except Exception as e:
-                                                if "unique" in str(e).lower() or "integrity" in str(e).lower():
-                                                    pass
-                                                else:
-                                                    print(f"[WALLET TRACKER] Error inserting native transfer: {e}", flush=True)
-                                                
+                                        print(f"[WALLET TRACKER] Detected real-time native payment: {amount_sol} SOL from {from_addr} to {tracked_address}. Tracing payer history...", flush=True)
+                                        # Trigger background history tracing; record to database only once a real token is confirmed
+                                        asyncio.create_task(process_payment_and_forward(from_addr, timestamp, amount_usd, signature=sig, tracked_address=tracked_address, amount=amount_sol, mint="SOL"))
+
                                 # Process token transfers
                                 for transfer in tx.get('tokenTransfers', []):
                                     to_addr = transfer.get('toUserAccount')
@@ -2429,55 +2694,34 @@ async def wallet_tracker_polling_loop():
                                     if to_addr == tracked_address and from_addr != tracked_address:
                                         token_price = get_token_price_usd(mint)
                                         amount_usd = token_amount * token_price if token_price else 0.0
-                                        with db_lock:
-                                            conn = get_db()
-                                            cursor = conn.cursor()
-                                            try:
-                                                cursor.execute('''
-                                                    INSERT INTO wallet_payments (tracked_address, sender_address, amount, mint, signature, timestamp)
-                                                    VALUES (?, ?, ?, ?, ?, ?)
-                                                ''', (tracked_address, from_addr, token_amount, mint, sig, timestamp))
-                                                conn.commit()
-                                                if supabase_client:
-                                                    push_to_supabase_table('wallet_payments', {
-                                                        'tracked_address': tracked_address,
-                                                        'sender_address': from_addr,
-                                                        'amount': token_amount,
-                                                        'mint': mint,
-                                                        'signature': sig,
-                                                        'timestamp': timestamp
-                                                    })
-                                                print(f"[WALLET TRACKER] Logged real-time token payment: {token_amount} {mint[:8]}... from {from_addr} to {tracked_address}", flush=True)
-                                                
-                                                # If it is a custom token, forward it directly. Otherwise trace payer history.
-                                                if mint not in ('So11111111111111111111111111111111111111112', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'Es9vMFrzaypmko8L7jV8YW156HCfaNuDY8jNH5KB3C1d', 'SOL'):
-                                                    print(f"[WALLET TRACKER] Custom token detected: {mint}. Forwarding directly to filters.", flush=True)
-                                                    target = settings.get('cto_target_channel', '')
-                                                    wf_id = settings.get('cto_workflow_id')
-                                                    t_mode = settings.get('cto_test_mode', 'false').lower() == 'true'
-                                                    item = {
-                                                        "tokenAddress": mint,
-                                                        "order_type": "Tracked Wallet Swap",
-                                                        "order_status": "detected",
-                                                        "payment_timestamp": timestamp * 1000,
-                                                        "amount_usd": amount_usd,
-                                                        "signature": sig,
-                                                        "payer_address": from_addr,
-                                                        "tracked_address": tracked_address
-                                                    }
-                                                    asyncio.create_task(process_single_cto_item(item, target, wf_id, t_mode))
-                                                else:
-                                                    asyncio.create_task(process_payment_and_forward(from_addr, timestamp, amount_usd, signature=sig, tracked_address=tracked_address))
-                                            except Exception as e:
-                                                if "unique" in str(e).lower() or "integrity" in str(e).lower():
-                                                    pass
-                                                else:
-                                                    print(f"[WALLET TRACKER] Error inserting token transfer: {e}", flush=True)
+
+                                        # If it is a custom token, forward it directly. Otherwise trace payer history.
+                                        if mint not in ('So11111111111111111111111111111111111111112', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'Es9vMFrzaypmko8L7jV8YW156HCfaNuDY8jNH5KB3C1d', 'SOL'):
+                                            print(f"[WALLET TRACKER] Custom token detected: {mint}. Forwarding directly to filters.", flush=True)
+                                            target = settings.get('cto_target_channel', '')
+                                            wf_id = settings.get('cto_workflow_id')
+                                            t_mode = settings.get('cto_test_mode', 'false').lower() == 'true'
+                                            item = {
+                                                "tokenAddress": mint,
+                                                "order_type": "Tracked Wallet Swap",
+                                                "order_status": "detected",
+                                                "payment_timestamp": timestamp * 1000,
+                                                "amount_usd": amount_usd,
+                                                "amount": token_amount,
+                                                "mint": mint,
+                                                "signature": sig,
+                                                "payer_address": from_addr,
+                                                "tracked_address": tracked_address
+                                            }
+                                            asyncio.create_task(process_single_cto_item(item, target, wf_id, t_mode))
+                                        else:
+                                            print(f"[WALLET TRACKER] Detected base token payment: {token_amount} {mint[:8]}... from {from_addr} to {tracked_address}. Tracing payer history...", flush=True)
+                                            asyncio.create_task(process_payment_and_forward(from_addr, timestamp, amount_usd, signature=sig, tracked_address=tracked_address, amount=token_amount, mint=mint))
                     else:
                         print(f"[WALLET TRACKER POLLING] Helius API error {r.status_code} for {tracked_address}: {r.text.strip()}", flush=True)
         except Exception as e:
             print(f"[WALLET TRACKER POLLING] Loop error: {e}", flush=True)
-            
+
         await asyncio.sleep(poll_interval)
 
 @app.route('/api/wallet/save_tracked', methods=['POST'])
@@ -2500,12 +2744,12 @@ def get_wallet_history_transactions():
         time_value = float(data.get('time_value', 12))
     except (ValueError, TypeError):
         time_value = 12.0
-    
+
     try:
         min_amount = float(data.get('min_amount')) if data.get('min_amount') else None
     except (ValueError, TypeError):
         min_amount = None
-        
+
     try:
         max_amount = float(data.get('max_amount')) if data.get('max_amount') else None
     except (ValueError, TypeError):
@@ -2566,21 +2810,21 @@ def get_wallet_history_transactions():
         multiplier = 3600.0
     elif time_unit == 'days':
         multiplier = 86400.0
-        
+
     cutoff_ts = time.time() - (time_value * multiplier)
-    
+
     senders_map = {}
     sol_price = get_token_price_usd("SOL")
-    
+
     for addr in addresses:
         last_sig = None
         stop_paginating = False
-        
+
         for page in range(5):
             url = f"https://api.helius.xyz/v0/addresses/{addr}/transactions?api-key={api_key}"
             if last_sig:
                 url += f"&before={last_sig}"
-                
+
             try:
                 r = requests.get(url, timeout=15)
                 if r.status_code != 200:
@@ -2590,33 +2834,33 @@ def get_wallet_history_transactions():
                         return jsonify({"success": False, "error": f"Helius API authorization failed (status {r.status_code}). Please verify your Helius API key in Settings."})
                     else:
                         return jsonify({"success": False, "error": f"Helius API returned status code {r.status_code}: {r.text.strip()}"})
-                
+
                 txs = r.json()
                 if not txs or not isinstance(txs, list):
                     break
-                    
+
                 for tx in txs:
                     tx_ts = tx.get("timestamp", 0)
                     if tx_ts < cutoff_ts:
                         stop_paginating = True
                         break
-                    
+
                     sig = tx.get("signature")
-                    
+
                     for transfer in tx.get('nativeTransfers', []):
                         to_addr = transfer.get('toUserAccount')
                         from_addr = transfer.get('fromUserAccount')
                         amount_lamports = transfer.get('amount', 0)
-                        
+
                         if to_addr == addr and from_addr != addr:
                             amount_sol = amount_lamports / 1_000_000_000.0
                             amount_usd = amount_sol * sol_price
-                            
+
                             if min_amount is not None and amount_usd < min_amount:
                                 continue
                             if max_amount is not None and amount_usd > max_amount:
                                 continue
-                                
+
                             if from_addr not in senders_map:
                                 senders_map[from_addr] = {
                                     "address": from_addr,
@@ -2626,13 +2870,13 @@ def get_wallet_history_transactions():
                                     "latest_timestamp": 0,
                                     "transfers": []
                                 }
-                            
+
                             senders_map[from_addr]["total_sent_sol"] += amount_sol
                             senders_map[from_addr]["total_sent_usd"] += amount_usd
                             senders_map[from_addr]["tx_count"] += 1
                             if tx_ts > senders_map[from_addr]["latest_timestamp"]:
                                 senders_map[from_addr]["latest_timestamp"] = tx_ts
-                                
+
                             senders_map[from_addr]["transfers"].append({
                                 "amount": amount_sol,
                                 "mint": "SOL",
@@ -2641,22 +2885,22 @@ def get_wallet_history_transactions():
                                 "signature": sig,
                                 "timestamp": tx_ts
                             })
-                            
+
                     for transfer in tx.get('tokenTransfers', []):
                         to_addr = transfer.get('toUserAccount')
                         from_addr = transfer.get('fromUserAccount')
                         token_amount = transfer.get('tokenAmount', 0)
                         mint = transfer.get('mint', '')
-                        
+
                         if to_addr == addr and from_addr != addr:
                             token_price = get_token_price_usd(mint)
                             amount_usd = token_amount * token_price
-                            
+
                             if min_amount is not None and amount_usd < min_amount:
                                 continue
                             if max_amount is not None and amount_usd > max_amount:
                                 continue
-                                
+
                             if from_addr not in senders_map:
                                 senders_map[from_addr] = {
                                     "address": from_addr,
@@ -2666,15 +2910,15 @@ def get_wallet_history_transactions():
                                     "latest_timestamp": 0,
                                     "transfers": []
                                 }
-                                
+
                             senders_map[from_addr]["total_sent_usd"] += amount_usd
                             if sol_price > 0:
                                 senders_map[from_addr]["total_sent_sol"] += amount_usd / sol_price
-                                
+
                             senders_map[from_addr]["tx_count"] += 1
                             if tx_ts > senders_map[from_addr]["latest_timestamp"]:
                                 senders_map[from_addr]["latest_timestamp"] = tx_ts
-                                
+
                             senders_map[from_addr]["transfers"].append({
                                 "amount": token_amount,
                                 "mint": mint,
@@ -2683,10 +2927,10 @@ def get_wallet_history_transactions():
                                 "signature": sig,
                                 "timestamp": tx_ts
                             })
-                
+
                 if stop_paginating:
                     break
-                    
+
                 last_sig = txs[-1].get("signature")
                 if not last_sig:
                     break
@@ -2695,10 +2939,10 @@ def get_wallet_history_transactions():
                 print(f"[TRACKER DECORATOR] Exception during Helius scan: {e}", flush=True)
                 traceback.print_exc()
                 return jsonify({"success": False, "error": f"Error scanning transactions from Helius: {str(e)}"})
-            
+
     sorted_senders = list(senders_map.values())
     sorted_senders.sort(key=lambda x: x["latest_timestamp"], reverse=True)
-    
+
     # Decorate senders with last bought token before returning
     if api_key and sorted_senders:
         async def decorate_senders_with_tokens(senders):
@@ -2709,13 +2953,13 @@ def get_wallet_history_transactions():
                 if isinstance(token, str) and token:
                     s["last_bought_token"] = token
                     s["last_bought_token_name"] = await asyncio.to_thread(get_token_metadata, token)
-                    
+
                     if workflow_rules:
                         # Fetch token details for workflow rules evaluation
                         token_url = f"https://api.dexscreener.com/latest/dex/tokens/{token}"
                         try:
                             token_response = await asyncio.to_thread(requests.get, token_url, timeout=10)
-                            
+
                             mc_str = "Unknown"
                             age_creation_str = "Unknown"
                             age_migration_str = "0"
@@ -2727,7 +2971,7 @@ def get_wallet_history_transactions():
                             type_display = "Token Profile"
                             project_name = s.get("last_bought_token_name") or "Unknown"
                             chain_id = "Solana (SOL)"
-                            
+
                             if token_response.status_code == 200:
                                 token_data = token_response.json()
                                 pairs = token_data.get("pairs", [])
@@ -2736,7 +2980,7 @@ def get_wallet_history_transactions():
                                     primary_pair = sorted_pairs[0]
                                     raw_chain = primary_pair.get("chainId", "unknown").lower()
                                     project_name = primary_pair.get("baseToken", {}).get("name", "Unknown")
-                                    
+
                                     # mc
                                     all_mcs = [p.get("marketCap") or p.get("fdv") for p in pairs if isinstance(p.get("marketCap") or p.get("fdv"), (int, float)) and (p.get("marketCap") or p.get("fdv")) > 0]
                                     raw_mc = max(all_mcs) if all_mcs else (primary_pair.get("marketCap") or primary_pair.get("fdv"))
@@ -2747,7 +2991,7 @@ def get_wallet_history_transactions():
                                             mc_str = f"${raw_mc/1_000:.2f}K"
                                         else:
                                             mc_str = f"${raw_mc:.2f}"
-                                            
+
                                     # Age (From creation) - oldest pair creation time
                                     creation_times = [p.get("pairCreatedAt") for p in pairs if p.get("pairCreatedAt")]
                                     if creation_times:
@@ -2760,7 +3004,7 @@ def get_wallet_history_transactions():
                                                 age_creation_str = f"{age_creation_minutes}m"
                                             else:
                                                 age_creation_str = f"{int(age_creation_minutes / 60)}h {age_creation_minutes % 60}m"
-                                                
+
                                     # If market cap or creation age is unknown, skip further fetching/processing
                                     if mc_str == "Unknown" or age_creation_str == "Unknown":
                                         s["test_status"] = "dropped"
@@ -2769,7 +3013,7 @@ def get_wallet_history_transactions():
 
                                     # migration and current location
                                     is_migrated, migration_detail, current_location = await check_token_migration(token, pairs)
-                                    
+
                                     # Age (After migration) - creation time of the standard DEX pair
                                     if is_migrated:
                                         standard_dex_pair = None
@@ -2778,7 +3022,7 @@ def get_wallet_history_transactions():
                                             if d_id not in ["pumpfun", "moonshot", "pumpswap"]:
                                                 standard_dex_pair = p
                                                 break
-                                        
+
                                         if standard_dex_pair and standard_dex_pair.get("pairCreatedAt"):
                                             migration_created_at = standard_dex_pair.get("pairCreatedAt")
                                             current_time_ms = int(time.time() * 1000)
@@ -2791,7 +3035,7 @@ def get_wallet_history_transactions():
                                                     age_migration_str = f"{int(age_migration_minutes / 60)}h {age_migration_minutes % 60}m"
                                         else:
                                             age_migration_str = "0"
-                                            
+
                                     # perf
                                     perf_5m, perf_1h, perf_6h, perf_24h = extract_best_price_change(pairs)
                                     s["perf_5m"] = perf_5m
@@ -2801,9 +3045,9 @@ def get_wallet_history_transactions():
                                     s["market_cap"] = mc_str
                                     s["creation_age"] = age_creation_str
                                     s["migration_age"] = age_migration_str
-                            
+
                             payment_amount_usd = s["total_sent_usd"]
-                            
+
                             payment_time_str = "Unknown"
                             if s.get("latest_timestamp"):
                                 try:
@@ -2811,7 +3055,7 @@ def get_wallet_history_transactions():
                                     payment_time_str = dt.strftime('%Y-%m-%d %H:%M:%S UTC')
                                 except Exception:
                                     pass
-                            
+
                             msg = (f"🚀 PROJECT: {str(project_name).upper()} 🚀\n"
                                    f"━━━━━━━━━━━\n"
                                    f"💰 Market Cap: {mc_str}\n"
@@ -2835,7 +3079,7 @@ def get_wallet_history_transactions():
                                    f"━━━━━━━━━━━\n"
                                    f"📈 Chart: https://dexscreener.com/solana/{token}")
                             s["formatted_message"] = msg
-                            
+
                             _, dropped, reason = process_message_logic(msg, workflow_rules, context={"payer_address": s.get("address"), "token_name": project_name})
                             if dropped:
                                 s["test_status"] = "dropped"
@@ -2843,7 +3087,7 @@ def get_wallet_history_transactions():
                             else:
                                 s["test_status"] = "passed"
                                 s["test_reason"] = "Passed"
-                                
+
                                 # Actually send to Telegram target group
                                 if tg_client:
                                     t_id = str(wf_target_channel_id or '').strip()
@@ -2893,21 +3137,21 @@ def get_wallet_history_transactions():
 def get_address_recent_transactions():
     data = request.json
     address = data.get('address', '').strip()
-    
+
     if not address:
         return jsonify({"success": False, "error": "Address is required"})
-        
+
     settings = get_settings()
     api_key = settings.get('helius_api_key')
     if not api_key:
         return jsonify({"success": False, "error": "Helius API Key not configured"})
-        
+
     url = f"https://api.helius.xyz/v0/addresses/{address}/transactions?api-key={api_key}"
     try:
         r = requests.get(url, timeout=15)
         if r.status_code != 200:
             return jsonify({"success": False, "error": f"Helius API error: {r.status_code}"})
-            
+
         txs = r.json()
         formatted_txs = []
         excluded_mints = {
@@ -2916,23 +3160,23 @@ def get_address_recent_transactions():
             'Es9vMFrzaypmko8L7jV8YW156HCfaNuDY8jNH5KB3C1d', # USDT
             '11111111111111111111111111111111'
         }
-        
+
         if isinstance(txs, list):
             for tx in txs:
                 sig = tx.get("signature")
                 timestamp = tx.get("timestamp", 0)
                 tx_type = tx.get("type", "UNKNOWN")
-                
+
                 incoming_tokens = []
                 outgoing_tokens = []
                 incoming_sol = 0.0
                 outgoing_sol = 0.0
-                
+
                 incoming_sol_native = 0.0
                 outgoing_sol_native = 0.0
                 incoming_stable = 0.0
                 outgoing_stable = 0.0
-                
+
                 for transfer in tx.get("nativeTransfers", []):
                     to_u = transfer.get("toUserAccount")
                     from_u = transfer.get("fromUserAccount")
@@ -2943,16 +3187,16 @@ def get_address_recent_transactions():
                     if from_u == address:
                         outgoing_sol += amt
                         outgoing_sol_native += amt
-                        
+
                 for transfer in tx.get("tokenTransfers", []):
                     to_u = transfer.get("toUserAccount")
                     from_u = transfer.get("fromUserAccount")
                     amt = transfer.get("tokenAmount", 0)
                     mint = transfer.get("mint", "")
-                    
+
                     if not mint:
                         continue
-                        
+
                     if to_u == address:
                         if mint not in excluded_mints:
                             incoming_tokens.append((mint, amt))
@@ -2972,9 +3216,9 @@ def get_address_recent_transactions():
                 target_token = ""
                 target_amount = 0.0
                 value_exchanged = ""
-                
+
                 sol_price = get_token_price_usd("SOL")
-                
+
                 # Check for buy
                 if incoming_tokens and (outgoing_sol > 0 or tx_type == "SWAP"):
                     tx_action = "BUY"
@@ -3047,7 +3291,7 @@ def get_address_recent_transactions():
                     "value_exchanged": value_exchanged,
                     "description": description
                 })
-                
+
         return jsonify({"success": True, "transactions": formatted_txs})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
@@ -3063,6 +3307,9 @@ def get_wallet_payments_log():
                        token_name, ca, platform, market_cap, age, perf_5m, perf_1h, perf_6h, perf_24h,
                        dex_url, migration_status, status, reason, formatted_message, created_at
                 FROM wallet_payments
+                WHERE token_name IS NOT NULL
+                  AND TRIM(token_name) != ''
+                  AND token_name NOT IN ('SOL', 'USDT', 'USDC', 'WSOL', 'Wrapped SOL', 'Unknown')
                 ORDER BY id DESC LIMIT 100
             ''').fetchall()
             rows_list = [dict(r) if isinstance(r, dict) else {
@@ -3089,14 +3336,14 @@ def get_wallet_payments_log():
                 "formatted_message": r[20],
                 "created_at": r[21]
             } for r in rows]
-            
+
         results = []
         for r in rows_list:
             amount = r['amount']
             mint = r['mint']
             price = get_token_price_usd(mint)
             amount_usd = amount * price if price else 0.0
-            
+
             res_dict = dict(r)
             res_dict['amount_usd'] = amount_usd
             if not res_dict.get('token_name'):
@@ -3190,7 +3437,7 @@ def get_token_wallet_data():
         page = max(1, int(request.args.get('page', 1)))
         limit = min(max(10, int(request.args.get('limit', 25))), 50000)
         offset = (page - 1) * limit
-        
+
         search = (request.args.get('search') or '').strip()
         status = (request.args.get('status') or 'all').strip().lower()
         platform = (request.args.get('platform') or 'all').strip().lower()
@@ -3215,7 +3462,7 @@ def get_token_wallet_data():
         enriched_only = request.args.get('enriched_only', 'false').lower() == 'true'
         sort_by = (request.args.get('sort_by') or 'id').lower()
         sort_order = 'ASC' if (request.args.get('sort_order') or 'desc').upper() == 'ASC' else 'DESC'
-        
+
         sol_price = 0.0
         try:
             sol_mint = "So11111111111111111111111111111111111111112"
@@ -3227,7 +3474,7 @@ def get_token_wallet_data():
             pass
         if not sol_price or sol_price <= 0:
             sol_price = 145.0
-            
+
         usd_calc_sql = f"(CASE WHEN mint IN ('SOL', 'So11111111111111111111111111111111111111112') AND amount < 20 THEN amount * {sol_price} ELSE amount END)"
         valid_sorts = {
             'id': 'id',
@@ -3245,19 +3492,19 @@ def get_token_wallet_data():
             'migration_age': 'parse_migration_age_minutes(migration_age, formatted_message)'
         }
         order_col = valid_sorts.get(sort_by, 'id')
-        
+
         where_clauses = []
         params = []
-        
+
         if search:
             s_param = f"%{search}%"
             where_clauses.append("(token_name LIKE ? OR ca LIKE ? OR sender_address LIKE ? OR tracked_address LIKE ? OR reason LIKE ?)")
             params.extend([s_param, s_param, s_param, s_param, s_param])
-            
+
         if status != 'all' and status:
             where_clauses.append("LOWER(status) = ?")
             params.append(status)
-            
+
         if platform != 'all' and platform:
             where_clauses.append("LOWER(platform) LIKE ?")
             params.append(f"%{platform}%")
@@ -3265,10 +3512,17 @@ def get_token_wallet_data():
         if exclude_platform != 'none' and exclude_platform:
             where_clauses.append("LOWER(platform) NOT LIKE ?")
             params.append(f"%{exclude_platform}%")
-            
-        if enriched_only:
-            where_clauses.append("(token_name IS NOT NULL AND token_name != '' AND token_name != 'SOL')")
-            
+
+        # The table is an enriched-token dataset, never a raw payment ledger.
+        where_clauses.append("""(
+            token_name IS NOT NULL AND TRIM(token_name) != ''
+            AND UPPER(TRIM(token_name)) NOT IN ('SOL', 'USDT', 'USDC', 'WSOL', 'WRAPPED SOL', 'UNKNOWN')
+            AND ca IS NOT NULL AND TRIM(ca) != ''
+            AND market_cap IS NOT NULL AND TRIM(market_cap) != '' AND UPPER(TRIM(market_cap)) != 'UNKNOWN'
+            AND age IS NOT NULL AND TRIM(age) != '' AND UPPER(TRIM(age)) != 'UNKNOWN'
+            AND dex_url IS NOT NULL AND TRIM(dex_url) != ''
+        )""")
+
         if timeframe and timeframe != 'all':
             now_ts = int(time.time())
             tf_seconds = {
@@ -3281,7 +3535,7 @@ def get_token_wallet_data():
             if tf_seconds:
                 where_clauses.append("timestamp >= ?")
                 params.append(now_ts - tf_seconds)
-                
+
         usd_amount_clause = "(CASE WHEN mint IN ('SOL', 'So11111111111111111111111111111111111111112') AND amount < 20 THEN amount * ? ELSE amount END)"
         if min_amount:
             try:
@@ -3289,7 +3543,7 @@ def get_token_wallet_data():
                 params.extend([sol_price, float(min_amount)])
             except ValueError:
                 pass
-                
+
         if max_amount:
             try:
                 where_clauses.append(f"{usd_amount_clause} <= ?")
@@ -3359,13 +3613,13 @@ def get_token_wallet_data():
 
         # Migrated filter
         if migrated == 'yes':
-            where_clauses.append("(LOWER(migration_status) LIKE '%migrated%' OR LOWER(platform) LIKE '%raydium%')")
+            where_clauses.append("(LOWER(migration_status) LIKE '%migrated%' OR LOWER(platform) LIKE '%raydium%' OR formatted_message LIKE '%Migrated: Yes%')")
         elif migrated == 'no':
-            where_clauses.append("(LOWER(migration_status) NOT LIKE '%migrated%' AND LOWER(platform) NOT LIKE '%raydium%')")
+            where_clauses.append("((LOWER(migration_status) LIKE '%not migrated%' OR formatted_message LIKE '%Migrated: No%') OR (LOWER(migration_status) NOT LIKE '%migrated%' AND LOWER(platform) NOT LIKE '%raydium%' AND (formatted_message NOT LIKE '%Migrated: Yes%' OR formatted_message IS NULL)))")
 
         # Token Name pattern / regex filter
         if token_name_pattern and token_name_pattern.strip() not in ('', '.*'):
-            pat = token_name_pattern.strip()
+            pat = token_name_pattern_for_sql(token_name_pattern)
             if token_name_mode == 'exclude':
                 where_clauses.append("NOT (token_name REGEXP ?)")
             else:
@@ -3374,12 +3628,14 @@ def get_token_wallet_data():
 
         # Word filter (drops tokens where name, reason, or message contains forbidden word)
         if word_filter:
-            wf_param = f"%{word_filter.strip().lower()}%"
-            where_clauses.append("(LOWER(token_name) NOT LIKE ? AND LOWER(reason) NOT LIKE ? AND LOWER(COALESCE(formatted_message, '')) NOT LIKE ?)")
-            params.extend([wf_param, wf_param, wf_param])
+            wf_words = [w.strip().lower() for w in re.split(r'[,|\n]+', word_filter) if w.strip()]
+            for w in wf_words:
+                wf_param = f"%{w}%"
+                where_clauses.append("(LOWER(token_name) NOT LIKE ? AND LOWER(reason) NOT LIKE ? AND LOWER(COALESCE(formatted_message, '')) NOT LIKE ?)")
+                params.extend([wf_param, wf_param, wf_param])
 
         where_str = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
-        
+
         with db_lock:
             conn = get_db()
             conn.create_function('parse_mc_usd', 1, parse_mc_usd)
@@ -3388,15 +3644,15 @@ def get_token_wallet_data():
             conn.create_function('parse_migration_age_minutes', 2, parse_migration_age_minutes)
             conn.create_function('regexp', 2, sqlite_regexp)
             cursor = conn.cursor()
-            
+
             # Count total matching records
             count_query = f"SELECT COUNT(*) FROM wallet_payments{where_str}"
             total_count = cursor.execute(count_query, params).fetchone()[0]
-            
+
             # Overall Stats (Volume in USD)
             usd_sum_clause = "COALESCE(SUM(CASE WHEN mint IN ('SOL', 'So11111111111111111111111111111111111111112') AND amount < 20 THEN amount * ? ELSE amount END), 0)"
             stats_query = f"""
-                SELECT 
+                SELECT
                     COUNT(*),
                     COUNT(CASE WHEN LOWER(status) = 'forwarded' THEN 1 END),
                     {usd_sum_clause},
@@ -3412,7 +3668,7 @@ def get_token_wallet_data():
                 'unique_tokens': stats_row[3] if stats_row else 0,
                 'sol_price': sol_price
             }
-            
+
             # Fetch Paginated Records
             data_query = f"""
                 SELECT id, tracked_address, sender_address, amount, mint, signature, timestamp,
@@ -3425,7 +3681,7 @@ def get_token_wallet_data():
             """
             fetch_params = list(params) + [limit, offset]
             rows = cursor.execute(data_query, fetch_params).fetchall()
-            
+
             rows_list = [dict(r) if isinstance(r, dict) else {
                 "id": r[0],
                 "tracked_address": r[1],
@@ -3463,7 +3719,7 @@ def get_token_wallet_data():
                 amount = float(item_dict.get('amount') or 0.0)
             except (ValueError, TypeError):
                 amount = 0.0
-            
+
             raw_msg = item_dict.get('formatted_message') or ''
             match_msg = re.search(r'DEX Payment:\s*\$?([\d,]+(?:\.\d+)?)\s*(?:USD)?', raw_msg, re.IGNORECASE)
             if match_msg:
@@ -3484,7 +3740,7 @@ def get_token_wallet_data():
 
             item_dict['amount_usd'] = round(amount_usd, 2)
             item_dict['currency'] = 'USD' if (mint in (USDC_MINT, USDT_MINT, 'USDC', 'USDT') or amount >= 20) else ('SOL' if mint in ('SOL', 'So11111111111111111111111111111111111111112') else 'TOKEN')
-                
+
             c_age = extract_creation_age_str(item_dict.get('age'), item_dict.get('formatted_message')) or item_dict.get('age') or '-'
             m_age = extract_migration_age_str(item_dict.get('migration_age'), item_dict.get('formatted_message')) or item_dict.get('migration_age') or '-'
             item_dict['creation_age'] = c_age
@@ -3529,7 +3785,7 @@ def get_token_wallet_data():
             if not item_dict.get('token_name'):
                 item_dict['token_name'] = "SOL" if mint == "SOL" else (token_metadata_cache.get(mint) or (mint[:6] + '...' if len(mint) > 10 else mint))
             results.append(item_dict)
-            
+
         total_pages = max(1, (total_count + limit - 1) // limit)
         return jsonify({
             "success": True,
@@ -3567,7 +3823,7 @@ def discover_payment_address_route():
         api_key = settings.get('helius_api_key')
         if not api_key:
             return jsonify({"success": False, "error": "Helius API Key not configured."})
-            
+
         # 1. Fetch active Solana tokens from DexScreener profiles & boosts to find fresh CTO orders
         fresh_candidates = []
         try:
@@ -3576,7 +3832,7 @@ def discover_payment_address_route():
             p_data = p_res.json() if p_res.status_code == 200 else []
             b_res = requests.get("https://api.dexscreener.com/token-boosts/latest/v1", timeout=5)
             b_data = b_res.json() if b_res.status_code == 200 else []
-            
+
             seen_cas = set()
             feed_tokens = []
             for item in p_data + b_data:
@@ -3585,7 +3841,7 @@ def discover_payment_address_route():
                 if ca and chain and chain.lower() == "solana" and ca not in seen_cas:
                     seen_cas.add(ca)
                     feed_tokens.append(ca)
-            
+
             # Check orders for up to 15 latest tokens from the feed to find a recent payment
             for ca in feed_tokens[:15]:
                 try:
@@ -3602,7 +3858,7 @@ def discover_payment_address_route():
                     print(f"[HELIUS DISCOVERY] Error checking feed token orders for {ca}: {ex}")
         except Exception as ex:
             print(f"[HELIUS DISCOVERY] Error fetching DexScreener profiles/boosts: {ex}")
-            
+
         # Sort fresh candidates by paymentTimestamp descending (newest first)
         fresh_candidates.sort(key=lambda x: x["payment_timestamp"], reverse=True)
         print(f"[HELIUS DISCOVERY] Discovered {len(fresh_candidates)} candidate CTO orders in live feed.")
@@ -3625,7 +3881,7 @@ def discover_payment_address_route():
                 })
         except Exception as ex:
             print(f"[HELIUS DISCOVERY] Error fetching database candidates: {ex}")
-            
+
         # 3. Combine list, prioritize live feed candidates (skipping duplicates)
         candidates_to_try = []
         seen_ca_try = set()
@@ -3633,21 +3889,21 @@ def discover_payment_address_route():
             if c["ca"] not in seen_ca_try:
                 seen_ca_try.add(c["ca"])
                 candidates_to_try.append(c)
-                
+
         for c in db_candidates:
             if c["ca"] not in seen_ca_try:
                 seen_ca_try.add(c["ca"])
                 candidates_to_try.append(c)
-                
+
         if not candidates_to_try:
             return jsonify({"success": False, "error": "No candidate CTO orders found in live feed or database."})
-            
+
         # Try finding the address from the candidates
         attempts = []
         for c in candidates_to_try:
             ca = c["ca"]
             payment_ts = c["payment_timestamp"]
-            
+
             print(f"[HELIUS DISCOVERY] Attempting to discover DexScreener payment address using token {ca} at timestamp {payment_ts}...")
             discovered_addr, reason = discover_payment_wallet_logic(ca, payment_ts, api_key)
             if discovered_addr:
@@ -3655,7 +3911,7 @@ def discover_payment_address_route():
                 return jsonify({"success": True, "address": discovered_addr})
             else:
                 attempts.append(f"Token {ca[:8]}: {reason}")
-                
+
         error_msg = f"Could not identify payment address from candidates. Attempts logs: " + " | ".join(attempts)
         print(f"[HELIUS DISCOVERY] FAILURE: {error_msg}")
         return jsonify({"success": False, "error": error_msg})
@@ -3671,7 +3927,7 @@ async def verify_and_forward_cto_token(ca, amount_usd=0.0, payer_address=None):
         test_mode = settings.get('cto_test_mode', 'false').lower() == 'true'
         fetch_approved = settings.get('cto_fetch_approved', 'true').lower() == 'true'
         fetch_pending = settings.get('cto_fetch_pending', 'true').lower() == 'true'
-        
+
         orders_url = f"https://api.dexscreener.com/orders/v1/solana/{ca}"
         orders_res = await asyncio.to_thread(requests.get, orders_url, timeout=10)
         if orders_res.status_code == 200:
@@ -3681,14 +3937,14 @@ async def verify_and_forward_cto_token(ca, amount_usd=0.0, payer_address=None):
                 o_status = o.get("status", "").lower()
                 o_type = o.get("type", "")
                 o_pay_ts = o.get("paymentTimestamp")
-                
+
                 is_match = False
                 # Accept all paid order types (profiles, ads, CTOs)
                 if o_status == "approved" and fetch_approved:
                     is_match = True
                 elif o_status == "processing" and fetch_pending:
                     is_match = True
-                        
+
                 if is_match:
                     item = {
                         "tokenAddress": ca,
@@ -3709,7 +3965,7 @@ def helius_webhook():
         transactions = request.json
         if not isinstance(transactions, list):
             return jsonify({"status": "ignored"}), 400
-            
+
         # Debug: Save raw webhook payload to a local file for inspection
         try:
             import json
@@ -3717,26 +3973,26 @@ def helius_webhook():
                 json.dump(transactions, f, indent=2)
         except Exception as e:
             print(f"[HELIUS WEBHOOK] Error saving raw webhook data: {e}", flush=True)
-            
+
         settings = get_settings()
         is_auto = str(settings.get('cto_auto_scan', 'false')).lower() == 'true'
         if not is_auto:
             print("[HELIUS WEBHOOK] Ignored webhook transaction because live scan is inactive.", flush=True)
             return jsonify({"status": "ignored", "reason": "live scan inactive"}), 200
-            
+
         monitored_address = settings.get('cto_dex_payment_address')
         tracked_address_str = settings.get('tracked_wallet_address')
-        
+
         # Build lists of addresses we care about
         tracked_addresses = []
         if tracked_address_str:
             tracked_addresses = [a.strip() for a in tracked_address_str.split(',') if len(a.strip()) >= 32]
-            
+
         for tx in transactions:
             sig = tx.get("signature")
             if not sig:
                 continue
-                
+
             # 1. Process tracked wallet payments
             for tracked_address in tracked_addresses:
                 # Process native transfers
@@ -3749,32 +4005,9 @@ def helius_webhook():
                         sol_price = get_token_price_usd("SOL")
                         amount_usd = amount_sol * sol_price if sol_price else 0.0
                         timestamp = tx.get("timestamp", int(time.time()))
-                        with db_lock:
-                            conn = get_db()
-                            cursor = conn.cursor()
-                            try:
-                                cursor.execute('''
-                                    INSERT INTO wallet_payments (tracked_address, sender_address, amount, mint, signature, timestamp)
-                                    VALUES (?, ?, ?, ?, ?, ?)
-                                ''', (tracked_address, from_addr, amount_sol, "SOL", sig, timestamp))
-                                conn.commit()
-                                if supabase_client:
-                                    push_to_supabase_table('wallet_payments', {
-                                        'tracked_address': tracked_address,
-                                        'sender_address': from_addr,
-                                        'amount': amount_sol,
-                                        'mint': "SOL",
-                                        'signature': sig,
-                                        'timestamp': timestamp
-                                    })
-                                print(f"[HELIUS WEBHOOK] Logged real-time tracked native payment: {amount_sol} SOL from {from_addr} to {tracked_address}", flush=True)
-                                run_async_coroutine(process_payment_and_forward(from_addr, timestamp, amount_usd, signature=sig, tracked_address=tracked_address))
-                            except Exception as e:
-                                if "unique" in str(e).lower() or "integrity" in str(e).lower():
-                                    pass
-                                else:
-                                    print(f"[HELIUS WEBHOOK] Error inserting native transfer: {e}", flush=True)
-                                
+                        print(f"[HELIUS WEBHOOK] Detected real-time tracked native payment: {amount_sol} SOL from {from_addr} to {tracked_address}. Tracing payer history...", flush=True)
+                        run_async_coroutine(process_payment_and_forward(from_addr, timestamp, amount_usd, signature=sig, tracked_address=tracked_address, amount=amount_sol, mint="SOL"))
+
                 # Process token transfers
                 for transfer in tx.get('tokenTransfers', []):
                     to_addr = transfer.get('toUserAccount')
@@ -3785,67 +4018,46 @@ def helius_webhook():
                         token_price = get_token_price_usd(mint)
                         amount_usd = token_amount * token_price if token_price else 0.0
                         timestamp = tx.get("timestamp", int(time.time()))
-                        with db_lock:
-                            conn = get_db()
-                            cursor = conn.cursor()
-                            try:
-                                cursor.execute('''
-                                    INSERT INTO wallet_payments (tracked_address, sender_address, amount, mint, signature, timestamp)
-                                    VALUES (?, ?, ?, ?, ?, ?)
-                                ''', (tracked_address, from_addr, token_amount, mint, sig, timestamp))
-                                conn.commit()
-                                if supabase_client:
-                                    push_to_supabase_table('wallet_payments', {
-                                        'tracked_address': tracked_address,
-                                        'sender_address': from_addr,
-                                        'amount': token_amount,
-                                        'mint': mint,
-                                        'signature': sig,
-                                        'timestamp': timestamp
-                                    })
-                                print(f"[HELIUS WEBHOOK] Logged real-time tracked token payment: {token_amount} {mint[:8]}... from {from_addr} to {tracked_address}", flush=True)
-                                
-                                # If it is a custom token, forward it directly. Otherwise trace payer history.
-                                if mint not in ('So11111111111111111111111111111111111111112', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'Es9vMFrzaypmko8L7jV8YW156HCfaNuDY8jNH5KB3C1d', 'SOL'):
-                                    print(f"[HELIUS WEBHOOK] Custom token detected: {mint}. Forwarding directly to filters.", flush=True)
-                                    target = settings.get('cto_target_channel', '')
-                                    wf_id = settings.get('cto_workflow_id')
-                                    t_mode = settings.get('cto_test_mode', 'false').lower() == 'true'
-                                    item = {
-                                        "tokenAddress": mint,
-                                        "order_type": "Tracked Wallet Swap",
-                                        "order_status": "detected",
-                                        "payment_timestamp": timestamp * 1000,
-                                        "amount_usd": amount_usd,
-                                        "signature": sig,
-                                        "payer_address": from_addr,
-                                        "tracked_address": tracked_address
-                                    }
-                                    run_async_coroutine(process_single_cto_item(item, target, wf_id, t_mode))
-                                else:
-                                    run_async_coroutine(process_payment_and_forward(from_addr, timestamp, amount_usd, signature=sig, tracked_address=tracked_address))
-                            except Exception as e:
-                                if "unique" in str(e).lower() or "integrity" in str(e).lower():
-                                    pass
-                                else:
-                                    print(f"[HELIUS WEBHOOK] Error inserting token transfer: {e}", flush=True)
-                                
+
+                        # If it is a custom token, forward it directly. Otherwise trace payer history.
+                        if mint not in ('So11111111111111111111111111111111111111112', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'Es9vMFrzaypmko8L7jV8YW156HCfaNuDY8jNH5KB3C1d', 'SOL'):
+                            print(f"[HELIUS WEBHOOK] Custom token detected: {mint}. Forwarding directly to filters.", flush=True)
+                            target = settings.get('cto_target_channel', '')
+                            wf_id = settings.get('cto_workflow_id')
+                            t_mode = settings.get('cto_test_mode', 'false').lower() == 'true'
+                            item = {
+                                "tokenAddress": mint,
+                                "order_type": "Tracked Wallet Swap",
+                                "order_status": "detected",
+                                "payment_timestamp": timestamp * 1000,
+                                "amount_usd": amount_usd,
+                                "amount": token_amount,
+                                "mint": mint,
+                                "signature": sig,
+                                "payer_address": from_addr,
+                                "tracked_address": tracked_address
+                            }
+                            run_async_coroutine(process_single_cto_item(item, target, wf_id, t_mode))
+                        else:
+                            print(f"[HELIUS WEBHOOK] Detected base token payment: {token_amount} {mint[:8]}... from {from_addr} to {tracked_address}. Tracing payer history...", flush=True)
+                            run_async_coroutine(process_payment_and_forward(from_addr, timestamp, amount_usd, signature=sig, tracked_address=tracked_address, amount=token_amount, mint=mint))
+
             # 2. Process DexScreener monitored payment address
             if monitored_address:
                 is_payment = False
-                
+
                 # Check if this transaction sent tokens/SOL to our monitored address
                 for transfer in tx.get('tokenTransfers', []):
                     if transfer.get('toUserAccount') == monitored_address:
                         is_payment = True
                         break
-                        
+
                 if not is_payment:
                     for transfer in tx.get('nativeTransfers', []):
                         if transfer.get('toUserAccount') == monitored_address:
                             is_payment = True
                             break
-                            
+
                 if is_payment:
                     # Find payer address
                     payer_address = None
@@ -3858,14 +4070,14 @@ def helius_webhook():
                             if transfer.get('toUserAccount') == monitored_address:
                                 payer_address = transfer.get('fromUserAccount')
                                 break
-                                
+
                     # Extract any referenced base token mint addresses, excluding native assets & USDC
                     mints = set()
                     for tc in tx.get('tokenBalanceChanges', []):
                         mints.add(tc.get('mint'))
                     for tt in tx.get('tokenTransfers', []):
                         mints.add(tt.get('mint'))
-                        
+
                     excluded_mints = {
                         'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', # USDC
                         'So11111111111111111111111111111111111111112', # WSOL
@@ -3873,9 +4085,9 @@ def helius_webhook():
                         monitored_address
                     }
                     base_tokens = [m for m in mints if m and m not in excluded_mints]
-                    
+
                     print(f"[HELIUS WEBHOOK] DexScreener payment transaction detected: {sig} | Discovered tokens: {base_tokens}", flush=True)
-                    
+
                     # Calculate amount_usd for DexScreener payment if possible
                     amount_usd = 0.0
                     for transfer in tx.get('tokenTransfers', []):
@@ -3905,7 +4117,7 @@ def helius_webhook():
                         tx_ts = tx.get("timestamp", int(time.time()))
                         print(f"[HELIUS WEBHOOK] No base tokens in payment tx. Triggering payer history search for {payer_address}...", flush=True)
                         run_async_coroutine(process_payment_payer_history(payer_address, tx_ts, api_key, amount_usd))
-                        
+
         return jsonify({"status": "success"}), 200
     except Exception as e:
         print(f"[HELIUS WEBHOOK] Error handling webhook: {e}", flush=True)
@@ -3914,37 +4126,37 @@ def helius_webhook():
 async def helius_polling_loop():
     processed_signatures = set()
     print("[HELIUS POLLING] Started fallback transaction scanning loop.", flush=True)
-    
+
     while True:
         try:
             settings = get_settings()
             is_auto = str(settings.get('cto_auto_scan', 'false')).lower() == 'true'
             poll_enabled = settings.get('helius_poll_enabled', 'false').lower() == 'true'
             poll_interval = int(settings.get('polling_interval', '10'))
-            
+
             if not is_auto or not poll_enabled:
                 await asyncio.sleep(poll_interval)
                 continue
-                
+
             api_key = settings.get('helius_api_key')
             payment_address = settings.get('cto_dex_payment_address')
-            
+
             if api_key and payment_address:
                 # Check signatures first via standard RPC (1 credit cost)
                 sigs = await get_latest_signatures(payment_address, api_key, limit=10)
-                
+
                 # Initialize set on startup if empty
                 if not processed_signatures:
                     for s in sigs:
                         processed_signatures.add(s)
                     await asyncio.sleep(poll_interval)
                     continue
-                    
+
                 has_new = any(s not in processed_signatures for s in sigs)
                 if not has_new:
                     await asyncio.sleep(poll_interval)
                     continue
-                    
+
                 # Fetch parsed transaction history ONLY when a new transaction is detected
                 url = f"https://api.helius.xyz/v0/addresses/{payment_address}/transactions?api-key={api_key}"
                 r = await asyncio.to_thread(requests.get, url, timeout=10)
@@ -3956,34 +4168,34 @@ async def helius_polling_loop():
                             sig = tx.get("signature")
                             if not sig:
                                 continue
-                                
+
                             if sig in processed_signatures:
                                 continue
-                            
+
                             processed_signatures.add(sig)
                             if len(processed_signatures) > 2000:
                                 processed_signatures.clear()
                                 processed_signatures.add(sig)
-                                
+
                             # Extract potential token mints from transfers & balance changes
                             mints = set()
                             for tc in tx.get('tokenBalanceChanges', []):
                                 mints.add(tc.get('mint'))
                             for tt in tx.get('tokenTransfers', []):
                                 mints.add(tt.get('mint'))
-                                
+
                             excluded_mints = {
                                 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', # USDC
                                 'So11111111111111111111111111111111111111112', # WSOL
                                 'Es9vMFrzaypmko8L7jV8YW156HCfaNuDY8jNH5KB3C1d', # USDT
                                 payment_address
                             }
-                            
+
                             # Find payer address if it is a payment to payment_address
                             is_payment = False
                             payer_address = None
                             amount_usd = 0.0
-                            
+
                             for transfer in tx.get('tokenTransfers', []):
                                 if transfer.get('toUserAccount') == payment_address:
                                     is_payment = True
@@ -4005,24 +4217,24 @@ async def helius_polling_loop():
                                         sol_price = get_token_price_usd("SOL")
                                         amount_usd += amount_sol * sol_price if sol_price else 0.0
                                         break
-                                        
+
                             has_custom_token = False
                             for mint in mints:
                                 if mint and mint not in excluded_mints:
                                     new_tokens_to_check.add(mint)
                                     has_custom_token = True
-                                    
+
                             if not has_custom_token and is_payment and payer_address:
                                 tx_ts = tx.get("timestamp", int(time.time()))
                                 print(f"[HELIUS POLLING] No base tokens in payment tx. Triggering payer history search for {payer_address}...", flush=True)
                                 asyncio.create_task(process_payment_payer_history(payer_address, tx_ts, api_key, amount_usd))
-                                    
+
                         for token in new_tokens_to_check:
                             print(f"[HELIUS POLLING] Instantly verifying token {token}...", flush=True)
                             await verify_and_forward_cto_token(token, amount_usd, payer_address=payer_address)
         except Exception as e:
             print(f"[HELIUS POLLING] Loop error: {e}", flush=True)
-            
+
         await asyncio.sleep(poll_interval)
 
 async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
@@ -4030,25 +4242,25 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
         settings = get_settings()
         fetch_approved = settings.get('cto_fetch_approved', 'true').lower() == 'true'
         fetch_pending = settings.get('cto_fetch_pending', 'true').lower() == 'true'
-        
+
         # Fallback for old databases
         if 'cto_fetch_approved' not in settings and 'cto_fetch_pending' not in settings:
             scan_mode = settings.get('cto_scan_mode', 'both')
             fetch_approved = scan_mode in ('approved', 'both')
             fetch_pending = scan_mode in ('pending', 'both')
-        
+
         tokens_to_process = []
-        
+
         # Fetch candidate tokens from profiles & boosts
         try:
             # Fetch token profiles
             profiles_res = await asyncio.to_thread(requests.get, "https://api.dexscreener.com/token-profiles/latest/v1")
             profiles = profiles_res.json() if profiles_res.status_code == 200 else []
-            
+
             # Fetch token boosts
             boosts_res = await asyncio.to_thread(requests.get, "https://api.dexscreener.com/token-boosts/latest/v1")
             boosts = boosts_res.json() if boosts_res.status_code == 200 else []
-            
+
             # Extract candidate tokens (Solana only)
             candidates = {}
             for p in profiles:
@@ -4061,14 +4273,14 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
                 chain = b.get("chainId")
                 if addr and chain and chain.lower() == "solana":
                     candidates[addr] = chain
-                    
+
             # Check orders for each candidate token
             now = time.time()
             for addr, chain in candidates.items():
                 cache_key = (chain, addr)
                 if not test_mode and now - orders_check_cache.get(cache_key, 0) < 120:
                     continue
-                
+
                 orders_check_cache[cache_key] = now
                 orders_url = f"https://api.dexscreener.com/orders/v1/{chain}/{addr}"
                 orders_res = await asyncio.to_thread(requests.get, orders_url)
@@ -4079,14 +4291,14 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
                         o_status = o.get("status", "").lower()
                         o_type = o.get("type", "")
                         o_pay_ts = o.get("paymentTimestamp")
-                        
+
                         is_match = False
                         # Accept all paid order types (profiles, ads, CTOs)
                         if o_status == "approved" and fetch_approved:
                             is_match = True
                         elif o_status == "processing" and fetch_pending:
                             is_match = True
-                            
+
                         if is_match:
                             tokens_to_process.append({
                                 "tokenAddress": addr,
@@ -4099,7 +4311,7 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
             print(f"Error fetching pending community takeovers/orders: {e}", flush=True)
 
         results = []
-        
+
         # Limit processing to avoid timeouts
         seen_in_batch = set()
         for item in tokens_to_process[:20]:
@@ -4109,23 +4321,23 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
             payment_timestamp = item.get("payment_timestamp")
             if not ca:
                 continue
-                
+
             batch_key = (ca, order_type, payment_timestamp, order_status)
             if batch_key in seen_in_batch:
                 continue
             seen_in_batch.add(batch_key)
-            
+
             token_info = await process_single_cto_item(item, target_channel, workflow_id, test_mode)
             if token_info:
                 results.append(token_info)
-        
+
         # Flushed realtime summary for production console logging
         scanned_count = len(results)
         passed_count = sum(1 for r in results if r.get("status") == "passed")
         duplicate_count = sum(1 for r in results if r.get("status") == "duplicate")
         dropped_count = sum(1 for r in results if r.get("status") == "dropped")
         print(f"[CTO SCANNER] Done. Scanned: {scanned_count} | Forwarded: {passed_count} | Duplicates: {duplicate_count} | Dropped: {dropped_count}", flush=True)
-        
+
         db_results = []
         try:
             allowed_statuses = []
@@ -4133,15 +4345,15 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
                 allowed_statuses.append('approved')
             if fetch_pending:
                 allowed_statuses.append('processing')
-            
+
             if allowed_statuses:
                 placeholders = ','.join('?' for _ in allowed_statuses)
                 query = f'''
-                    SELECT ca, name, platform, market_cap, age, 
-                           perf_5m, perf_1h, perf_6h, perf_24h, 
+                    SELECT ca, name, platform, market_cap, age,
+                           perf_5m, perf_1h, perf_6h, perf_24h,
                            status, dex_url, migration_status, signal_type,
                            payment_timestamp, order_status, reason
-                    FROM cto_signals 
+                    FROM cto_signals
                     WHERE signal_type = 'communityTakeover' AND order_status IN ({placeholders})
                     ORDER BY id DESC LIMIT 50
                 '''
@@ -4176,15 +4388,15 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
         # Merge new scan results and database results
         merged_results = list(results)
         merged_keys = {(r["ca"], r["signal_type"], r.get("payment_timestamp"), r.get("order_status")) for r in results}
-        
+
         for r in db_results:
             key = (r["ca"], r["signal_type"], r.get("payment_timestamp"), r.get("order_status"))
             if key not in merged_keys:
                 merged_results.append(r)
                 merged_keys.add(key)
-                
+
         return merged_results
-        
+
     except Exception as e:
         import traceback
         print(f"Auto scan error: {traceback.format_exc()}")
@@ -4196,14 +4408,14 @@ def scan_cto():
     target_channel = data.get('target_channel')
     workflow_id = data.get('workflow_id')
     test_mode = data.get('test_mode', False)
-    
+
     if not tg_client or not telethon_loop:
         return jsonify({"success": False, "error": "Telegram client not ready"})
 
     try:
         results = asyncio.run_coroutine_threadsafe(perform_cto_scan(target_channel, workflow_id, test_mode), telethon_loop).result(timeout=60)
         return jsonify({"success": True, "results": results})
-        
+
     except Exception as e:
         import traceback
         return jsonify({"success": False, "error": str(e), "trace": traceback.format_exc()})
@@ -4216,20 +4428,20 @@ async def cto_auto_scanner_loop():
             is_auto = str(settings.get('cto_auto_scan', 'false')).lower() == 'true'
             target = settings.get('cto_target_channel', '')
             workflow_id = settings.get('cto_workflow_id')
-            
+
             try:
                 interval = int(settings.get('cto_scan_interval', 60))
                 if interval < 2:  # Safety boundary
                     interval = 2
             except (ValueError, TypeError):
                 interval = 60
-                
+
             if is_auto and tg_client and await tg_client.is_user_authorized():
                 print(f"Running auto CTO scan (Interval: {interval}s)...", flush=True)
                 await perform_cto_scan(target, workflow_id)
         except Exception as e:
             print(f"Error in cto_auto_scanner_loop: {e}", flush=True)
-            
+
         await asyncio.sleep(interval)
 
 def run_flask_app():
@@ -4255,36 +4467,36 @@ def register_handlers(client):
     async def handler(event):
         workflows = get_workflows()
         chat = await event.get_chat()
-        
+
         # Determine actual chat ID
         actual_chat_id = ""
         if chat:
             actual_chat_id = str(chat.id)
         else:
             actual_chat_id = str(event.chat_id)
-            
+
         # Normalize for reliable matching
         normalized_actual_id = normalize_channel_id(actual_chat_id)
-            
+
         chat_username = getattr(chat, 'username', '') or ''
-        
+
         print(f"\n--- [NEW MESSAGE] ---")
         print(f"From Chat ID: '{actual_chat_id}' (normalized: '{normalized_actual_id}')")
         print(f"From Username: '{chat_username}'")
         print(f"Message Text: {repr(event.text[:200] if event.text else '')}")
-        
+
         for wf in workflows:
             if not wf.get('is_active'):
                 continue
-                
+
             s_username = (wf.get('source_channel') or '').replace('@', '')
             s_id = str(wf.get('source_channel_id') or '').strip()
             normalized_s_id = normalize_channel_id(s_id) if s_id else ''
-            
+
             print(f"  Checking Workflow '{wf.get('name')}':")
             print(f"    Expected Source ID: '{s_id}' (normalized: '{normalized_s_id}')")
             print(f"    Expected Source Username: '{s_username}'")
-            
+
             match = False
             # Match by normalized ID (handles -100 prefix mismatch)
             if normalized_s_id and normalized_actual_id == normalized_s_id:
@@ -4293,7 +4505,7 @@ def register_handlers(client):
             elif s_username and chat_username and chat_username.lower() == s_username.lower():
                 match = True
                 print("    -> Match by Username!")
-                
+
             # If the user saved a channel/chat NAME instead of username in the 'source_channel' field
             # We can also check if the name matches the chat title or user display name!
             chat_title = getattr(chat, 'title', '') or ''
@@ -4304,22 +4516,22 @@ def register_handlers(client):
                         chat_title += f" {chat.last_name}"
                 elif hasattr(chat, 'username') and chat.username:
                     chat_title = chat.username
-            
+
             if not match and chat_title and s_username and chat_title.lower() == s_username.lower():
                 match = True
                 print("    -> Match by Chat Title/Name!")
-            
+
             if match:
                 print(f"    Proceeding to process message with {len(wf['rules'])} rules...")
                 modified_text, dropped, reason = process_message_logic(event.text, wf['rules'])
-                
+
                 if dropped:
                     print(f"    Message dropped due to filter rules. Reason: {reason}")
                 elif modified_text:
                     t_username = wf.get('target_channel') or ''
                     t_id = str(wf.get('target_channel_id') or '').strip()
                     target = t_id if t_id else t_username
-                    
+
                     if target:
                         print(f"    Sending to target: '{target}'")
                         try:
@@ -4334,22 +4546,22 @@ def register_handlers(client):
 async def main():
     global telethon_loop, tg_client, current_api_id, current_api_hash, handlers_registered
     telethon_loop = asyncio.get_running_loop()
-    
+
     # Start Flask dashboard in background immediately so health checks pass
     flask_thread = threading.Thread(target=run_flask_app, daemon=True)
     flask_thread.start()
-    
+
     print("Initializing Database...")
     init_db()
-    
+
     print("Waiting for Telegram settings...")
-    
+
     # Start auto-scanner loops
     # asyncio.create_task(cto_auto_scanner_loop())
     asyncio.create_task(helius_polling_loop())
     asyncio.create_task(wallet_tracker_polling_loop())
     asyncio.create_task(supabase_sync_loop())
-    
+
     try:
         while True:
             try:
@@ -4357,7 +4569,7 @@ async def main():
                 settings = get_settings()
                 api_id = str(settings.get('api_id', '')).strip()
                 api_hash = str(settings.get('api_hash', '')).strip()
-                
+
                 session_path = 'userbot_session'
                 if PERSISTENT_DATA_DIR:
                     session_path = os.path.join(PERSISTENT_DATA_DIR, 'userbot_session')
@@ -4372,13 +4584,13 @@ async def main():
                     session_file = session_path + '.session'
                     if os.path.exists(session_file):
                         os.remove(session_file)
-                    
+
                     with db_lock:
                         conn = get_db()
                         cursor = conn.cursor()
                         cursor.execute("DELETE FROM settings WHERE key IN ('phone_code_hash', 'telegram_string_session')")
                         conn.commit()
-                    
+
                     reset_requested = False
                     print("Reset complete.")
                     continue
@@ -4404,7 +4616,7 @@ async def main():
                     try:
                         current_api_id = api_id
                         current_api_hash = api_hash
-                        
+
                         # Retrieve saved string session if available
                         string_session_val = settings.get('telegram_string_session', '').strip()
                         if string_session_val:
@@ -4413,7 +4625,7 @@ async def main():
                         else:
                             print("No saved session in database. Using file-based session...")
                             tg_client = TelegramClient(session_path, int(api_id), api_hash)
-                            
+
                         await tg_client.connect()
                     except Exception as e:
                         print(f"Failed to initialize Telegram Client: {e}")
@@ -4423,7 +4635,7 @@ async def main():
 
                 if await tg_client.is_user_authorized():
                     print("Userbot is authorized and running!")
-                    
+
                     # Auto-persist session to database if not already saved
                     string_session_val = settings.get('telegram_string_session', '').strip()
                     if not string_session_val:
@@ -4438,7 +4650,7 @@ async def main():
                                 print("Successfully persisted Telegram session string to database settings!")
                         except Exception as e:
                             print(f"Error persisting session string: {e}")
-                            
+
                     if not handlers_registered:
                         register_handlers(tg_client)
                         handlers_registered = True

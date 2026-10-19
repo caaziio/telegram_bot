@@ -506,6 +506,7 @@
                                 <option value="forwarded">Forwarded</option>
                                 <option value="skipped">Skipped</option>
                                 <option value="dropped">Dropped</option>
+                                <option value="send_failed">Send Failed</option>
                                 <option value="detected">Detected</option>
                             </select>
                         </div>
@@ -665,7 +666,7 @@
                     <div style="display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap; padding-top: 0.5rem;">
                         <div style="display: flex; gap: 1.25rem; align-items: center; flex-wrap: wrap;">
                             <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-muted); cursor: pointer;">
-                                <input type="checkbox" id="td-enriched-only" onchange="loadTokenWalletData(1)" style="accent-color: var(--accent-color); width: 16px; height: 16px; cursor: pointer;">
+                                <input type="checkbox" id="td-enriched-only" onchange="loadTokenWalletData(1)" style="accent-color: var(--accent-color); width: 16px; height: 16px; cursor: pointer;" checked>
                                 <span>Show Matched Tokens Only (Non-SOL)</span>
                             </label>
                             <span id="td-active-filters-count" style="font-size: 0.78rem; background: rgba(99, 102, 241, 0.15); color: #818cf8; padding: 2px 8px; border-radius: 12px; display: none;">0 filters active</span>
@@ -780,7 +781,7 @@
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #0ea5e9;" onclick="addRule('show_wallet')">+ Show Wallet</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #ef4444;" onclick="addRule('exclude_platform')">+ Exclude Platform</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #ec4899;" onclick="addRule('token_name')">+ Add Token Name</button>
-                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem;" onclick="addRule('filter')">+ Add Word Filter</button>
+                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #f43f5e;" onclick="addRule('filter')">+ Add Word Filter</button>
                             </div>
                         </div>
                     </div>
@@ -861,6 +862,6 @@
         const initialWorkflows = {{ workflows | tojson | safe }};
         const initialSettings = {{ settings | tojson | safe }};
     </script>
-    <script src="{{ url_for('static', filename='js/app.js') }}?v=32"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v=34"></script>
 </body>
 </html>
