@@ -532,6 +532,11 @@
                                 <option value="perf_6h_desc">Top 6h Gainers</option>
                                 <option value="perf_24h_desc">Top 24h Gainers</option>
                                 <option value="market_cap_desc">Highest Market Cap</option>
+                                <option value="liquidity_usd_desc">Highest Liquidity</option>
+                                <option value="volume_5m_desc">Highest 5m Volume</option>
+                                <option value="volume_1h_desc">Highest 1h Volume</option>
+                                <option value="volume_6h_desc">Highest 6h Volume</option>
+                                <option value="volume_24h_desc">Highest 24h Volume</option>
                                 <option value="age_asc">Youngest Creation Age</option>
                                 <option value="migration_age_asc">Youngest Migration Age</option>
                                 <option value="token_name_asc">Token Name (A-Z)</option>
@@ -580,6 +585,28 @@
                                     <input type="number" step="any" class="form-input" id="td-min-perf" placeholder="Min %" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
                                     <span style="color: var(--text-muted); font-size: 0.8rem;">to</span>
                                     <input type="number" step="any" class="form-input" id="td-max-perf" placeholder="Max %" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                </div>
+                            </div>
+
+                            <!-- Creation Age Rule -->
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Liquidity Range ($ USD)</label>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <input type="number" class="form-input" id="td-min-liquidity" placeholder="Min $" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                    <span style="color: var(--text-muted);">to</span>
+                                    <input type="number" class="form-input" id="td-max-liquidity" placeholder="Max $" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Volume Range ($ USD)</label>
+                                <div style="display: flex; gap: 4px; align-items: center;">
+                                    <select id="td-volume-tf" onchange="loadTokenWalletData(1)" style="width: 65px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 6px; font-size: 0.8rem;">
+                                        <option value="5m">5m</option><option value="1h">1h</option><option value="6h">6h</option><option value="24h" selected>24h</option>
+                                    </select>
+                                    <input type="number" class="form-input" id="td-min-volume" placeholder="Min $" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                    <span style="color: var(--text-muted);">to</span>
+                                    <input type="number" class="form-input" id="td-max-volume" placeholder="Max $" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
                                 </div>
                             </div>
 
@@ -704,6 +731,8 @@
                                     <th>Payment ($)</th>
                                     <th>Sender</th>
                                     <th>Market Cap</th>
+                                    <th>Liquidity</th>
+                                    <th>Volume (5m / 1h / 6h / 24h)</th>
                                     <th>Age (Create / Mig)</th>
                                     <th>5m</th>
                                     <th>1h</th>
@@ -716,7 +745,7 @@
                             </thead>
                             <tbody id="token-data-tbody">
                                 <tr>
-                                    <td colspan="14" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                                    <td colspan="16" style="text-align: center; padding: 3rem; color: var(--text-muted);">
                                         Loading token wallet data...
                                     </td>
                                 </tr>
@@ -776,6 +805,8 @@
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem;" onclick="addRule('token_age')">+ Add Token Age</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #8b5cf6;" onclick="addRule('market_cap')">+ Add Market Cap</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #f59e0b;" onclick="addRule('performance')">+ Add Performance</button>
+                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #14b8a6;" onclick="addRule('liquidity')">+ Add Liquidity</button>
+                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #0ea5e9;" onclick="addRule('volume')">+ Add Volume</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #10b981;" onclick="addRule('dex_payment')">+ Add DEX Payment</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #6366f1;" onclick="addRule('migrated')">+ Add Migration Filter</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #0ea5e9;" onclick="addRule('show_wallet')">+ Show Wallet</button>

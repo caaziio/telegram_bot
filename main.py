@@ -349,6 +349,7 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
         cols = [
             "id", "tracked_address", "sender_address", "amount", "mint", "signature", "timestamp",
             "token_name", "ca", "platform", "market_cap", "age", "perf_5m", "perf_1h", "perf_6h", "perf_24h",
+            "liquidity_usd", "volume_5m", "volume_1h", "volume_6h", "volume_24h",
             "dex_url", "migration_status", "status", "reason", "formatted_message", "created_at", "migration_age"
         ]
         col_str = ", ".join(cols)
@@ -406,6 +407,7 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                         stream_cur.execute("""
                             SELECT id, tracked_address, sender_address, amount, mint, signature, timestamp,
                                    token_name, ca, platform, market_cap, age, perf_5m, perf_1h, perf_6h, perf_24h,
+                                   liquidity_usd, volume_5m, volume_1h, volume_6h, volume_24h,
                                    dex_url, migration_status, status, reason, formatted_message, created_at, migration_age
                             FROM wallet_payments
                             WHERE id >= %s
@@ -428,14 +430,14 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                             for r in rows:
                                 rl = list(r)
                                 # Normalize migration_status if it is raw DETECTED or missing
-                                m_status = str(rl[17] or '')
-                                fmt_msg = str(rl[20] or '')
+                                m_status = str(rl[22] or '')
+                                fmt_msg = str(rl[25] or '')
                                 if 'migrated: yes' in fmt_msg.lower() or 'status: ✅ migrated' in fmt_msg.lower():
                                     if not m_status.lower().startswith('migrated') and not m_status.lower().startswith('✅ migrated'):
-                                        rl[17] = 'Migrated'
+                                        rl[22] = 'Migrated'
                                 elif 'migrated: no' in fmt_msg.lower():
                                     if m_status != 'Not Migrated':
-                                        rl[17] = 'Not Migrated'
+                                        rl[22] = 'Not Migrated'
 
                                 for i, v in enumerate(rl):
                                     if hasattr(v, 'isoformat'):
@@ -740,6 +742,11 @@ def init_db():
                 perf_1h REAL,
                 perf_6h REAL,
                 perf_24h REAL,
+                liquidity_usd REAL,
+                volume_5m REAL,
+                volume_1h REAL,
+                volume_6h REAL,
+                volume_24h REAL,
                 status TEXT,
                 dex_url TEXT,
                 migration_status TEXT,
@@ -835,6 +842,11 @@ def init_db():
                 perf_1h REAL,
                 perf_6h REAL,
                 perf_24h REAL,
+                liquidity_usd REAL,
+                volume_5m REAL,
+                volume_1h REAL,
+                volume_6h REAL,
+                volume_24h REAL,
                 dex_url TEXT,
                 migration_status TEXT,
                 status TEXT,
@@ -848,10 +860,20 @@ def init_db():
         for col_def in [
             'token_name TEXT', 'ca TEXT', 'platform TEXT', 'market_cap TEXT', 'age TEXT', 'migration_age TEXT',
             'perf_5m REAL', 'perf_1h REAL', 'perf_6h REAL', 'perf_24h REAL',
+            'liquidity_usd REAL', 'volume_5m REAL', 'volume_1h REAL', 'volume_6h REAL', 'volume_24h REAL',
             'dex_url TEXT', 'migration_status TEXT', 'status TEXT', 'reason TEXT', 'formatted_message TEXT'
         ]:
             try:
                 cursor.execute(f'ALTER TABLE wallet_payments ADD COLUMN {col_def}')
+            except Exception:
+                pass
+
+        for col_def in [
+            'liquidity_usd REAL', 'volume_5m REAL', 'volume_1h REAL',
+            'volume_6h REAL', 'volume_24h REAL'
+        ]:
+            try:
+                cursor.execute(f'ALTER TABLE cto_signals ADD COLUMN {col_def}')
             except Exception:
                 pass
 
@@ -1163,6 +1185,24 @@ def process_message_logic(text, rules, context=None):
                     return None, True, "Dropped by Market Cap Filter (Market Cap is Unknown)"
             except Exception as e:
                 return None, True, f"Dropped by Market Cap Filter (Error parsing: {e})"
+
+        elif rule_type in ('liquidity', 'volume'):
+            try:
+                min_value = float(rule.get('time_min')) if str(rule.get('time_min') or '').strip() else 0.0
+                max_value = float(rule.get('time_max')) if str(rule.get('time_max') or '').strip() else float('inf')
+                timeframe = (rule.get('search_text') or '24h').strip().lower()
+                label = 'Liquidity' if rule_type == 'liquidity' else f'{timeframe} Volume'
+                pattern = rf'{re.escape(label)}:\s*\$?([\d,.]+)([KMB]?)'
+                metric_match = re.search(pattern, text, re.IGNORECASE)
+                if not metric_match:
+                    return None, True, f"Dropped by {label} Filter ({label} is Unknown)"
+                actual = float(metric_match.group(1).replace(',', ''))
+                suffix = metric_match.group(2).upper()
+                actual *= {'K': 1_000, 'M': 1_000_000, 'B': 1_000_000_000}.get(suffix, 1)
+                if not (min_value <= actual <= max_value):
+                    return None, True, f"Dropped by {label} Filter (Allowed: ${min_value}-${max_value}, Found: ${actual})"
+            except Exception as e:
+                return None, True, f"Dropped by {rule_type.title()} Filter (Error parsing: {e})"
 
         # SHOW WALLET LOGIC
         elif rule_type == 'show_wallet':
@@ -1647,6 +1687,39 @@ def extract_best_price_change(pairs):
         h24 if h24 is not None else 0.0
     )
 
+def extract_pair_market_metrics(pair):
+    """Return liquidity and rolling USD volume for the selected Dexscreener pair."""
+    pair = pair or {}
+    liquidity = pair.get('liquidity') or {}
+    volume = pair.get('volume') or {}
+
+    def number(source, key):
+        try:
+            return float(source.get(key) or 0.0)
+        except (TypeError, ValueError, AttributeError):
+            return 0.0
+
+    return (
+        number(liquidity, 'usd'),
+        number(volume, 'm5'),
+        number(volume, 'h1'),
+        number(volume, 'h6'),
+        number(volume, 'h24'),
+    )
+
+def format_usd_metric(value):
+    try:
+        value = float(value or 0.0)
+    except (TypeError, ValueError):
+        value = 0.0
+    if value >= 1_000_000_000:
+        return f"${value / 1_000_000_000:.2f}B"
+    if value >= 1_000_000:
+        return f"${value / 1_000_000:.2f}M"
+    if value >= 1_000:
+        return f"${value / 1_000:.2f}K"
+    return f"${value:.2f}"
+
 async def check_token_migration(ca, pairs):
     """
     Checks if a token has migrated and identifies where it is right now.
@@ -1781,6 +1854,11 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
         "perf_1h": 0.0,
         "perf_6h": 0.0,
         "perf_24h": 0.0,
+        "liquidity_usd": 0.0,
+        "volume_5m": 0.0,
+        "volume_1h": 0.0,
+        "volume_6h": 0.0,
+        "volume_24h": 0.0,
         "status": "passed",
         "reason": "Passed and Sent!",
         "formatted_message": "",
@@ -1957,6 +2035,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
             age_migration_str = "0"
 
     perf_5m, perf_1h, perf_6h, perf_24h = extract_best_price_change(pairs)
+    liquidity_usd, volume_5m, volume_1h, volume_6h, volume_24h = extract_pair_market_metrics(primary_pair)
 
     payer_address = item.get("payer_address")
 
@@ -1982,6 +2061,11 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
     token_info["perf_1h"] = perf_1h
     token_info["perf_6h"] = perf_6h
     token_info["perf_24h"] = perf_24h
+    token_info["liquidity_usd"] = liquidity_usd
+    token_info["volume_5m"] = volume_5m
+    token_info["volume_1h"] = volume_1h
+    token_info["volume_6h"] = volume_6h
+    token_info["volume_24h"] = volume_24h
     token_info["dex_url"] = dex_url
 
     status_emoji_map = {
@@ -2021,6 +2105,12 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
            f"┃ ⚡ 1h: {perf_1h:+.2f}%\n"
            f"┃ 📉 6h: {perf_6h:+.2f}%\n"
            f"┃ 🟥 24h: {perf_24h:+.2f}%\n"
+           f"\n💧 LIQUIDITY & VOLUME\n"
+           f"┃ Liquidity: {format_usd_metric(liquidity_usd)}\n"
+           f"┃ 5m Volume: {format_usd_metric(volume_5m)}\n"
+           f"┃ 1h Volume: {format_usd_metric(volume_1h)}\n"
+           f"┃ 6h Volume: {format_usd_metric(volume_6h)}\n"
+           f"┃ 24h Volume: {format_usd_metric(volume_24h)}\n"
            f"━━━━━━━━━━━\n"
            f"📈 Chart: {dex_url}")
 
@@ -2109,12 +2199,14 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                 INSERT INTO cto_signals (
                     ca, name, platform, market_cap, age,
                     perf_5m, perf_1h, perf_6h, perf_24h,
+                    liquidity_usd, volume_5m, volume_1h, volume_6h, volume_24h,
                     status, dex_url, migration_status, signal_type,
                     payment_timestamp, order_status, reason
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 ca, project_name, chain_id, mc_str, age_creation_str,
                 perf_5m, perf_1h, perf_6h, perf_24h,
+                liquidity_usd, volume_5m, volume_1h, volume_6h, volume_24h,
                 db_status, dex_url, migration_status_formatted, order_type,
                 payment_timestamp, order_status, token_info.get("reason")
             ))
@@ -2154,6 +2246,11 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                 'perf_1h': perf_1h,
                 'perf_6h': perf_6h,
                 'perf_24h': perf_24h,
+                'liquidity_usd': liquidity_usd,
+                'volume_5m': volume_5m,
+                'volume_1h': volume_1h,
+                'volume_6h': volume_6h,
+                'volume_24h': volume_24h,
                 'dex_url': dex_url,
                 'migration_status': migration_status_formatted,
                 'status': db_status,
@@ -2168,8 +2265,9 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                             tracked_address, sender_address, amount, mint, signature, timestamp,
                             token_name, ca, platform, market_cap, age, migration_age,
                             perf_5m, perf_1h, perf_6h, perf_24h, dex_url, migration_status,
+                            liquidity_usd, volume_5m, volume_1h, volume_6h, volume_24h,
                             status, reason, formatted_message
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(signature) DO UPDATE SET
                             tracked_address=COALESCE(excluded.tracked_address, wallet_payments.tracked_address),
                             sender_address=COALESCE(excluded.sender_address, wallet_payments.sender_address),
@@ -2184,6 +2282,11 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                             perf_1h=excluded.perf_1h,
                             perf_6h=excluded.perf_6h,
                             perf_24h=excluded.perf_24h,
+                            liquidity_usd=excluded.liquidity_usd,
+                            volume_5m=excluded.volume_5m,
+                            volume_1h=excluded.volume_1h,
+                            volume_6h=excluded.volume_6h,
+                            volume_24h=excluded.volume_24h,
                             dex_url=excluded.dex_url,
                             migration_status=excluded.migration_status,
                             status=excluded.status,
@@ -2193,6 +2296,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                         tracked_val, payer, amt_val, mint_val, sig, ts_val,
                         project_name, ca, chain_id, mc_str, age_creation_str, age_migration_str,
                         perf_5m, perf_1h, perf_6h, perf_24h, dex_url, migration_status_formatted,
+                        liquidity_usd, volume_5m, volume_1h, volume_6h, volume_24h,
                         db_status, token_info.get("reason"), send_text
                     ))
                 elif payer:
@@ -2200,10 +2304,10 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                     if existing:
                         cursor.execute("""
                             UPDATE wallet_payments
-                            SET token_name=?, ca=?, platform=?, market_cap=?, age=?, migration_age=?, perf_5m=?, perf_1h=?, perf_6h=?, perf_24h=?, dex_url=?, migration_status=?, status=?, reason=?, formatted_message=?
+                            SET token_name=?, ca=?, platform=?, market_cap=?, age=?, migration_age=?, perf_5m=?, perf_1h=?, perf_6h=?, perf_24h=?, liquidity_usd=?, volume_5m=?, volume_1h=?, volume_6h=?, volume_24h=?, dex_url=?, migration_status=?, status=?, reason=?, formatted_message=?
                             WHERE id=?
                         """, (
-                            project_name, ca, chain_id, mc_str, age_creation_str, age_migration_str, perf_5m, perf_1h, perf_6h, perf_24h, dex_url, migration_status_formatted, db_status, token_info.get("reason"), send_text, existing[0]
+                            project_name, ca, chain_id, mc_str, age_creation_str, age_migration_str, perf_5m, perf_1h, perf_6h, perf_24h, liquidity_usd, volume_5m, volume_1h, volume_6h, volume_24h, dex_url, migration_status_formatted, db_status, token_info.get("reason"), send_text, existing[0]
                         ))
                     else:
                         cursor.execute("""
@@ -2211,12 +2315,14 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                                 tracked_address, sender_address, amount, mint, signature, timestamp,
                                 token_name, ca, platform, market_cap, age, migration_age,
                                 perf_5m, perf_1h, perf_6h, perf_24h, dex_url, migration_status,
+                                liquidity_usd, volume_5m, volume_1h, volume_6h, volume_24h,
                                 status, reason, formatted_message
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
                             tracked_val, payer, amt_val, mint_val, None, ts_val,
                             project_name, ca, chain_id, mc_str, age_creation_str, age_migration_str,
                             perf_5m, perf_1h, perf_6h, perf_24h, dex_url, migration_status_formatted,
+                            liquidity_usd, volume_5m, volume_1h, volume_6h, volume_24h,
                             db_status, token_info.get("reason"), send_text
                         ))
 
@@ -2253,6 +2359,11 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                     'perf_1h': perf_1h,
                     'perf_6h': perf_6h,
                     'perf_24h': perf_24h,
+                    'liquidity_usd': liquidity_usd,
+                    'volume_5m': volume_5m,
+                    'volume_1h': volume_1h,
+                    'volume_6h': volume_6h,
+                    'volume_24h': volume_24h,
                     'status': db_status,
                     'dex_url': dex_url,
                     'migration_status': migration_status_formatted,
@@ -3543,6 +3654,11 @@ def get_token_wallet_data():
         max_amount = request.args.get('max_amount')
         min_mc = request.args.get('min_mc')
         max_mc = request.args.get('max_mc')
+        min_liquidity = request.args.get('min_liquidity')
+        max_liquidity = request.args.get('max_liquidity')
+        volume_tf = (request.args.get('volume_tf') or '24h').strip().lower()
+        min_volume = request.args.get('min_volume')
+        max_volume = request.args.get('max_volume')
         perf_tf = (request.args.get('perf_tf') or '5m').strip().lower()
         min_perf = request.args.get('min_perf')
         max_perf = request.args.get('max_perf')
@@ -3583,6 +3699,11 @@ def get_token_wallet_data():
             'perf_24h': 'perf_24h',
             'status': 'status',
             'market_cap': 'parse_mc_usd(market_cap)',
+            'liquidity_usd': 'liquidity_usd',
+            'volume_5m': 'volume_5m',
+            'volume_1h': 'volume_1h',
+            'volume_6h': 'volume_6h',
+            'volume_24h': 'volume_24h',
             'age': 'parse_creation_age_minutes(age, formatted_message)',
             'creation_age': 'parse_creation_age_minutes(age, formatted_message)',
             'migration_age': 'parse_migration_age_minutes(migration_age, formatted_message)'
@@ -3658,6 +3779,33 @@ def get_token_wallet_data():
             try:
                 where_clauses.append("parse_mc_usd(market_cap) <= ?")
                 params.append(float(max_mc))
+            except ValueError:
+                pass
+
+        if min_liquidity:
+            try:
+                where_clauses.append("liquidity_usd >= ?")
+                params.append(float(min_liquidity))
+            except ValueError:
+                pass
+        if max_liquidity:
+            try:
+                where_clauses.append("liquidity_usd <= ?")
+                params.append(float(max_liquidity))
+            except ValueError:
+                pass
+
+        volume_col = f"volume_{volume_tf}" if volume_tf in ['5m', '1h', '6h', '24h'] else 'volume_24h'
+        if min_volume:
+            try:
+                where_clauses.append(f"{volume_col} >= ?")
+                params.append(float(min_volume))
+            except ValueError:
+                pass
+        if max_volume:
+            try:
+                where_clauses.append(f"{volume_col} <= ?")
+                params.append(float(max_volume))
             except ValueError:
                 pass
 
@@ -3769,6 +3917,7 @@ def get_token_wallet_data():
             data_query = f"""
                 SELECT id, tracked_address, sender_address, amount, mint, signature, timestamp,
                        token_name, ca, platform, market_cap, age, perf_5m, perf_1h, perf_6h, perf_24h,
+                       liquidity_usd, volume_5m, volume_1h, volume_6h, volume_24h,
                        dex_url, migration_status, status, reason, formatted_message, created_at, migration_age
                 FROM wallet_payments
                 {where_str}
@@ -3795,13 +3944,18 @@ def get_token_wallet_data():
                 "perf_1h": r[13],
                 "perf_6h": r[14],
                 "perf_24h": r[15],
-                "dex_url": r[16],
-                "migration_status": r[17],
-                "status": r[18],
-                "reason": r[19],
-                "formatted_message": r[20],
-                "created_at": r[21],
-                "migration_age": r[22] if len(r) > 22 else None
+                "liquidity_usd": r[16],
+                "volume_5m": r[17],
+                "volume_1h": r[18],
+                "volume_6h": r[19],
+                "volume_24h": r[20],
+                "dex_url": r[21],
+                "migration_status": r[22],
+                "status": r[23],
+                "reason": r[24],
+                "formatted_message": r[25],
+                "created_at": r[26],
+                "migration_age": r[27] if len(r) > 27 else None
             } for r in rows]
 
         USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"

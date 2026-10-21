@@ -83,6 +83,12 @@ function renderWorkflows() {
                     } else if (r.rule_type === 'performance') {
                         label = `📊 Perf (${r.search_text || '5m'}): ${r.time_min || '-∞'}% to ${r.time_max || '∞'}%`;
                         color = '#f59e0b';
+                    } else if (r.rule_type === 'liquidity') {
+                        label = `💧 Liquidity: $${r.time_min || 0}-$${r.time_max || '∞'}`;
+                        color = '#14b8a6';
+                    } else if (r.rule_type === 'volume') {
+                        label = `📊 Volume (${r.search_text || '24h'}): $${r.time_min || 0}-$${r.time_max || '∞'}`;
+                        color = '#0ea5e9';
                     } else if (r.rule_type === 'dex_payment') {
                         let minP = (r.time_min !== undefined && r.time_min !== null && r.time_min !== '') ? r.time_min : '0';
                         let maxP = (r.time_max !== undefined && r.time_max !== null && r.time_max !== '') ? r.time_max : '∞';
@@ -211,6 +217,8 @@ function renderRules() {
         else if (rule.rule_type === 'dex_payment') badgeColor = '#06b6d4';
         else if (rule.rule_type === 'migrated') badgeColor = '#6366f1';
         else if (rule.rule_type === 'performance') badgeColor = '#f59e0b';
+        else if (rule.rule_type === 'liquidity') badgeColor = '#14b8a6';
+        else if (rule.rule_type === 'volume') badgeColor = '#0ea5e9';
         else if (rule.rule_type === 'show_wallet') badgeColor = '#0ea5e9';
         else if (rule.rule_type === 'exclude_platform') badgeColor = '#ef4444';
         else if (rule.rule_type === 'token_name') badgeColor = '#ec4899';
@@ -258,6 +266,22 @@ function renderRules() {
                 <input type="number" class="form-input" style="width:85px" placeholder="0" value="${(rule.time_min !== undefined && rule.time_min !== null) ? rule.time_min : ''}" oninput="updateRule(${index}, 'time_min', this.value)">
                 <label style="font-size:0.85rem; color:var(--text-muted)">Max ($):</label>
                 <input type="number" class="form-input" style="width:85px" placeholder="∞" value="${(rule.time_max !== undefined && rule.time_max !== null) ? rule.time_max : ''}" oninput="updateRule(${index}, 'time_max', this.value)">
+            `;
+        } else if (rule.rule_type === 'liquidity' || rule.rule_type === 'volume') {
+            const timeframe = rule.search_text || '24h';
+            fieldsHtml += rule.rule_type === 'volume' ? `
+                <label style="font-size:0.85rem; color:var(--text-muted)">Timeframe:</label>
+                <select class="form-input" style="width:85px" onchange="updateRule(${index}, 'search_text', this.value)">
+                    <option value="5m" ${timeframe === '5m' ? 'selected' : ''}>5m</option>
+                    <option value="1h" ${timeframe === '1h' ? 'selected' : ''}>1h</option>
+                    <option value="6h" ${timeframe === '6h' ? 'selected' : ''}>6h</option>
+                    <option value="24h" ${timeframe === '24h' ? 'selected' : ''}>24h</option>
+                </select>` : '';
+            fieldsHtml += `
+                <label style="font-size:0.85rem; color:var(--text-muted)">Min ($):</label>
+                <input type="number" class="form-input" style="width:95px" placeholder="0" value="${rule.time_min ?? ''}" oninput="updateRule(${index}, 'time_min', this.value)">
+                <label style="font-size:0.85rem; color:var(--text-muted)">Max ($):</label>
+                <input type="number" class="form-input" style="width:95px" placeholder="∞" value="${rule.time_max ?? ''}" oninput="updateRule(${index}, 'time_max', this.value)">
             `;
         } else if (rule.rule_type === 'dex_payment') {
             fieldsHtml += `
@@ -343,6 +367,8 @@ function addRule(type) {
     } else if (type === 'filter') {
         newRule.search_text = '';
         newRule.replace_text = 'include';
+    } else if (type === 'volume') {
+        newRule.search_text = '24h';
     }
     currentRules.push(newRule);
     renderRules();
@@ -1334,6 +1360,10 @@ function updateActiveFiltersCount() {
     const maxAmount = String(document.getElementById('td-max-amount')?.value || '').trim();
     const minMc = String(document.getElementById('td-min-mc')?.value || '').trim();
     const maxMc = String(document.getElementById('td-max-mc')?.value || '').trim();
+    const minLiquidity = String(document.getElementById('td-min-liquidity')?.value || '').trim();
+    const maxLiquidity = String(document.getElementById('td-max-liquidity')?.value || '').trim();
+    const minVolume = String(document.getElementById('td-min-volume')?.value || '').trim();
+    const maxVolume = String(document.getElementById('td-max-volume')?.value || '').trim();
     const minPerf = String(document.getElementById('td-min-perf')?.value || '').trim();
     const maxPerf = String(document.getElementById('td-max-perf')?.value || '').trim();
     const minAge = String(document.getElementById('td-min-age')?.value || '').trim();
@@ -1355,6 +1385,10 @@ function updateActiveFiltersCount() {
     if (maxAmount) count++;
     if (minMc) count++;
     if (maxMc) count++;
+    if (minLiquidity) count++;
+    if (maxLiquidity) count++;
+    if (minVolume) count++;
+    if (maxVolume) count++;
     if (minPerf) count++;
     if (maxPerf) count++;
     if (minAge) count++;
@@ -1394,7 +1428,7 @@ function applyWorkflowPresetToFilters() {
     }
 
     // Reset metric inputs first
-    const clearIds = ['td-min-age', 'td-max-age', 'td-min-migration-age', 'td-max-migration-age', 'td-min-mc', 'td-max-mc', 'td-min-perf', 'td-max-perf', 'td-min-amount', 'td-max-amount', 'td-token-name-pattern', 'td-word-filter'];
+    const clearIds = ['td-min-age', 'td-max-age', 'td-min-migration-age', 'td-max-migration-age', 'td-min-mc', 'td-max-mc', 'td-min-liquidity', 'td-max-liquidity', 'td-min-volume', 'td-max-volume', 'td-min-perf', 'td-max-perf', 'td-min-amount', 'td-max-amount', 'td-token-name-pattern', 'td-word-filter'];
     clearIds.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = '';
@@ -1445,6 +1479,19 @@ function applyWorkflowPresetToFilters() {
                 if (minP && rule.time_min !== undefined && rule.time_min !== null) minP.value = rule.time_min;
                 if (maxP && rule.time_max !== undefined && rule.time_max !== null) maxP.value = rule.time_max;
             }
+        } else if (type === 'liquidity') {
+            const minL = document.getElementById('td-min-liquidity');
+            const maxL = document.getElementById('td-max-liquidity');
+            if (minL && rule.time_min !== undefined && rule.time_min !== null) minL.value = rule.time_min;
+            if (maxL && rule.time_max !== undefined && rule.time_max !== null) maxL.value = rule.time_max;
+        } else if (type === 'volume') {
+            const tf = (rule.search_text || '24h').toLowerCase().replace('hr', 'h');
+            const tfEl = document.getElementById('td-volume-tf');
+            const minV = document.getElementById('td-min-volume');
+            const maxV = document.getElementById('td-max-volume');
+            if (tfEl && ['5m', '1h', '6h', '24h'].includes(tf)) tfEl.value = tf;
+            if (minV && rule.time_min !== undefined && rule.time_min !== null) minV.value = rule.time_min;
+            if (maxV && rule.time_max !== undefined && rule.time_max !== null) maxV.value = rule.time_max;
         } else if (type === 'dex_payment') {
             const minA = document.getElementById('td-min-amount');
             const maxA = document.getElementById('td-max-amount');
@@ -1486,6 +1533,11 @@ function resetTokenFilters() {
         'td-max-amount': '',
         'td-min-mc': '',
         'td-max-mc': '',
+        'td-min-liquidity': '',
+        'td-max-liquidity': '',
+        'td-volume-tf': '24h',
+        'td-min-volume': '',
+        'td-max-volume': '',
         'td-perf-tf': '5m',
         'td-min-perf': '',
         'td-max-perf': '',
@@ -1592,7 +1644,7 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
     if (showLoading && tbody && !hasRows) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="14" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                <td colspan="16" style="text-align: center; padding: 3rem; color: var(--text-muted);">
                     <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
                         <span style="font-size: 1.5rem;">🔄</span>
                         <span>Loading token wallet data...</span>
@@ -1622,6 +1674,11 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
         const maxAmount = String(document.getElementById('td-max-amount')?.value || '').trim();
         const minMc = String(document.getElementById('td-min-mc')?.value || '').trim();
         const maxMc = String(document.getElementById('td-max-mc')?.value || '').trim();
+        const minLiquidity = String(document.getElementById('td-min-liquidity')?.value || '').trim();
+        const maxLiquidity = String(document.getElementById('td-max-liquidity')?.value || '').trim();
+        const volumeTf = document.getElementById('td-volume-tf')?.value || '24h';
+        const minVolume = String(document.getElementById('td-min-volume')?.value || '').trim();
+        const maxVolume = String(document.getElementById('td-max-volume')?.value || '').trim();
         const perfTf = document.getElementById('td-perf-tf')?.value || '5m';
         const minPerf = String(document.getElementById('td-min-perf')?.value || '').trim();
         const maxPerf = String(document.getElementById('td-max-perf')?.value || '').trim();
@@ -1657,6 +1714,11 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
         if (maxAmount) params.append('max_amount', maxAmount);
         if (minMc) params.append('min_mc', minMc);
         if (maxMc) params.append('max_mc', maxMc);
+        if (minLiquidity) params.append('min_liquidity', minLiquidity);
+        if (maxLiquidity) params.append('max_liquidity', maxLiquidity);
+        if (volumeTf) params.append('volume_tf', volumeTf);
+        if (minVolume) params.append('min_volume', minVolume);
+        if (maxVolume) params.append('max_volume', maxVolume);
         if (perfTf) params.append('perf_tf', perfTf);
         if (minPerf) params.append('min_perf', minPerf);
         if (maxPerf) params.append('max_perf', maxPerf);
@@ -1677,7 +1739,7 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
 
         if (!data.success) {
             if (tbody) {
-                tbody.innerHTML = `<tr><td colspan="14" style="text-align: center; color: #ef4444; padding: 2rem;">Error: ${data.error || 'Failed to fetch data'}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="16" style="text-align: center; color: #ef4444; padding: 2rem;">Error: ${data.error || 'Failed to fetch data'}</td></tr>`;
             }
             if (badge) {
                 badge.innerText = '❌ Sync Failed';
@@ -1710,7 +1772,7 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
             if (tbody) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="14" style="text-align: center; padding: 3.5rem; color: var(--text-muted);">
+                        <td colspan="16" style="text-align: center; padding: 3.5rem; color: var(--text-muted);">
                             <div style="font-size: 2rem; margin-bottom: 8px;">🔍</div>
                             <div style="font-weight: 500; font-size: 0.95rem; color: white;">No token records found</div>
                             <div style="font-size: 0.8rem; margin-top: 4px;">Try adjusting or resetting your filter criteria.</div>
@@ -1759,7 +1821,7 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
     } catch (err) {
         console.error("Failed to load token wallet data:", err);
         if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="14" style="text-align: center; color: #ef4444; padding: 2rem;">Error loading data: ${err.message}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="16" style="text-align: center; color: #ef4444; padding: 2rem;">Error loading data: ${err.message}</td></tr>`;
         }
         if (badge) {
             badge.innerText = '❌ Connection Error';
@@ -1804,6 +1866,11 @@ function renderTokenRow(p) {
     const senderShort = sender ? `${sender.slice(0, 4)}...${sender.slice(-4)}` : '-';
 
     const mc = p.market_cap || '-';
+    const liquidity = formatUsdMetric(p.liquidity_usd);
+    const volume5m = formatUsdMetric(p.volume_5m);
+    const volume1h = formatUsdMetric(p.volume_1h);
+    const volume6h = formatUsdMetric(p.volume_6h);
+    const volume24h = formatUsdMetric(p.volume_24h);
     const creationAge = p.creation_age || p.age || '-';
     const migrationAge = p.migration_age && p.migration_age !== '0' && p.migration_age !== '-' ? p.migration_age : null;
 
@@ -1856,6 +1923,11 @@ function renderTokenRow(p) {
                 ` : '<span style="color: var(--text-muted);">-</span>'}
             </td>
             <td><strong style="color: #e2e8f0;">${mc}</strong></td>
+            <td><strong style="color: #2dd4bf;">${liquidity}</strong></td>
+            <td title="5m: ${volume5m}, 1h: ${volume1h}, 6h: ${volume6h}, 24h: ${volume24h}">
+                <div style="font-size:0.74rem; white-space:nowrap;">5m ${volume5m} · 1h ${volume1h}</div>
+                <div style="font-size:0.74rem; color:var(--text-muted); white-space:nowrap;">6h ${volume6h} · 24h ${volume24h}</div>
+            </td>
             <td>
                 <div style="font-weight: 500; color: #e2e8f0; font-size: 0.85rem;" title="Creation Age: ${escapeHtml(creationAge)}">${escapeHtml(creationAge)}</div>
                 ${migrationAge ? `<div style="font-size: 0.72rem; color: #34d399; margin-top: 1px;" title="Migration Age: ${escapeHtml(migrationAge)}">Mig: ${escapeHtml(migrationAge)}</div>` : ''}
@@ -1887,6 +1959,16 @@ function formatPerfBadge(val) {
     if (num > 0) return `<span class="badge-perf badge-perf-pos">${formatted}</span>`;
     if (num < 0) return `<span class="badge-perf badge-perf-neg">${formatted}</span>`;
     return `<span class="badge-perf badge-perf-neu">0.0%</span>`;
+}
+
+function formatUsdMetric(val) {
+    if (val === null || val === undefined || val === '') return '-';
+    const num = Number(val || 0);
+    if (!Number.isFinite(num)) return '-';
+    if (num >= 1e9) return `$${(num / 1e9).toFixed(2)}B`;
+    if (num >= 1e6) return `$${(num / 1e6).toFixed(2)}M`;
+    if (num >= 1e3) return `$${(num / 1e3).toFixed(2)}K`;
+    return `$${num.toFixed(2)}`;
 }
 
 function formatStatusPill(status) {
@@ -2013,6 +2095,11 @@ async function exportTokenDataCSV() {
         const maxAmount = String(document.getElementById('td-max-amount')?.value || '').trim();
         const minMc = String(document.getElementById('td-min-mc')?.value || '').trim();
         const maxMc = String(document.getElementById('td-max-mc')?.value || '').trim();
+        const minLiquidity = String(document.getElementById('td-min-liquidity')?.value || '').trim();
+        const maxLiquidity = String(document.getElementById('td-max-liquidity')?.value || '').trim();
+        const volumeTf = document.getElementById('td-volume-tf')?.value || '24h';
+        const minVolume = String(document.getElementById('td-min-volume')?.value || '').trim();
+        const maxVolume = String(document.getElementById('td-max-volume')?.value || '').trim();
         const perfTf = document.getElementById('td-perf-tf')?.value || '5m';
         const minPerf = String(document.getElementById('td-min-perf')?.value || '').trim();
         const maxPerf = String(document.getElementById('td-max-perf')?.value || '').trim();
@@ -2047,6 +2134,11 @@ async function exportTokenDataCSV() {
         if (maxAmount) params.append('max_amount', maxAmount);
         if (minMc) params.append('min_mc', minMc);
         if (maxMc) params.append('max_mc', maxMc);
+        if (minLiquidity) params.append('min_liquidity', minLiquidity);
+        if (maxLiquidity) params.append('max_liquidity', maxLiquidity);
+        if (volumeTf) params.append('volume_tf', volumeTf);
+        if (minVolume) params.append('min_volume', minVolume);
+        if (maxVolume) params.append('max_volume', maxVolume);
         if (perfTf) params.append('perf_tf', perfTf);
         if (minPerf) params.append('min_perf', minPerf);
         if (maxPerf) params.append('max_perf', maxPerf);
@@ -2068,7 +2160,7 @@ async function exportTokenDataCSV() {
             return;
         }
 
-        const headers = ["ID", "Timestamp", "Token Name", "CA", "Platform", "Amount (SOL)", "Amount (USD)", "Sender", "Tracked Address", "Market Cap", "Creation Age", "Migration Age", "5m %", "1h %", "6h %", "24h %", "Status", "Reason", "Dex URL"];
+        const headers = ["ID", "Timestamp", "Token Name", "CA", "Platform", "Amount (SOL)", "Amount (USD)", "Sender", "Tracked Address", "Market Cap", "Liquidity USD", "Volume 5m", "Volume 1h", "Volume 6h", "Volume 24h", "Creation Age", "Migration Age", "5m %", "1h %", "6h %", "24h %", "Status", "Reason", "Dex URL"];
         const csvRows = [headers.join(",")];
 
         data.payments.forEach(p => {
@@ -2083,6 +2175,11 @@ async function exportTokenDataCSV() {
                 `"${p.sender_address || ''}"`,
                 `"${p.tracked_address || ''}"`,
                 `"${(p.market_cap || '').replace(/"/g, '""')}"`,
+                p.liquidity_usd || 0,
+                p.volume_5m || 0,
+                p.volume_1h || 0,
+                p.volume_6h || 0,
+                p.volume_24h || 0,
                 `"${(p.creation_age || p.age || '').replace(/"/g, '""')}"`,
                 `"${(p.migration_age || '').replace(/"/g, '""')}"`,
                 p.perf_5m || 0,

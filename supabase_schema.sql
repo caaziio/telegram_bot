@@ -42,6 +42,11 @@ CREATE TABLE IF NOT EXISTS cto_signals (
     perf_1h REAL,
     perf_6h REAL,
     perf_24h REAL,
+    liquidity_usd REAL,
+    volume_5m REAL,
+    volume_1h REAL,
+    volume_6h REAL,
+    volume_24h REAL,
     status TEXT,
     dex_url TEXT,
     migration_status TEXT,
@@ -72,6 +77,11 @@ CREATE TABLE IF NOT EXISTS wallet_payments (
     perf_1h REAL,
     perf_6h REAL,
     perf_24h REAL,
+    liquidity_usd REAL,
+    volume_5m REAL,
+    volume_1h REAL,
+    volume_6h REAL,
+    volume_24h REAL,
     dex_url TEXT,
     migration_status TEXT,
     status TEXT,
@@ -79,6 +89,17 @@ CREATE TABLE IF NOT EXISTS wallet_payments (
     formatted_message TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE cto_signals ADD COLUMN IF NOT EXISTS liquidity_usd REAL;
+ALTER TABLE cto_signals ADD COLUMN IF NOT EXISTS volume_5m REAL;
+ALTER TABLE cto_signals ADD COLUMN IF NOT EXISTS volume_1h REAL;
+ALTER TABLE cto_signals ADD COLUMN IF NOT EXISTS volume_6h REAL;
+ALTER TABLE cto_signals ADD COLUMN IF NOT EXISTS volume_24h REAL;
+ALTER TABLE wallet_payments ADD COLUMN IF NOT EXISTS liquidity_usd REAL;
+ALTER TABLE wallet_payments ADD COLUMN IF NOT EXISTS volume_5m REAL;
+ALTER TABLE wallet_payments ADD COLUMN IF NOT EXISTS volume_1h REAL;
+ALTER TABLE wallet_payments ADD COLUMN IF NOT EXISTS volume_6h REAL;
+ALTER TABLE wallet_payments ADD COLUMN IF NOT EXISTS volume_24h REAL;
 
 -- Enable Row Level Security (RLS)
 ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
