@@ -920,43 +920,25 @@ def get_settings():
         return settings
 
 
-def token_name_pattern_matches(token_name, pattern):
-    """Match a token name against one regex or a comma/newline keyword list.
+def regex_matches(value, pattern):
+    """Case-insensitively match a user-supplied regex.
 
-    Keyword lists use OR semantics and are matched case-insensitively as literal
-    text. A single value remains a regex for backwards compatibility.
+    Invalid expressions fall back to literal substring matching so a typo in a
+    saved rule cannot crash message processing.
     """
-    token_name = str(token_name or '')
+    value = str(value or '')
     pattern = str(pattern or '').strip()
-    if not token_name or not pattern:
+    if not value or not pattern:
         return False
-
-    if ',' in pattern or '\n' in pattern or '\r' in pattern:
-        keywords = [
-            keyword.strip()
-            for keyword in re.split(r'[,\r\n]+', pattern)
-            if keyword.strip()
-        ]
-        token_name_lower = token_name.casefold()
-        return any(keyword.casefold() in token_name_lower for keyword in keywords)
-
     try:
-        return re.search(pattern, token_name, re.IGNORECASE) is not None
+        return re.search(pattern, value, re.IGNORECASE) is not None
     except re.error:
-        return pattern.casefold() in token_name.casefold()
+        return pattern.casefold() in value.casefold()
 
 
 def token_name_pattern_for_sql(pattern):
-    """Return a SQLite REGEXP pattern with the same semantics as the live filter."""
-    pattern = str(pattern or '').strip()
-    if ',' in pattern or '\n' in pattern or '\r' in pattern:
-        keywords = [
-            re.escape(keyword.strip())
-            for keyword in re.split(r'[,\r\n]+', pattern)
-            if keyword.strip()
-        ]
-        return f"({'|'.join(keywords)})" if keywords else ''
-    return pattern
+    """Return the user-supplied regex used by SQLite's REGEXP function."""
+    return str(pattern or '').strip()
 
 def get_workflows():
     with db_lock:
@@ -1219,10 +1201,10 @@ def process_message_logic(text, rules, context=None):
 
         # EXCLUDE PLATFORM LOGIC
         elif rule_type == 'exclude_platform':
-            platform_to_exclude = (rule.get('search_text') or '').strip().lower()
+            platform_to_exclude = (rule.get('search_text') or '').strip()
             if platform_to_exclude:
                 # Look for "Status: ✅ Migrated (on pump.fun)" or "Platform: Solana"
-                if platform_to_exclude in text.lower():
+                if regex_matches(text, platform_to_exclude):
                     return None, True, f"Dropped by Platform Exclusion (Found '{platform_to_exclude}')"
 
         # TOKEN NAME FILTER LOGIC
@@ -1247,7 +1229,7 @@ def process_message_logic(text, rules, context=None):
 
             debug_log(f"      [TOKEN NAME] token_name='{token_name}', pattern='{pattern}', mode='{mode}'")
 
-            is_matched = token_name_pattern_matches(token_name, pattern)
+            is_matched = regex_matches(token_name, pattern)
 
             if mode == 'exclude':
                 if is_matched and token_name:
@@ -1267,32 +1249,27 @@ def process_message_logic(text, rules, context=None):
             search = (rule.get('search_text') or '').strip()
             mode = (rule.get('replace_text') or 'include').strip().lower()
             if search:
-                # Split search words by comma, pipe, or newline
-                words = [w.strip().lower() for w in re.split(r'[,|\n]+', search) if w.strip()]
-                if words:
-                    found_words = [w for w in words if w in text.lower()]
-                    if mode == 'exclude':
-                        if found_words:
-                            matched = "', '".join(found_words)
-                            debug_log(f"      [WORD FILTER] DROPPING: Found forbidden word(s): '{matched}'")
-                            return None, True, f"Dropped by Word Filter (Found forbidden word: '{matched}')"
-                        else:
-                            debug_log(f"      [WORD FILTER] PASSED: No forbidden words from '{search}' found in text")
-                    else:  # mode == 'include' (default: pass if at least one word is present)
-                        if found_words:
-                            matched = "', '".join(found_words)
-                            debug_log(f"      [WORD FILTER] PASSED: Message contains required word(s): '{matched}'")
-                        else:
-                            words_preview = ", ".join(words[:5]) + ("..." if len(words) > 5 else "")
-                            debug_log(f"      [WORD FILTER] DROPPING: None of the required words ('{words_preview}') found in message")
-                            return None, True, f"Dropped by Word Filter (None of the required words found: '{words_preview}')"
+                is_matched = regex_matches(text, search)
+                if mode == 'exclude':
+                    if is_matched:
+                        debug_log(f"      [WORD FILTER] DROPPING: Regex matched: '{search}'")
+                        return None, True, f"Dropped by Word Filter (Regex matched: '{search}')"
+                    debug_log(f"      [WORD FILTER] PASSED: Regex '{search}' did not match")
+                elif is_matched:
+                    debug_log(f"      [WORD FILTER] PASSED: Regex matched: '{search}'")
+                else:
+                    debug_log(f"      [WORD FILTER] DROPPING: Required regex did not match: '{search}'")
+                    return None, True, f"Dropped by Word Filter (Required regex did not match: '{search}')"
 
         # REPLACE LOGIC
         elif rule_type == 'replace':
             search = rule.get('search_text', '')
             replace = rule.get('replace_text', '')
             if search:
-                processed_text = processed_text.replace(search, replace)
+                try:
+                    processed_text = re.sub(search, replace, processed_text, flags=re.IGNORECASE)
+                except re.error:
+                    processed_text = processed_text.replace(search, replace)
 
         # APPEND LOGIC
         elif rule_type == 'append':
@@ -3870,13 +3847,10 @@ def get_token_wallet_data():
                 where_clauses.append("(token_name REGEXP ?)")
             params.append(pat)
 
-        # Word filter (drops tokens where name, reason, or message contains forbidden word)
+        # Word regex filter (drops tokens when any searchable text matches)
         if word_filter:
-            wf_words = [w.strip().lower() for w in re.split(r'[,|\n]+', word_filter) if w.strip()]
-            for w in wf_words:
-                wf_param = f"%{w}%"
-                where_clauses.append("(LOWER(token_name) NOT LIKE ? AND LOWER(reason) NOT LIKE ? AND LOWER(COALESCE(formatted_message, '')) NOT LIKE ?)")
-                params.extend([wf_param, wf_param, wf_param])
+            where_clauses.append("NOT ((COALESCE(token_name, '') || '\n' || COALESCE(reason, '') || '\n' || COALESCE(formatted_message, '')) REGEXP ?)")
+            params.append(word_filter)
 
         where_str = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 

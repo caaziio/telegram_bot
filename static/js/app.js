@@ -312,7 +312,8 @@ function renderRules() {
             `;
         } else if (rule.rule_type === 'exclude_platform') {
             fieldsHtml += `
-                <input class="form-input" style="flex: 1; max-width: 250px;" placeholder="e.g. pump.fun" value="${rule.search_text || ''}" oninput="updateRule(${index}, 'search_text', this.value)">
+                <label style="font-size:0.85rem; color:var(--text-muted)">Regex:</label>
+                <input class="form-input" style="flex: 1; max-width: 250px;" placeholder="e.g. pump\\.fun|raydium" value="${rule.search_text || ''}" oninput="updateRule(${index}, 'search_text', this.value)" title="Case-insensitive regular expression">
             `;
         } else if (rule.rule_type === 'token_name') {
             const mode = (rule.replace_text || 'include').toLowerCase();
@@ -322,8 +323,8 @@ function renderRules() {
                     <option value="include" ${mode === 'include' ? 'selected' : ''}>Must Match (Include)</option>
                     <option value="exclude" ${mode === 'exclude' ? 'selected' : ''}>Must Not Match (Exclude)</option>
                 </select>
-                <label style="font-size:0.85rem; color:var(--text-muted)">Keywords / Regex:</label>
-                <input class="form-input" style="flex: 1; min-width: 170px;" placeholder="e.g. AI, SOL, PEPE (matches any)" value="${rule.search_text !== undefined && rule.search_text !== null ? rule.search_text : '.*'}" oninput="updateRule(${index}, 'search_text', this.value)" title="Separate keywords with commas. Any one keyword is a match. A single value may be a regular expression.">
+                <label style="font-size:0.85rem; color:var(--text-muted)">Regex:</label>
+                <input class="form-input" style="flex: 1; min-width: 170px;" placeholder="e.g. AI|SOL|PEPE" value="${rule.search_text !== undefined && rule.search_text !== null ? rule.search_text : '.*'}" oninput="updateRule(${index}, 'search_text', this.value)" title="Case-insensitive regular expression. Use | to match alternatives.">
             `;
         } else if (rule.rule_type === 'filter') {
             const mode = (rule.replace_text || 'include').toLowerCase();
@@ -333,11 +334,11 @@ function renderRules() {
                     <option value="include" ${mode === 'include' ? 'selected' : ''}>Must Contain (Pass if any found)</option>
                     <option value="exclude" ${mode === 'exclude' ? 'selected' : ''}>Must Not Contain (Drop if found)</option>
                 </select>
-                <label style="font-size:0.85rem; color:var(--text-muted)">Words:</label>
-                <input class="form-input" style="flex: 1; min-width: 240px;" placeholder="e.g. sol, ai, trump, pepe, doge (comma-separated)" value="${rule.search_text || ''}" oninput="updateRule(${index}, 'search_text', this.value)" title="Enter words separated by commas. If 'Must Contain' is selected, having any one word will pass.">
+                <label style="font-size:0.85rem; color:var(--text-muted)">Regex:</label>
+                <input class="form-input" style="flex: 1; min-width: 240px;" placeholder="e.g. sol|ai|trump|pepe|doge" value="${rule.search_text || ''}" oninput="updateRule(${index}, 'search_text', this.value)" title="Case-insensitive regular expression. Use | to match alternatives.">
             `;
         } else {
-            fieldsHtml += `<input class="form-input" style="flex: 1; max-width: 250px;" placeholder="Word to find" value="${rule.search_text || ''}" oninput="updateRule(${index}, 'search_text', this.value)">`;
+            fieldsHtml += `<input class="form-input" style="flex: 1; max-width: 250px;" placeholder="Regex to find" value="${rule.search_text || ''}" oninput="updateRule(${index}, 'search_text', this.value)" title="Case-insensitive regular expression">`;
             if (rule.rule_type === 'replace') {
                 fieldsHtml += `<input class="form-input" style="flex: 1; max-width: 250px;" placeholder="Replace with..." value="${rule.replace_text || ''}" oninput="updateRule(${index}, 'replace_text', this.value)">`;
             }
