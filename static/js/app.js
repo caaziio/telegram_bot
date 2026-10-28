@@ -16,6 +16,14 @@ function escapeHtml(text) {
         .replace(/'/g, '&#039;');
 }
 
+async function readJsonResponse(response, endpointName) {
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.toLowerCase().includes('application/json')) {
+        throw new Error(`${endpointName} is not available on the running server. Restart or redeploy the app to load the new backend route.`);
+    }
+    return response.json();
+}
+
 function switchTab(tabId) {
     const tabs = ['workflows', 'settings', 'wallet-tracker', 'token-data'];
     tabs.forEach(t => {
@@ -144,12 +152,6 @@ function renderWorkflows() {
         `;
         grid.appendChild(card);
     });
-
-    // Populate tester dropdown if it exists
-    const select = document.getElementById('tester-workflow');
-    if (select) {
-        select.innerHTML = workflows.map(wf => `<option value="${wf.id}">${wf.name}</option>`).join('');
-    }
 
 }
 
@@ -676,47 +678,115 @@ setInterval(checkAuthStatus, 15000); // Re-check every 15s to keep UI updated
 
 async function runTester() {
     const workflowId = document.getElementById('tester-workflow').value;
-    const text = document.getElementById('tester-input').value;
+    const text = document.getElementById('tester-input').value.trim();
     const container = document.getElementById('tester-result-container');
+    const button = document.getElementById('tester-run-button');
     
     if (!workflowId) {
-        container.innerHTML = 'Please select a workflow.';
+        container.innerHTML = '<div class="result-error">Please select a workflow to test.</div>';
+        return;
+    }
+    if (!text) {
+        container.innerHTML = '<div class="result-error">Please paste a sample message.</div>';
         return;
     }
     
-    container.innerHTML = 'Processing...';
-    
-    const res = await fetch('/api/tester', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workflow_id: workflowId, text })
-    });
-    
-    const result = await res.json();
-    
-    if (result.dropped) {
-        container.innerHTML = `
-            <div class="result-error">
-                <div class="result-header">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
-                    Message Dropped
+    container.innerHTML = '<div style="color: var(--text-muted);">Testing flow...</div>';
+    if (button) button.disabled = true;
+
+    try {
+        const res = await fetch('/api/tester', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ workflow_id: workflowId, text })
+        });
+        const result = await readJsonResponse(res, 'The flow tester');
+        if (!res.ok || result.success === false) {
+            throw new Error(result.error || 'The test could not be completed.');
+        }
+
+        const workflowName = escapeHtml(result.workflow_name || 'Selected workflow');
+        const ruleSummary = `${result.rule_count || 0} rule${result.rule_count === 1 ? '' : 's'} checked`;
+        if (result.dropped) {
+            container.innerHTML = `
+                <div class="result-error">
+                    <div class="result-header">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+                        Does Not Pass — ${workflowName}
+                    </div>
+                    <div style="margin-top: 8px;">${escapeHtml(result.reason || 'Dropped by filters')}</div>
+                    <div style="margin-top: 8px; font-size: 0.78rem; color: var(--text-muted);">${ruleSummary}</div>
                 </div>
-                ${result.reason || 'Dropped by filters'}
-            </div>
-        `;
-    } else {
-        container.innerHTML = `
-            <div class="result-success">
-                <div class="result-header" style="color: #6ee7b7;">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-                    Message Forwarded Successfully
+            `;
+        } else {
+            container.innerHTML = `
+                <div class="result-success">
+                    <div class="result-header" style="color: #6ee7b7;">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                        Passes — ${workflowName}
+                    </div>
+                    <div style="margin: 8px 0;">The message passed every filter in this workflow. Nothing was sent.</div>
+                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 10px;">${ruleSummary}</div>
+                    <div style="font-family: monospace; font-size: 0.85rem; white-space: pre-wrap; color: white; background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 6px;">${escapeHtml(result.text || text)}</div>
                 </div>
-                <div style="font-family: monospace; font-size: 0.85rem; white-space: pre-wrap; color: white; background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 6px;">
-                    ${result.text}
-                </div>
-            </div>
-        `;
+            `;
+        }
+    } catch (error) {
+        container.innerHTML = `<div class="result-error"><strong>Test failed:</strong> ${escapeHtml(error.message)}</div>`;
+    } finally {
+        if (button) button.disabled = false;
     }
+}
+
+async function loadTesterWorkflows(preferredWorkflowId = '') {
+    const select = document.getElementById('tester-workflow');
+    const resultContainer = document.getElementById('tester-result-container');
+    const runButton = document.getElementById('tester-run-button');
+    if (!select) return;
+
+    select.disabled = true;
+    select.innerHTML = '<option value="">Loading active Supabase workflows...</option>';
+    if (runButton) runButton.disabled = true;
+
+    try {
+        const response = await fetch('/api/tester/workflows', { cache: 'no-store' });
+        const result = await readJsonResponse(response, 'The Supabase workflow endpoint');
+        if (!response.ok || result.success === false) {
+            throw new Error(result.error || 'Could not load Supabase workflows.');
+        }
+
+        const testerWorkflows = result.workflows || [];
+        select.innerHTML = '<option value="">Select an active Supabase workflow...</option>' + testerWorkflows
+            .map(wf => `<option value="${wf.id}">${escapeHtml(wf.name || 'Unnamed Flow')}</option>`)
+            .join('');
+        if (preferredWorkflowId && testerWorkflows.some(wf => String(wf.id) === String(preferredWorkflowId))) {
+            select.value = String(preferredWorkflowId);
+        }
+        if (!testerWorkflows.length && resultContainer) {
+            resultContainer.innerHTML = '<div class="result-error">No active workflows were found in Supabase.</div>';
+        }
+    } catch (error) {
+        select.innerHTML = '<option value="">Supabase workflows unavailable</option>';
+        if (resultContainer) {
+            resultContainer.innerHTML = `<div class="result-error"><strong>Cannot load flows:</strong> ${escapeHtml(error.message)}</div>`;
+        }
+    } finally {
+        select.disabled = false;
+        if (runButton) runButton.disabled = false;
+    }
+}
+
+function openTesterModal(workflowId = '') {
+    const modal = document.getElementById('tester-modal');
+    const result = document.getElementById('tester-result-container');
+    if (result) result.innerHTML = '';
+    if (modal) modal.classList.remove('hidden');
+    loadTesterWorkflows(workflowId);
+}
+
+function closeTesterModal() {
+    const modal = document.getElementById('tester-modal');
+    if (modal) modal.classList.add('hidden');
 }
 
 // Initialize settings form
@@ -1316,7 +1386,7 @@ if (document.getElementById('scan-wallet-address')) {
     document.getElementById('scan-wallet-address').value = settings.tracked_wallet_address || '';
 }
 
-// Close Level 2 modal or Telegram Message modal when clicking overlay
+// Close modals when clicking their overlays
 document.addEventListener('click', function(e) {
     const modal = document.getElementById('wallet-tx-modal');
     if (modal && e.target === modal) {
@@ -1325,6 +1395,10 @@ document.addEventListener('click', function(e) {
     const tgModal = document.getElementById('tg-msg-modal');
     if (tgModal && e.target === tgModal) {
         closeTgMsgModal();
+    }
+    const testerModal = document.getElementById('tester-modal');
+    if (testerModal && e.target === testerModal) {
+        closeTesterModal();
     }
 });
 

@@ -169,6 +169,9 @@
                         <button class="btn-primary" id="btn-toggle-live-scan" onclick="toggleLiveScan()" style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.15); color: var(--text-muted); box-shadow: none;">
                             ⚫ Start Live Scan
                         </button>
+                        <button class="btn-primary" type="button" onclick="openTesterModal()" style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); color: #6ee7b7; box-shadow: none;">
+                            🧪 Test Flow
+                        </button>
                         <button class="btn-primary" onclick="openModal()">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                             Add Flow
@@ -765,6 +768,37 @@
                 </div>
             </div>
         </main>
+
+        <!-- Flow Tester Modal -->
+        <div id="tester-modal" class="modal-overlay hidden">
+            <div class="modal-content" style="max-width: 760px;">
+                <div class="header" style="margin-bottom: 1.5rem;">
+                    <div>
+                        <h2>Test Filter Flow</h2>
+                        <p>Paste a sample message and test it against an active Supabase workflow without forwarding anything.</p>
+                    </div>
+                    <button class="btn-icon" type="button" onclick="closeTesterModal()" aria-label="Close flow tester">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                </div>
+
+                <div class="form-group">
+                    <label for="tester-workflow">Active Supabase workflow to test</label>
+                    <select class="form-input" id="tester-workflow">
+                        <option value="">Open the tester to load workflows...</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="tester-input">Sample message</label>
+                    <textarea class="form-input" id="tester-input" rows="12" placeholder="Paste the complete token message here..." style="resize: vertical; line-height: 1.5;"></textarea>
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 1rem;">
+                    <button type="button" class="btn-icon" style="padding: 0 1rem;" onclick="closeTesterModal()">Cancel</button>
+                    <button type="button" class="btn-primary" id="tester-run-button" onclick="runTester()">Run Test</button>
+                </div>
+                <div id="tester-result-container" aria-live="polite" style="margin-top: 1.5rem;"></div>
+            </div>
+        </div>
 
         <!-- Editor Modal -->
         <div id="workflow-modal" class="modal-overlay hidden">
