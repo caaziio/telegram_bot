@@ -108,27 +108,18 @@ ALTER TABLE rules ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cto_signals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wallet_payments ENABLE ROW LEVEL SECURITY;
 
--- Allow full access for anon/service_role keys
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'settings' AND policyname = 'Allow all operations on settings') THEN
-        CREATE POLICY "Allow all operations on settings" ON settings FOR ALL USING (true) WITH CHECK (true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'workflows' AND policyname = 'Allow all operations on workflows') THEN
-        CREATE POLICY "Allow all operations on workflows" ON workflows FOR ALL USING (true) WITH CHECK (true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'rules' AND policyname = 'Allow all operations on rules') THEN
-        CREATE POLICY "Allow all operations on rules" ON rules FOR ALL USING (true) WITH CHECK (true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'cto_signals' AND policyname = 'Allow all operations on cto_signals') THEN
-        CREATE POLICY "Allow all operations on cto_signals" ON cto_signals FOR ALL USING (true) WITH CHECK (true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_payments WHERE tablename = 'wallet_payments' AND policyname = 'Allow all operations on wallet_payments') THEN
-        CREATE POLICY "Allow all operations on wallet_payments" ON wallet_payments FOR ALL USING (true) WITH CHECK (true);
-    END IF;
-EXCEPTION
-    WHEN undefined_table THEN
-        NULL;
-    WHEN others THEN
-        NULL;
-END $$;
+-- Backend-only access. The application uses a server-side Supabase secret key,
+-- which assumes the service_role and bypasses RLS. Public and normal signed-in
+-- clients must not access these operational tables directly.
+DROP POLICY IF EXISTS "Allow all operations on settings" ON settings;
+DROP POLICY IF EXISTS "Allow all operations on workflows" ON workflows;
+DROP POLICY IF EXISTS "Allow all operations on rules" ON rules;
+DROP POLICY IF EXISTS "Allow all operations on cto_signals" ON cto_signals;
+DROP POLICY IF EXISTS "Allow all operations on wallet_payments" ON wallet_payments;
+
+REVOKE ALL ON TABLE settings, workflows, rules, cto_signals, wallet_payments
+FROM anon, authenticated;
+
+REVOKE ALL ON SEQUENCE workflows_id_seq, rules_id_seq,
+    cto_signals_id_seq, wallet_payments_id_seq
+FROM anon, authenticated;

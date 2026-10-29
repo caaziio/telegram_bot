@@ -31,7 +31,7 @@ app = Flask(__name__,
             static_folder=os.path.join(current_dir, 'static'))
 
 # Release label format: <major>.<YYYY>.<MM>.<DD>. Update this on each push.
-APP_VERSION = "1.2026.10.29"
+APP_VERSION = "5.2026.10.30"
 
 # Globals for async bridge
 telethon_loop = None
@@ -4573,14 +4573,20 @@ async def helius_polling_loop():
 
         await asyncio.sleep(poll_interval)
 
-async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False):
+async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False, validated_only=False):
     try:
         settings = get_settings()
-        fetch_approved = settings.get('cto_fetch_approved', 'true').lower() == 'true'
-        fetch_pending = settings.get('cto_fetch_pending', 'true').lower() == 'true'
+        if validated_only:
+            # DEX Validated is intentionally isolated from the SOL-payment scanner.
+            # Only Dexscreener-confirmed orders are eligible for this system.
+            fetch_approved = True
+            fetch_pending = False
+        else:
+            fetch_approved = settings.get('cto_fetch_approved', 'true').lower() == 'true'
+            fetch_pending = settings.get('cto_fetch_pending', 'true').lower() == 'true'
 
         # Fallback for old databases
-        if 'cto_fetch_approved' not in settings and 'cto_fetch_pending' not in settings:
+        if not validated_only and 'cto_fetch_approved' not in settings and 'cto_fetch_pending' not in settings:
             scan_mode = settings.get('cto_scan_mode', 'both')
             fetch_approved = scan_mode in ('approved', 'both')
             fetch_pending = scan_mode in ('pending', 'both')
@@ -4756,25 +4762,48 @@ def scan_cto():
         import traceback
         return jsonify({"success": False, "error": str(e), "trace": traceback.format_exc()})
 
+@app.route('/api/dex-validated/scan', methods=['POST'])
+def scan_dex_validated():
+    """Run the Dexscreener-confirmed scanner independently of SOL payments."""
+    data = request.json or {}
+    target_channel = data.get('target_channel')
+    workflow_id = data.get('workflow_id')
+    test_mode = bool(data.get('test_mode', False))
+
+    if not tg_client or not telethon_loop:
+        return jsonify({"success": False, "error": "Telegram client not ready"})
+
+    try:
+        results = asyncio.run_coroutine_threadsafe(
+            perform_cto_scan(target_channel, workflow_id, test_mode, validated_only=True),
+            telethon_loop
+        ).result(timeout=60)
+        return jsonify({"success": True, "results": results})
+    except Exception as e:
+        import traceback
+        return jsonify({"success": False, "error": str(e), "trace": traceback.format_exc()}), 500
+
 async def cto_auto_scanner_loop():
+    """Background scanner for the independent DEX Validated system."""
     while True:
         interval = 60
         try:
             settings = get_settings()
-            is_auto = str(settings.get('cto_auto_scan', 'false')).lower() == 'true'
-            target = settings.get('cto_target_channel', '')
-            workflow_id = settings.get('cto_workflow_id')
+            is_auto = str(settings.get('dex_validated_auto_scan', 'false')).lower() == 'true'
+            target = settings.get('dex_validated_target_channel', '')
+            workflow_id = settings.get('dex_validated_workflow_id', 'active_all')
+            test_mode = str(settings.get('dex_validated_test_mode', 'false')).lower() == 'true'
 
             try:
-                interval = int(settings.get('cto_scan_interval', 60))
-                if interval < 2:  # Safety boundary
-                    interval = 2
+                interval = int(settings.get('dex_validated_scan_interval', 60))
+                if interval < 10:  # Avoid hammering public Dexscreener endpoints.
+                    interval = 10
             except (ValueError, TypeError):
                 interval = 60
 
             if is_auto and tg_client and await tg_client.is_user_authorized():
-                debug_log(f"Running auto CTO scan (Interval: {interval}s)...")
-                await perform_cto_scan(target, workflow_id)
+                debug_log(f"Running DEX Validated scan (Interval: {interval}s)...")
+                await perform_cto_scan(target, workflow_id, test_mode, validated_only=True)
         except Exception as e:
             print(f"Error in cto_auto_scanner_loop: {e}", flush=True)
 
@@ -4896,7 +4925,7 @@ async def main():
     print("Waiting for Telegram settings...")
 
     # Start auto-scanner loops
-    # asyncio.create_task(cto_auto_scanner_loop())
+    asyncio.create_task(cto_auto_scanner_loop())
     asyncio.create_task(helius_polling_loop())
     asyncio.create_task(wallet_tracker_polling_loop())
     asyncio.create_task(supabase_sync_loop())

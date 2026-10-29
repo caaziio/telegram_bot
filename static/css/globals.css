@@ -452,6 +452,324 @@ body {
   }
 }
 
+/* Workflow workspace
+   Kept in the versioned stylesheet so the JS-rendered group UI and its layout
+   are always deployed and cached as one visual system. */
+.workflow-page-header {
+  align-items: flex-start;
+  gap: 24px;
+}
+
+.workflow-page-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.workflow-page-actions .btn-primary {
+  padding: 0.65rem 0.9rem;
+  font-size: 0.84rem;
+  white-space: nowrap;
+  box-shadow: none;
+}
+
+.workflow-control-bar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 150px;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.workflow-workspace {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  min-height: 560px;
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.012);
+}
+
+.flow-folder-rail {
+  padding: 14px 10px;
+  background: rgba(0, 0, 0, 0.16);
+  border-right: 1px solid var(--border-color);
+}
+
+.flow-folder-rail-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px 12px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.flow-folder-create-button {
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 6px;
+  background: rgba(99, 102, 241, 0.12);
+  color: #a5b4fc;
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.flow-folder-create-button:hover {
+  background: rgba(99, 102, 241, 0.24);
+  color: white;
+}
+
+.flow-folder-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 10px;
+  border-radius: 9px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  margin-bottom: 3px;
+}
+
+.flow-folder-item:hover {
+  color: white;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.flow-folder-item.active {
+  color: white;
+  background: rgba(99, 102, 241, 0.15);
+  box-shadow: inset 2px 0 #818cf8;
+}
+
+.flow-folder-item.drag-over {
+  background: rgba(99, 102, 241, 0.25);
+  outline: 1px solid #818cf8;
+}
+
+.flow-folder-item-icon {
+  width: 25px;
+  height: 25px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  flex: 0 0 auto;
+}
+
+.flow-folder-item-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.flow-folder-item-count {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.flow-list-panel {
+  min-width: 0;
+  padding: 18px;
+}
+
+.flow-list-panel .workflows-grid {
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.flow-list-panel .workflow-card {
+  min-width: 0;
+}
+
+.flow-list-panel .workflow-footer {
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.flow-list-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 15px;
+  margin-bottom: 16px;
+}
+
+.flow-list-heading h2 {
+  font-size: 1.1rem;
+  margin-bottom: 4px;
+}
+
+.flow-list-heading p {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.flow-group-action {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 7px;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.flow-group-action:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: white;
+}
+
+.workflow-card[draggable="true"] {
+  cursor: grab;
+}
+
+.workflow-card.workflow-dragging {
+  opacity: 0.45;
+  transform: scale(0.98);
+}
+
+.workflow-card--compact {
+  padding: 1rem 1.1rem;
+  cursor: pointer;
+}
+
+.workflow-card--compact:hover {
+  transform: none;
+  border-color: rgba(99, 102, 241, 0.38);
+  background: rgba(38, 41, 49, 0.68);
+}
+
+.workflow-card--expanded {
+  border-color: rgba(99, 102, 241, 0.42);
+  background: rgba(35, 38, 47, 0.72);
+}
+
+.workflow-card--compact .workflow-header {
+  margin-bottom: 0.65rem;
+}
+
+.workflow-card-chevron {
+  color: #818cf8;
+  font-size: 0.85rem;
+  width: 12px;
+  flex: 0 0 auto;
+}
+
+.workflow-compact-rule-count {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.workflow-compact-target {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  min-width: 0;
+}
+
+.workflow-card-details {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+  cursor: default;
+}
+
+.workflow-card-open-hint {
+  margin-top: 0.65rem;
+  color: #6b7280;
+  font-size: 0.7rem;
+  padding-left: 22px;
+}
+
+.workflow-quick-move {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 0.72rem;
+  max-width: 120px;
+}
+
+.workflow-empty-state {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: var(--text-muted);
+  border: 1px dashed var(--border-color);
+  border-radius: 14px;
+}
+
+.flow-group-manager-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+@media (max-width: 1050px) {
+  .workflow-page-header {
+    flex-direction: column;
+  }
+
+  .workflow-page-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 760px) {
+  .workflow-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .flow-folder-rail {
+    border-right: 0;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    overflow-x: auto;
+    gap: 4px;
+  }
+
+  .flow-folder-rail-title {
+    display: none;
+  }
+
+  .flow-folder-item {
+    width: auto;
+    min-width: max-content;
+    margin: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .workflow-control-bar {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ==========================================================================
    Token Wallet Data Page Styles
    ========================================================================== */

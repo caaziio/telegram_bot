@@ -8,6 +8,27 @@ let currentTgModalRawMessage = '';
 let tokenNameRuleIndex = null;
 let tokenNameDraft = { exact: [], contains: [] };
 
+function parseFlowGroups(raw) {
+    try {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});
+        return {
+            groups: Array.isArray(parsed.groups) ? parsed.groups.filter(g => g && g.id && g.name).map(g => ({ id: String(g.id), name: String(g.name) })) : [],
+            assignments: parsed.assignments && typeof parsed.assignments === 'object' ? parsed.assignments : {}
+        };
+    } catch (_) {
+        return { groups: [], assignments: {} };
+    }
+}
+
+let flowGroups = parseFlowGroups(settings.workflow_groups);
+let collapsedFlowGroups = new Set();
+try {
+    collapsedFlowGroups = new Set(JSON.parse(localStorage.getItem('teleflow_collapsed_flow_groups') || '[]').map(String));
+} catch (_) {}
+let activeFlowGroupView = 'all';
+try { activeFlowGroupView = localStorage.getItem('teleflow_active_flow_group') || 'all'; } catch (_) {}
+let expandedWorkflowCards = new Set();
+
 const TOKEN_NAME_FILTER_PREFIX = 'token_name_filter:';
 
 function parseTokenNameFilter(value) {
@@ -57,7 +78,7 @@ async function readJsonResponse(response, endpointName) {
 }
 
 function switchTab(tabId) {
-    const tabs = ['workflows', 'settings', 'wallet-tracker', 'token-data'];
+    const tabs = ['workflows', 'dex-validated', 'settings', 'wallet-tracker', 'token-data'];
     tabs.forEach(t => {
         const tabEl = document.getElementById('tab-' + t);
         const navEl = document.getElementById('nav-' + t);
@@ -76,6 +97,18 @@ function switchTab(tabId) {
     }
 }
 
+function showSystemLanding() {
+    const landing = document.getElementById('system-landing');
+    if (landing) landing.classList.remove('hidden');
+}
+
+function selectSystem(system) {
+    const landing = document.getElementById('system-landing');
+    if (landing) landing.classList.add('hidden');
+    try { sessionStorage.setItem('teleflow_active_system', system); } catch (_) {}
+    switchTab(system === 'dex' ? 'dex-validated' : 'workflows');
+}
+
 function renderWorkflows() {
     // Populate the dropdown selector in Scan History card
     const scanSelect = document.getElementById('scan-test-workflow');
@@ -90,24 +123,91 @@ function renderWorkflows() {
 
     populateTokenWorkflowPresets();
 
+    const dexWorkflow = document.getElementById('dex-validated-workflow');
+    if (dexWorkflow) {
+        const selected = settings.dex_validated_workflow_id || 'active_all';
+        dexWorkflow.innerHTML = '<option value="active_all">All active workflows</option>';
+        workflows.forEach(wf => {
+            if (wf.is_active) dexWorkflow.innerHTML += `<option value="${wf.id}">${escapeHtml(wf.name || 'Unnamed Flow')}</option>`;
+        });
+        dexWorkflow.value = Array.from(dexWorkflow.options).some(o => o.value === String(selected)) ? String(selected) : 'active_all';
+    }
+
     const grid = document.getElementById('workflows-grid');
     grid.innerHTML = '';
+    grid.style.display = 'block';
+
+    const validGroupIds = new Set(flowGroups.groups.map(group => group.id));
+    const allSections = [
+        ...flowGroups.groups,
+        { id: 'ungrouped', name: 'Ungrouped' }
+    ];
+    if (activeFlowGroupView !== 'all' && !allSections.some(group => group.id === activeFlowGroupView)) activeFlowGroupView = 'all';
+    const selectedGroup = activeFlowGroupView;
+    const statusFilter = document.getElementById('workflow-status-filter')?.value || 'all';
+    const search = String(document.getElementById('workflow-search')?.value || '').trim().toLowerCase();
+    const visibleWorkflows = workflows.filter(wf => {
+        const assigned = String(flowGroups.assignments[String(wf.id)] || '');
+        const resolvedGroup = validGroupIds.has(assigned) ? assigned : 'ungrouped';
+        if (selectedGroup !== 'all' && resolvedGroup !== selectedGroup) return false;
+        if (statusFilter === 'active' && !wf.is_active) return false;
+        if (statusFilter === 'paused' && wf.is_active) return false;
+        if (search) {
+            const haystack = [wf.name, wf.target_channel, wf.target_channel_id, ...(wf.rules || []).flatMap(rule => [rule.rule_type, rule.search_text, rule.replace_text])].join(' ').toLowerCase();
+            if (!haystack.includes(search)) return false;
+        }
+        return true;
+    });
+    const selectedMeta = selectedGroup === 'all' ? { id:'all', name:'All flows' } : allSections.find(group => group.id === selectedGroup);
+    const folderItems = [{ id:'all', name:'All flows' }, ...allSections].map(group => {
+        const count = group.id === 'all' ? workflows.length : workflows.filter(wf => {
+            const assigned = String(flowGroups.assignments[String(wf.id)] || '');
+            const resolved = validGroupIds.has(assigned) ? assigned : 'ungrouped';
+            return resolved === group.id;
+        }).length;
+        return `<button type="button" class="flow-folder-item${selectedGroup === group.id ? ' active' : ''}" data-group-id="${escapeHtml(group.id)}" onclick="selectFlowGroup('${escapeHtml(group.id)}')" ondragover="handleFolderDragOver(event, this)" ondragleave="handleFolderDragLeave(event, this)" ondrop="dropWorkflowOnFolder(event, '${escapeHtml(group.id)}', this)">
+            <span class="flow-folder-item-icon">${group.id === 'all' ? '✦' : group.id === 'ungrouped' ? '◇' : '▰'}</span><span class="flow-folder-item-name">${escapeHtml(group.name)}</span><span class="flow-folder-item-count">${count}</span>
+        </button>`;
+    }).join('');
+    grid.innerHTML = `<div class="workflow-workspace">
+        <aside class="flow-folder-rail"><div class="flow-folder-rail-title"><span>Groups</span><button type="button" class="flow-folder-create-button" onclick="openCreateFlowGroupModal()" title="Create a new group">＋ New</button></div>${folderItems}</aside>
+        <section class="flow-list-panel">
+            <div class="flow-list-heading"><div><h2>${escapeHtml(selectedMeta?.name || 'All flows')}</h2><p>${visibleWorkflows.length} shown · ${visibleWorkflows.filter(wf => wf.is_active).length} active</p></div>
+            <div style="display:flex;gap:6px;"><button type="button" class="flow-group-action" onclick="openModalForGroup('${selectedGroup === 'all' ? 'ungrouped' : escapeHtml(selectedGroup)}')">＋ New flow</button>${selectedGroup !== 'all' && selectedGroup !== 'ungrouped' ? `<button type="button" class="flow-group-action" onclick="openFlowGroupEditor('${escapeHtml(selectedGroup)}')">Manage group</button>` : ''}</div></div>
+            <div class="workflows-grid flow-group-grid" id="active-flow-grid"></div>
+        </section></div>`;
+    const activeGrid = document.getElementById('active-flow-grid');
+    if (!visibleWorkflows.length) {
+        activeGrid.innerHTML = `<div class="workflow-empty-state"><strong>${search || statusFilter !== 'all' ? 'No matching flows' : 'This group is empty'}</strong><div style="margin-top:7px;">${search || statusFilter !== 'all' ? 'Try clearing the search or status filter.' : 'Create a flow or drag one into this group.'}</div>${search || statusFilter !== 'all' ? '<button type="button" class="btn-primary" style="margin:18px auto 0;" onclick="clearWorkflowFilters()">Clear filters</button>' : ''}</div>`;
+    }
     
-    workflows.forEach(wf => {
+    visibleWorkflows.forEach(wf => {
         const card = document.createElement('div');
-        card.className = 'workflow-card';
+        const isExpanded = expandedWorkflowCards.has(String(wf.id));
+        card.className = `workflow-card workflow-card--compact${isExpanded ? ' workflow-card--expanded' : ''}`;
+        card.draggable = true;
+        card.dataset.workflowId = String(wf.id);
+        card.ondragstart = event => startWorkflowDrag(event, wf.id, card);
+        card.ondragend = () => card.classList.remove('workflow-dragging');
+        card.onclick = event => toggleWorkflowCard(event, wf.id);
         card.innerHTML = `
             <div class="workflow-header">
-                <div class="workflow-title">${wf.name || 'Unnamed Flow'}</div>
-                <div class="status-badge" style="${!wf.is_active ? 'background: rgba(239, 68, 68, 0.1); color: #ef4444;' : ''}">
-                    ${wf.is_active ? 'Active' : 'Paused'}
+                <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+                    <span class="workflow-card-chevron">${isExpanded ? '▾' : '▸'}</span>
+                    <div class="workflow-title">${wf.name || 'Unnamed Flow'}</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <span class="workflow-compact-rule-count">${(wf.rules || []).length} rule${(wf.rules || []).length === 1 ? '' : 's'}</span>
+                    <div class="status-badge" style="${!wf.is_active ? 'background: rgba(239, 68, 68, 0.1); color: #ef4444;' : ''}">
+                        ${wf.is_active ? 'Active' : 'Paused'}
+                    </div>
                 </div>
             </div>
-            <div style="font-size: 0.82rem; color: var(--text-muted); margin: 0.75rem 0 1rem 0; display: flex; align-items: center; gap: 6px;">
+            <div class="workflow-compact-target">
                 <span>📢 Target Group:</span>
                 <strong style="color: #f3f4f6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 80%;" title="${wf.target_channel || wf.target_channel_id || 'Fallback Group'}">${wf.target_channel || (wf.target_channel_id ? `Chat ${wf.target_channel_id}` : 'Fallback Group')}</strong>
             </div>
-            <div class="workflow-rules-preview" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 1.5rem; min-height: 40px; align-content: flex-start;">
+            ${isExpanded ? `<div class="workflow-card-details"><div class="workflow-rules-preview" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 1.5rem; min-height: 40px; align-content: flex-start;">
                 ${(wf.rules && wf.rules.length > 0) ? wf.rules.map(r => {
                     let label = '';
                     let color = 'var(--accent-color)';
@@ -165,7 +265,13 @@ function renderWorkflows() {
                 }).join('') : '<span style="color: var(--text-muted); font-size: 0.85rem; font-style: italic;">No active rules configured</span>'}
             </div>
             <div class="workflow-footer">
-                <div class="rules-count">${(wf.rules || []).length} Active Rules/Filters</div>
+                <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+                    <div class="rules-count">${(wf.rules || []).length} Rules</div>
+                    <select class="workflow-quick-move" title="Move to group" onchange="moveWorkflowToGroup(${wf.id}, this.value)">
+                        <option value="" ${!validGroupIds.has(String(flowGroups.assignments[String(wf.id)] || '')) ? 'selected' : ''}>Ungrouped</option>
+                        ${flowGroups.groups.map(group => `<option value="${escapeHtml(group.id)}" ${String(flowGroups.assignments[String(wf.id)] || '') === group.id ? 'selected' : ''}>${escapeHtml(group.name)}</option>`).join('')}
+                    </select>
+                </div>
                 <div style="display: flex; gap: 8px;">
                     <button class="btn-icon" onclick="duplicateWorkflow(${wf.id})" title="Duplicate Workflow">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
@@ -181,10 +287,278 @@ function renderWorkflows() {
                     </button>
                 </div>
             </div>
+            </div>` : '<div class="workflow-card-open-hint">Click to view filters and controls</div>'}
         `;
-        grid.appendChild(card);
+        activeGrid.appendChild(card);
     });
 
+}
+
+function toggleWorkflowCard(event, workflowId) {
+    if (event.target.closest('button, select, input, a')) return;
+    const key = String(workflowId);
+    if (expandedWorkflowCards.has(key)) expandedWorkflowCards.delete(key);
+    else expandedWorkflowCards.add(key);
+    renderWorkflows();
+}
+
+function toggleFlowGroupSection(button) {
+    const section = button.closest('.flow-group-section');
+    const groupGrid = section?.querySelector('.flow-group-grid');
+    const chevron = button.querySelector('.flow-group-chevron');
+    if (!groupGrid) return;
+    groupGrid.classList.toggle('hidden');
+    const groupId = String(section.dataset.groupId || '');
+    if (groupGrid.classList.contains('hidden')) collapsedFlowGroups.add(groupId);
+    else collapsedFlowGroups.delete(groupId);
+    if (chevron) chevron.textContent = groupGrid.classList.contains('hidden') ? '▸' : '▾';
+    try { localStorage.setItem('teleflow_collapsed_flow_groups', JSON.stringify([...collapsedFlowGroups])); } catch (_) {}
+}
+
+function setAllFlowGroupsCollapsed(collapsed) {
+    const ids = [...flowGroups.groups.map(group => group.id), 'ungrouped'];
+    collapsedFlowGroups = collapsed ? new Set(ids) : new Set();
+    try { localStorage.setItem('teleflow_collapsed_flow_groups', JSON.stringify([...collapsedFlowGroups])); } catch (_) {}
+    renderWorkflows();
+}
+
+function clearWorkflowFilters() {
+    const search = document.getElementById('workflow-search');
+    const status = document.getElementById('workflow-status-filter');
+    if (search) search.value = '';
+    if (status) status.value = 'all';
+    renderWorkflows();
+}
+
+function selectFlowGroup(groupId) {
+    activeFlowGroupView = String(groupId || 'all');
+    try { localStorage.setItem('teleflow_active_flow_group', activeFlowGroupView); } catch (_) {}
+    renderWorkflows();
+}
+
+function openModalForGroup(groupId) {
+    openModal();
+    renderFlowGroupOptions(groupId === 'ungrouped' ? '' : groupId);
+}
+
+function openFlowGroupEditor(groupId) {
+    openFlowGroupsModal();
+    setTimeout(() => document.getElementById(`flow-group-name-${groupId}`)?.focus(), 0);
+}
+
+function startWorkflowDrag(event, workflowId, card) {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(workflowId));
+    card.classList.add('workflow-dragging');
+}
+
+function handleFlowGroupDragOver(event, section) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    section.classList.add('drag-over');
+}
+
+function handleFlowGroupDragLeave(event, section) {
+    if (!section.contains(event.relatedTarget)) section.classList.remove('drag-over');
+}
+
+async function dropWorkflowIntoGroup(event, groupId, section) {
+    event.preventDefault();
+    section.classList.remove('drag-over');
+    const workflowId = event.dataTransfer.getData('text/plain');
+    if (workflowId) await moveWorkflowToGroup(workflowId, groupId === 'ungrouped' ? '' : groupId);
+}
+
+function handleFolderDragOver(event, item) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    item.classList.add('drag-over');
+}
+
+function handleFolderDragLeave(event, item) {
+    if (!item.contains(event.relatedTarget)) item.classList.remove('drag-over');
+}
+
+async function dropWorkflowOnFolder(event, groupId, item) {
+    event.preventDefault();
+    event.stopPropagation();
+    item.classList.remove('drag-over');
+    const workflowId = event.dataTransfer.getData('text/plain');
+    if (!workflowId || groupId === 'all') return;
+    await moveWorkflowToGroup(workflowId, groupId === 'ungrouped' ? '' : groupId);
+}
+
+async function moveWorkflowToGroup(workflowId, groupId) {
+    const key = String(workflowId);
+    const previous = flowGroups.assignments[key];
+    if (groupId) flowGroups.assignments[key] = String(groupId);
+    else delete flowGroups.assignments[key];
+    renderWorkflows();
+    if (!await saveFlowGroups()) {
+        if (previous) flowGroups.assignments[key] = previous;
+        else delete flowGroups.assignments[key];
+        renderWorkflows();
+    }
+}
+
+function renderFlowGroupOptions(selectedId = '') {
+    const select = document.getElementById('flow-group-id');
+    if (!select) return;
+    select.innerHTML = '<option value="">Ungrouped</option>' + flowGroups.groups.map(group =>
+        `<option value="${escapeHtml(group.id)}">${escapeHtml(group.name)}</option>`
+    ).join('');
+    select.value = flowGroups.groups.some(group => group.id === String(selectedId)) ? String(selectedId) : '';
+}
+
+async function saveFlowGroups(showError = true) {
+    try {
+        const serialized = JSON.stringify(flowGroups);
+        const response = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ workflow_groups: serialized })
+        });
+        const result = await readJsonResponse(response, 'Workflow groups');
+        if (!response.ok || !result.success) throw new Error(result.error || 'Unable to save groups');
+        settings.workflow_groups = serialized;
+        return true;
+    } catch (error) {
+        if (showError) alert('Failed to save workflow groups: ' + error.message);
+        return false;
+    }
+}
+
+function openFlowGroupsModal() {
+    renderFlowGroupsManager();
+    document.getElementById('flow-groups-modal')?.classList.remove('hidden');
+}
+
+function closeFlowGroupsModal() {
+    document.getElementById('flow-groups-modal')?.classList.add('hidden');
+}
+
+function ensureCreateFlowGroupModal() {
+    if (document.getElementById('create-flow-group-modal')) return;
+    document.body.insertAdjacentHTML('beforeend', `
+        <div id="create-flow-group-modal" class="modal-overlay hidden">
+            <div class="modal-content" style="max-width:460px;">
+                <div class="header" style="margin-bottom:1.25rem;">
+                    <div><h2>Create Group</h2><p style="color:var(--text-muted);font-size:.82rem;margin-top:4px;">Give this workflow folder a clear name.</p></div>
+                    <button class="btn-icon" type="button" onclick="closeCreateFlowGroupModal()" aria-label="Close create group dialog">×</button>
+                </div>
+                <label for="new-flow-group-name" style="display:block;color:var(--text-muted);font-size:.82rem;margin-bottom:7px;">Group name</label>
+                <input id="new-flow-group-name" class="form-input" placeholder="e.g. Boost Orders" onkeydown="handleFlowGroupNameKey(event)" />
+                <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:1.25rem;">
+                    <button type="button" class="btn-icon" style="padding:0 1rem;" onclick="closeCreateFlowGroupModal()">Cancel</button>
+                    <button type="button" class="btn-primary" onclick="createFlowGroup()">Create Group</button>
+                </div>
+            </div>
+        </div>`);
+}
+
+function openCreateFlowGroupModal() {
+    ensureCreateFlowGroupModal();
+    const input = document.getElementById('new-flow-group-name');
+    if (input) input.value = '';
+    document.getElementById('create-flow-group-modal')?.classList.remove('hidden');
+    setTimeout(() => input?.focus(), 0);
+}
+
+function closeCreateFlowGroupModal() {
+    document.getElementById('create-flow-group-modal')?.classList.add('hidden');
+}
+
+function renderFlowGroupsManager() {
+    const container = document.getElementById('flow-groups-list');
+    if (!container) return;
+    if (!flowGroups.groups.length) {
+        container.innerHTML = '<p style="color:var(--text-muted);font-size:.86rem;padding:1rem 0;">No groups to manage yet. Use the + beside Groups to create one.</p>';
+        return;
+    }
+    container.innerHTML = flowGroups.groups.map(group => {
+        const count = Object.values(flowGroups.assignments).filter(value => String(value) === group.id).length;
+        return `<div class="flow-group-manager-row">
+            <span style="display:flex;flex-direction:column;gap:1px;"><button type="button" class="btn-icon" onclick="moveFlowGroup('${escapeHtml(group.id)}', -1)" title="Move group up">▴</button><button type="button" class="btn-icon" onclick="moveFlowGroup('${escapeHtml(group.id)}', 1)" title="Move group down">▾</button></span>
+            <input class="form-input" id="flow-group-name-${escapeHtml(group.id)}" value="${escapeHtml(group.name)}" aria-label="Group name" />
+            <span class="flow-group-count">${count} flow${count === 1 ? '' : 's'}</span>
+            <button type="button" class="btn-icon" onclick="renameFlowGroup('${escapeHtml(group.id)}')" title="Save name">✓</button>
+            <button type="button" class="btn-icon" style="color:#ef4444;" onclick="deleteFlowGroup('${escapeHtml(group.id)}')" title="Delete group">×</button>
+        </div>`;
+    }).join('');
+}
+
+async function moveFlowGroup(groupId, direction) {
+    const index = flowGroups.groups.findIndex(group => group.id === groupId);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= flowGroups.groups.length) return;
+    [flowGroups.groups[index], flowGroups.groups[target]] = [flowGroups.groups[target], flowGroups.groups[index]];
+    renderFlowGroupsManager();
+    renderWorkflows();
+    if (!await saveFlowGroups()) {
+        [flowGroups.groups[index], flowGroups.groups[target]] = [flowGroups.groups[target], flowGroups.groups[index]];
+        renderFlowGroupsManager();
+        renderWorkflows();
+    }
+}
+
+async function createFlowGroup() {
+    const input = document.getElementById('new-flow-group-name');
+    const name = String(input?.value || '').trim();
+    if (!name) return;
+    if (flowGroups.groups.some(group => group.name.toLowerCase() === name.toLowerCase())) {
+        alert('A group with that name already exists.');
+        return;
+    }
+    const id = `group_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+    flowGroups.groups.push({ id, name });
+    if (await saveFlowGroups()) {
+        input.value = '';
+        closeCreateFlowGroupModal();
+        renderFlowGroupsManager();
+        renderWorkflows();
+    } else {
+        flowGroups.groups = flowGroups.groups.filter(group => group.id !== id);
+    }
+}
+
+async function renameFlowGroup(groupId) {
+    const group = flowGroups.groups.find(item => item.id === groupId);
+    const input = document.getElementById(`flow-group-name-${groupId}`);
+    const name = String(input?.value || '').trim();
+    if (!group || !name) return;
+    if (flowGroups.groups.some(item => item.id !== groupId && item.name.toLowerCase() === name.toLowerCase())) {
+        alert('A group with that name already exists.');
+        return;
+    }
+    const previous = group.name;
+    group.name = name;
+    if (!await saveFlowGroups()) group.name = previous;
+    renderFlowGroupsManager();
+    renderWorkflows();
+}
+
+async function deleteFlowGroup(groupId) {
+    const group = flowGroups.groups.find(item => item.id === groupId);
+    if (!group || !confirm(`Delete group "${group.name}"? Its flows will move to Ungrouped.`)) return;
+    const previousGroups = flowGroups.groups.map(item => ({ ...item }));
+    const previousAssignments = { ...flowGroups.assignments };
+    flowGroups.groups = flowGroups.groups.filter(item => item.id !== groupId);
+    Object.keys(flowGroups.assignments).forEach(workflowId => {
+        if (String(flowGroups.assignments[workflowId]) === groupId) delete flowGroups.assignments[workflowId];
+    });
+    if (await saveFlowGroups()) {
+        renderFlowGroupsManager();
+        renderWorkflows();
+    } else {
+        flowGroups.groups = previousGroups;
+        flowGroups.assignments = previousAssignments;
+    }
+}
+
+function handleFlowGroupNameKey(event) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    createFlowGroup();
 }
 
 function openModal() {
@@ -192,6 +566,7 @@ function openModal() {
     document.getElementById('modal-title').innerText = 'New Workflow';
     document.getElementById('flow-id').value = '';
     document.getElementById('flow-name').value = '';
+    renderFlowGroupOptions('');
     
     const sourceEl = document.getElementById('flow-source');
     if (sourceEl) sourceEl.value = '';
@@ -220,6 +595,7 @@ function editWorkflow(id) {
     document.getElementById('modal-title').innerText = 'Edit Workflow';
     document.getElementById('flow-id').value = wf.id;
     document.getElementById('flow-name').value = wf.name || '';
+    renderFlowGroupOptions(flowGroups.assignments[String(wf.id)] || '');
     
     const sourceEl = document.getElementById('flow-source');
     if (sourceEl) sourceEl.value = wf.source_channel || '';
@@ -505,6 +881,7 @@ async function saveWorkflow(e) {
     const sourceChannelId = document.getElementById('flow-source-id').value;
     const targetChannel = document.getElementById('flow-target').value;
     const targetChannelId = document.getElementById('flow-target-id').value;
+    const selectedGroupId = document.getElementById('flow-group-id')?.value || '';
     
     const workflow = {
         name: name,
@@ -536,10 +913,14 @@ async function saveWorkflow(e) {
                 workflow.id = result.id;
                 workflow.is_active = 1;
                 workflows.push(workflow);
+                if (selectedGroupId) flowGroups.assignments[String(result.id)] = selectedGroupId;
             } else {
                 const idx = workflows.findIndex(w => w.id == id);
                 workflows[idx] = { ...workflows[idx], ...workflow };
+                if (selectedGroupId) flowGroups.assignments[String(id)] = selectedGroupId;
+                else delete flowGroups.assignments[String(id)];
             }
+            await saveFlowGroups(false);
             renderWorkflows();
             closeModal();
         } else {
@@ -578,6 +959,8 @@ async function deleteWorkflow(id) {
         const result = await res.json();
         if (result.success) {
             workflows = workflows.filter(w => w.id != id);
+            delete flowGroups.assignments[String(id)];
+            await saveFlowGroups(false);
             renderWorkflows();
         } else {
             alert('Error deleting workflow: ' + (result.error || 'Unknown error'));
@@ -621,6 +1004,9 @@ async function duplicateWorkflow(id) {
             newWf.id = result.id;
             newWf.is_active = 1;
             workflows.push(newWf);
+            const sourceGroup = flowGroups.assignments[String(id)];
+            if (sourceGroup) flowGroups.assignments[String(result.id)] = sourceGroup;
+            await saveFlowGroups(false);
             renderWorkflows();
         } else {
             alert('Error duplicating workflow: ' + (result.error || 'Unknown error'));
@@ -1039,6 +1425,108 @@ async function logoutTelegram() {
     } catch (e) {
         alert("Logout error: " + e);
     }
+}
+
+function updateDexValidatedStatus() {
+    const badge = document.getElementById('dex-validated-status');
+    if (!badge) return;
+    const active = String(settings.dex_validated_auto_scan || 'false').toLowerCase() === 'true';
+    badge.textContent = active ? 'Active' : 'Inactive';
+    badge.style.color = active ? '#10b981' : '#9ca3af';
+    badge.style.background = active ? 'rgba(16,185,129,.12)' : 'rgba(255,255,255,.05)';
+}
+
+async function saveDexValidatedSettings(showConfirmation = true) {
+    const workflowId = document.getElementById('dex-validated-workflow')?.value || 'active_all';
+    const target = document.getElementById('dex-validated-target')?.value.trim() || '';
+    const interval = document.getElementById('dex-validated-interval')?.value || '60';
+    const autoScan = !!document.getElementById('dex-validated-auto')?.checked;
+    const testMode = !!document.getElementById('dex-validated-test')?.checked;
+    const payload = {
+        dex_validated_workflow_id: workflowId,
+        dex_validated_target_channel: target,
+        dex_validated_scan_interval: interval,
+        dex_validated_auto_scan: autoScan ? 'true' : 'false',
+        dex_validated_test_mode: testMode ? 'true' : 'false'
+    };
+    try {
+        const response = await fetch('/api/settings', {
+            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+        });
+        const result = await readJsonResponse(response, 'DEX Validated settings');
+        if (!response.ok || !result.success) throw new Error(result.error || 'Unable to save settings');
+        Object.assign(settings, payload);
+        updateDexValidatedStatus();
+        if (showConfirmation) alert('DEX Validated settings saved.');
+        return true;
+    } catch (error) {
+        alert('Failed to save DEX Validated settings: ' + error.message);
+        return false;
+    }
+}
+
+function renderDexValidatedResults(results) {
+    const container = document.getElementById('dex-validated-results');
+    const count = document.getElementById('dex-validated-count');
+    if (!container) return;
+    if (count) count.textContent = String(results.length);
+    if (!results.length) {
+        container.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:3rem 1rem;">No new approved Dexscreener events were found.</div>';
+        return;
+    }
+    container.innerHTML = results.map(item => {
+        const status = item.status || 'dropped';
+        const color = status === 'passed' ? '#10b981' : status === 'duplicate' ? '#f59e0b' : '#ef4444';
+        const label = status === 'passed' ? 'Forwarded' : status === 'duplicate' ? 'Duplicate' : 'Dropped';
+        const ca = escapeHtml(item.ca || 'Unknown');
+        const chart = item.dex_url ? `<a href="${escapeHtml(item.dex_url)}" target="_blank" rel="noopener" style="color:#60a5fa;text-decoration:none;">Chart ↗</a>` : '';
+        return `<div style="padding:14px;border:1px solid var(--border-color);border-left:3px solid ${color};border-radius:9px;background:rgba(0,0,0,.16);">
+            <div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:8px;"><strong>${escapeHtml(item.name || 'Unknown token')}</strong><span style="color:${color};font-size:.78rem;font-weight:700;">${label}</span></div>
+            <div style="font-size:.76rem;color:var(--text-muted);word-break:break-all;margin-bottom:8px;">${ca}</div>
+            <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;font-size:.8rem;margin-bottom:8px;">
+                <span>Event: <strong>${escapeHtml(item.signal_type || 'DEX order')}</strong></span><span>Status: <strong>${escapeHtml(item.order_status || 'approved')}</strong></span>
+                <span>MC: <strong>${escapeHtml(item.market_cap || 'Unknown')}</strong></span><span>Age: <strong>${escapeHtml(item.age || 'Unknown')}</strong></span>
+            </div>
+            <div style="display:flex;justify-content:space-between;gap:10px;color:var(--text-muted);font-size:.77rem;"><span>${escapeHtml(item.reason || '')}</span>${chart}</div>
+        </div>`;
+    }).join('');
+}
+
+async function runDexValidatedScan() {
+    const button = document.getElementById('btn-run-dex-validated');
+    const container = document.getElementById('dex-validated-results');
+    if (button) { button.disabled = true; button.textContent = 'Scanning…'; }
+    if (container) container.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:3rem 1rem;">Checking Dexscreener orders and boosts…</div>';
+    try {
+        if (!await saveDexValidatedSettings(false)) return;
+        const response = await fetch('/api/dex-validated/scan', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                target_channel: settings.dex_validated_target_channel || '',
+                workflow_id: settings.dex_validated_workflow_id || 'active_all',
+                test_mode: String(settings.dex_validated_test_mode).toLowerCase() === 'true'
+            })
+        });
+        const result = await readJsonResponse(response, 'DEX Validated scanner');
+        if (!response.ok || !result.success) throw new Error(result.error || 'Scan failed');
+        renderDexValidatedResults(result.results || []);
+    } catch (error) {
+        if (container) container.innerHTML = `<div class="result-error">${escapeHtml(error.message)}</div>`;
+    } finally {
+        if (button) { button.disabled = false; button.textContent = 'Run Now'; }
+    }
+}
+
+function initializeDexValidated() {
+    const target = document.getElementById('dex-validated-target');
+    const interval = document.getElementById('dex-validated-interval');
+    const autoScan = document.getElementById('dex-validated-auto');
+    const testMode = document.getElementById('dex-validated-test');
+    if (target) target.value = settings.dex_validated_target_channel || '';
+    if (interval) interval.value = ['30','60','120','300'].includes(String(settings.dex_validated_scan_interval)) ? String(settings.dex_validated_scan_interval) : '60';
+    if (autoScan) autoScan.checked = String(settings.dex_validated_auto_scan || 'false').toLowerCase() === 'true';
+    if (testMode) testMode.checked = String(settings.dex_validated_test_mode || 'false').toLowerCase() === 'true';
+    updateDexValidatedStatus();
 }
 
 
@@ -1504,6 +1992,14 @@ document.addEventListener('click', function(e) {
     const testerModal = document.getElementById('tester-modal');
     if (testerModal && e.target === testerModal) {
         closeTesterModal();
+    }
+    const groupsModal = document.getElementById('flow-groups-modal');
+    if (groupsModal && e.target === groupsModal) {
+        closeFlowGroupsModal();
+    }
+    const createGroupModal = document.getElementById('create-flow-group-modal');
+    if (createGroupModal && e.target === createGroupModal) {
+        closeCreateFlowGroupModal();
     }
 });
 
@@ -2433,6 +2929,7 @@ async function syncSupabaseData() {
 // ==========================================
 renderWorkflows();
 populateTokenWorkflowPresets();
+initializeDexValidated();
 loadRealtimePayments();
 setInterval(loadRealtimePayments, 15000);
 updateLiveScanButtonUI();

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TeleFlow Dashboard</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/globals.css') }}?v=27">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/globals.css') }}?v={{ app_version }}">
     <style>
         .hidden { display: none !important; }
         
@@ -236,9 +236,108 @@
         .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
         input:checked + .slider { background-color: #10b981; }
         input:checked + .slider:before { transform: translateX(20px); }
+
+        .system-landing {
+            position: fixed;
+            inset: 0;
+            z-index: 2000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            background: #0f1115;
+            background-image: radial-gradient(circle at 20% 30%, rgba(99,102,241,.16), transparent 34%), radial-gradient(circle at 80% 65%, rgba(16,185,129,.12), transparent 34%);
+        }
+        .system-landing__inner { width: min(900px, 100%); text-align: center; }
+        .system-landing__brand { color: #a5b4fc; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; font-size: .78rem; }
+        .system-landing h1 { font-size: clamp(2rem, 5vw, 3.5rem); margin: 14px 0 10px; }
+        .system-landing__subtitle { color: var(--text-muted); margin-bottom: 34px; }
+        .system-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+        .system-option {
+            text-align: left;
+            color: white;
+            background: rgba(30,33,40,.82);
+            border: 1px solid var(--border-color);
+            border-radius: 18px;
+            padding: 26px;
+            cursor: pointer;
+            transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+        }
+        .system-option:hover { transform: translateY(-4px); border-color: #818cf8; box-shadow: 0 18px 45px rgba(0,0,0,.28); }
+        .system-option--dex:hover { border-color: #10b981; }
+        .system-option__icon { font-size: 2rem; margin-bottom: 18px; }
+        .system-option h2 { margin-bottom: 8px; font-size: 1.35rem; }
+        .system-option p { color: var(--text-muted); line-height: 1.55; font-size: .9rem; }
+        .system-option__action { display: inline-block; margin-top: 22px; font-weight: 700; color: #a5b4fc; }
+        .system-option--dex .system-option__action { color: #6ee7b7; }
+        .system-switcher { margin: 0 0 20px; padding: 9px 12px; width: 100%; justify-content: center; }
+        .workflow-page-header { align-items:flex-start; gap:24px; }
+        .workflow-page-actions { display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap; }
+        .workflow-page-actions .btn-primary { padding:.65rem .9rem;font-size:.84rem;white-space:nowrap;box-shadow:none; }
+        .workflow-control-bar { display:grid; grid-template-columns:minmax(220px,1fr) 150px; gap:10px; align-items:center; margin-bottom:14px; }
+        .workflow-workspace { display:grid;grid-template-columns:210px minmax(0,1fr);min-height:560px;border:1px solid var(--border-color);border-radius:16px;overflow:hidden;background:rgba(255,255,255,.012); }
+        .flow-folder-rail { padding:14px 10px;background:rgba(0,0,0,.16);border-right:1px solid var(--border-color); }
+        .flow-folder-rail-title { display:flex;align-items:center;justify-content:space-between;padding:4px 8px 12px;color:var(--text-muted);font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em; }
+        .flow-folder-item { width:100%;display:flex;align-items:center;gap:9px;border:0;background:transparent;color:var(--text-muted);padding:10px;border-radius:9px;cursor:pointer;text-align:left;font:inherit;margin-bottom:3px; }
+        .flow-folder-item:hover { color:white;background:rgba(255,255,255,.04); }
+        .flow-folder-item.active { color:white;background:rgba(99,102,241,.15);box-shadow:inset 2px 0 #818cf8; }
+        .flow-folder-item.drag-over { background:rgba(99,102,241,.25);outline:1px solid #818cf8; }
+        .flow-folder-item-icon { width:25px;height:25px;display:grid;place-items:center;border-radius:7px;background:rgba(255,255,255,.05);flex:0 0 auto; }
+        .flow-folder-item-name { flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.84rem;font-weight:600; }
+        .flow-folder-item-count { font-size:.7rem;color:var(--text-muted); }
+        .flow-list-panel { min-width:0;padding:18px; }
+        .flow-list-panel .workflows-grid { grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); }
+        .flow-list-panel .workflow-card { min-width:0; }
+        .flow-list-panel .workflow-footer { gap:10px;flex-wrap:wrap; }
+        .flow-list-heading { display:flex;align-items:flex-start;justify-content:space-between;gap:15px;margin-bottom:16px; }
+        .flow-list-heading h2 { font-size:1.1rem;margin-bottom:4px; }
+        .flow-list-heading p { color:var(--text-muted);font-size:.78rem; }
+        .flow-group-section { margin-bottom: 1.5rem; border:1px solid var(--border-color); border-radius:14px; background:rgba(255,255,255,.012); overflow:hidden; transition:border-color .2s, background .2s; }
+        .flow-group-section.drag-over { border-color:#818cf8; background:rgba(99,102,241,.08); }
+        .flow-group-header { width:100%; display:flex; justify-content:space-between; align-items:center; gap:12px; color:white; background:rgba(255,255,255,.025); padding:14px 16px; font:inherit; font-weight:700; }
+        .flow-group-header-main { display:flex;align-items:center;gap:10px;min-width:0;cursor:pointer;flex:1; }
+        .flow-group-folder { width:34px;height:34px;border-radius:9px;display:grid;place-items:center;background:rgba(99,102,241,.13);color:#a5b4fc;flex:0 0 auto; }
+        .flow-group-title { overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+        .flow-group-summary { color:var(--text-muted);font-size:.74rem;font-weight:500;margin-top:3px; }
+        .flow-group-actions { display:flex;align-items:center;gap:5px; }
+        .flow-group-action { border:0;background:transparent;color:var(--text-muted);cursor:pointer;border-radius:7px;padding:7px 9px;font:inherit;font-size:.78rem; }
+        .flow-group-action:hover { background:rgba(255,255,255,.06);color:white; }
+        .flow-group-count { color:var(--text-muted); font-size:.76rem; font-weight:600; white-space:nowrap; }
+        .flow-group-grid { padding:14px; }
+        .flow-group-grid:empty::after { content:'Drop flows here or create a new one'; color:var(--text-muted); font-size:.85rem; padding:24px; border:1px dashed var(--border-color); border-radius:10px; text-align:center; }
+        .flow-group-manager-row { display:grid; grid-template-columns:auto minmax(0,1fr) auto auto auto; align-items:center; gap:9px; padding:9px 0; border-bottom:1px solid var(--border-color); }
+        .workflow-card[draggable="true"] { cursor:grab; }
+        .workflow-card.workflow-dragging { opacity:.45;transform:scale(.98); }
+        .workflow-quick-move { background:rgba(255,255,255,.04);border:1px solid var(--border-color);color:var(--text-muted);border-radius:6px;padding:4px 6px;font-size:.72rem;max-width:120px; }
+        .workflow-empty-state { text-align:center;padding:3rem 1rem;color:var(--text-muted);border:1px dashed var(--border-color);border-radius:14px; }
+        @media (max-width:1050px) { .workflow-page-header { flex-direction:column; } .workflow-page-actions { justify-content:flex-start; } }
+        @media (max-width:760px) { .workflow-workspace { grid-template-columns:1fr; } .flow-folder-rail { border-right:0;border-bottom:1px solid var(--border-color);display:flex;overflow-x:auto;gap:4px; } .flow-folder-rail-title { display:none; } .flow-folder-item { width:auto;min-width:max-content;margin:0; } }
+        @media (max-width:560px) { .workflow-control-bar { grid-template-columns:1fr; } .flow-group-actions .flow-group-action-label { display:none; } }
+        @media (max-width: 720px) { .system-options { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
+    <div id="system-landing" class="system-landing">
+        <div class="system-landing__inner">
+            <div class="system-landing__brand">TeleFlow</div>
+            <h1>Choose a monitoring system</h1>
+            <p class="system-landing__subtitle">Each scanner runs independently with its own trigger and configuration.</p>
+            <div class="system-options">
+                <button type="button" class="system-option" onclick="selectSystem('sol')">
+                    <div class="system-option__icon">◎</div>
+                    <h2>SOL Payment</h2>
+                    <p>Monitor Solana wallet payments through Helius, discover the related token, apply filters, and forward passing signals.</p>
+                    <span class="system-option__action">Open SOL Payment →</span>
+                </button>
+                <button type="button" class="system-option system-option--dex" onclick="selectSystem('dex')">
+                    <div class="system-option__icon">✓</div>
+                    <h2>DEX Validated</h2>
+                    <p>Monitor Dexscreener-confirmed orders and boosts, enrich the token, apply filters, and forward validated signals.</p>
+                    <span class="system-option__action">Open DEX Validated →</span>
+                </button>
+            </div>
+        </div>
+    </div>
     <div class="dashboard-container">
         <!-- Sidebar -->
         <aside class="sidebar">
@@ -253,9 +352,15 @@
             </div>
 
             <nav>
+                <button type="button" class="btn-secondary system-switcher" onclick="showSystemLanding()">⇄ Change System</button>
                 <div class="nav-link active" id="nav-workflows" onclick="switchTab('workflows')">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
                     Workflows
+                </div>
+
+                <div class="nav-link" id="nav-dex-validated" onclick="switchTab('dex-validated')">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"></path><circle cx="12" cy="12" r="10"></circle></svg>
+                    DEX Validated
                 </div>
 
                 <div class="nav-link" id="nav-settings" onclick="switchTab('settings')">
@@ -286,30 +391,99 @@
             
             <!-- Workflows Tab -->
             <div id="tab-workflows">
-                <div class="header">
+                <div class="header workflow-page-header">
                     <div class="header-title">
-                        <h1>Your Workflows</h1>
-                        <p>Manage your automated channel routing and filters</p>
+                        <h1>SOL Payment Workflows</h1>
+                        <p>Manage payment-triggered channel routing and filters</p>
                     </div>
-                    <div style="display: flex; gap: 10px; align-items: center;">
+                    <div class="workflow-page-actions">
                         <button class="btn-primary" id="btn-toggle-live-scan" onclick="toggleLiveScan()" style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.15); color: var(--text-muted); box-shadow: none;">
-                            ⚫ Start Live Scan
+                            ● Live Scan
                         </button>
                         <button class="btn-primary" type="button" onclick="openTesterModal()" style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); color: #6ee7b7; box-shadow: none;">
-                            🧪 Test Flow
+                            Test Flow
+                        </button>
+                        <button class="btn-primary" type="button" onclick="openFlowGroupsModal()" style="background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.4);color:#a5b4fc;box-shadow:none;">
+                            Manage Groups
                         </button>
                         <button class="btn-primary" onclick="openModal()">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                            Add Flow
+                            New Flow
                         </button>
                     </div>
+                </div>
+                <div class="workflow-control-bar">
+                    <input id="workflow-search" class="form-input" placeholder="Search flows, targets, or rules…" oninput="renderWorkflows()" />
+                    <select id="workflow-status-filter" class="form-input" onchange="renderWorkflows()"><option value="all">All statuses</option><option value="active">Active only</option><option value="paused">Paused only</option></select>
                 </div>
                 <div class="workflows-grid" id="workflows-grid">
                     <!-- Workflows populated by JS -->
                 </div>
             </div>
 
+            <!-- Independent DEX Validated System -->
+            <div id="tab-dex-validated" class="hidden">
+                <div class="header">
+                    <div class="header-title">
+                        <h1>DEX Validated</h1>
+                        <p>Forward Dexscreener-confirmed orders and boosts after your workflow filters pass</p>
+                    </div>
+                    <span id="dex-validated-status" class="status-badge">Inactive</span>
+                </div>
 
+                <div class="tester-container" style="align-items: stretch; margin-bottom: 2rem;">
+                    <div class="workflow-card" style="flex: 1; min-width: 320px;">
+                        <h3 style="margin-bottom: 1rem; color: #6ee7b7;">Scanner configuration</h3>
+                        <div class="form-group">
+                            <label>Workflow filters</label>
+                            <select id="dex-validated-workflow" class="form-input">
+                                <option value="active_all">All active workflows</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Fallback Telegram channel ID</label>
+                            <input id="dex-validated-target" class="form-input" placeholder="-1001234567890" />
+                            <small style="display:block; color:var(--text-muted); margin-top:6px;">A workflow's own target takes priority. This target is used only as fallback.</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Scan interval</label>
+                            <select id="dex-validated-interval" class="form-input">
+                                <option value="30">30 seconds</option>
+                                <option value="60">1 minute</option>
+                                <option value="120">2 minutes</option>
+                                <option value="300">5 minutes</option>
+                            </select>
+                        </div>
+                        <div style="display:flex; justify-content:space-between; align-items:center; padding:14px 0; border-top:1px solid var(--border-color);">
+                            <div><strong>Automatic scanning</strong><div style="font-size:.78rem;color:var(--text-muted);margin-top:4px;">Independent from SOL Payment</div></div>
+                            <label class="switch"><input type="checkbox" id="dex-validated-auto"><span class="slider"></span></label>
+                        </div>
+                        <div style="display:flex; justify-content:space-between; align-items:center; padding:14px 0; border-top:1px solid var(--border-color);">
+                            <div><strong>Test mode</strong><div style="font-size:.78rem;color:var(--text-muted);margin-top:4px;">Do not persist duplicate records</div></div>
+                            <label class="switch"><input type="checkbox" id="dex-validated-test"><span class="slider"></span></label>
+                        </div>
+                        <div style="display:flex; gap:10px; margin-top:16px;">
+                            <button type="button" class="btn-primary" onclick="saveDexValidatedSettings()" style="flex:1; justify-content:center;">Save Settings</button>
+                            <button type="button" class="btn-primary" id="btn-run-dex-validated" onclick="runDexValidatedScan()" style="flex:1; justify-content:center; background:linear-gradient(135deg,#059669,#10b981);">Run Now</button>
+                        </div>
+                    </div>
+
+                    <div class="workflow-card" style="flex: 1.35; min-width: 340px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+                            <h3>Validated event results</h3>
+                            <span id="dex-validated-count" class="status-badge">0</span>
+                        </div>
+                        <div id="dex-validated-results" style="max-height:520px;overflow:auto;display:flex;flex-direction:column;gap:10px;">
+                            <div style="text-align:center;color:var(--text-muted);padding:3rem 1rem;">Run the scanner to view approved orders and boosts.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="workflow-card">
+                    <h3 style="margin-bottom:.75rem;">What qualifies</h3>
+                    <p style="color:var(--text-muted);line-height:1.6;font-size:.88rem;">This system processes Dexscreener orders only after their status is <strong style="color:#6ee7b7;">approved</strong>. Candidate tokens come from the latest profile and boost feeds. Exact duplicate events are skipped using contract address, order type, payment timestamp, and status.</p>
+                </div>
+            </div>
 
             <!-- Settings Tab -->
             <div id="tab-settings" class="hidden">
@@ -943,6 +1117,12 @@
                         <label>Workflow Name</label>
                         <input class="form-input" id="flow-name" placeholder="e.g. VIP Signals Forwarder" />
                     </div>
+                    <div class="form-group">
+                        <label>Flow Group</label>
+                        <select class="form-input" id="flow-group-id">
+                            <option value="">Ungrouped</option>
+                        </select>
+                    </div>
                     <input type="hidden" id="flow-source" />
                     <input type="hidden" id="flow-source-id" />
                     <div class="form-group" style="position: relative;">
@@ -982,6 +1162,33 @@
                         <button type="submit" class="btn-primary">Save Workflow</button>
                     </div>
                 </form>
+            </div>
+        </div>
+
+        <!-- Create Flow Group -->
+        <div id="create-flow-group-modal" class="modal-overlay hidden">
+            <div class="modal-content" style="max-width:460px;">
+                <div class="header" style="margin-bottom:1.25rem;">
+                    <div><h2>Create Group</h2><p style="color:var(--text-muted);font-size:.82rem;margin-top:4px;">Give this workflow folder a clear name.</p></div>
+                    <button class="btn-icon" type="button" onclick="closeCreateFlowGroupModal()" aria-label="Close create group dialog">×</button>
+                </div>
+                <label for="new-flow-group-name" style="display:block;color:var(--text-muted);font-size:.82rem;margin-bottom:7px;">Group name</label>
+                <input id="new-flow-group-name" class="form-input" placeholder="e.g. Boost Orders" onkeydown="handleFlowGroupNameKey(event)" />
+                <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:1.25rem;">
+                    <button type="button" class="btn-icon" style="padding:0 1rem;" onclick="closeCreateFlowGroupModal()">Cancel</button>
+                    <button type="button" class="btn-primary" onclick="createFlowGroup()">Create Group</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Flow Groups Manager -->
+        <div id="flow-groups-modal" class="modal-overlay hidden">
+            <div class="modal-content" style="max-width:620px;">
+                <div class="header" style="margin-bottom:1.25rem;">
+                    <div><h2>Manage Flow Groups</h2><p style="color:var(--text-muted);font-size:.82rem;margin-top:4px;">Deleting a group moves its flows to Ungrouped.</p></div>
+                    <button class="btn-icon" type="button" onclick="closeFlowGroupsModal()" aria-label="Close group manager">×</button>
+                </div>
+                <div id="flow-groups-list"></div>
             </div>
         </div>
 
@@ -1096,6 +1303,6 @@
         const initialWorkflows = {{ workflows | tojson | safe }};
         const initialSettings = {{ settings | tojson | safe }};
     </script>
-    <script src="{{ url_for('static', filename='js/app.js') }}?v=38"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v={{ app_version }}"></script>
 </body>
 </html>
