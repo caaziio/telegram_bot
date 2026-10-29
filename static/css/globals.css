@@ -36,83 +36,374 @@ body {
 .dashboard-container {
   display: flex;
   width: 100%;
+  min-height: 100vh;
+  background: #000000;
 }
 
-.sidebar {
-  width: 260px;
-  background: #08080a;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-right: 1px solid var(--border-color);
-  padding: 2rem 1.5rem;
+/* Grok Dual-Tier Sidebar */
+.grok-sidebar {
+  display: flex;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  z-index: 100;
+  flex-shrink: 0;
+  background: #000000;
+  user-select: none;
+}
+
+/* Tier 1: Slim Icon Rail */
+.grok-rail {
+  width: 60px;
+  background: #000000;
+  border-right: 1px solid rgba(255, 255, 255, 0.07);
   display: flex;
   flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 0;
+  z-index: 2;
 }
 
-.logo-container {
+.grok-rail-top,
+.grok-rail-bottom {
   display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 12px;
-  margin-bottom: 3rem;
 }
 
-.logo-icon {
-  width: 32px;
-  height: 32px;
-  background: var(--gradient-main);
-  border-radius: 8px;
+.grok-rail-nav {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin: auto 0;
+}
+
+.grok-rail-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: transparent;
+  border: none;
+  color: #71717a;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: bold;
-  box-shadow: 0 0 15px var(--accent-glow);
-}
-
-.logo-text {
-  font-size: 1.25rem;
-  font-weight: 700;
-  letter-spacing: -0.5px;
-}
-
-.app-version {
-  margin-top: auto;
-  padding: 0.75rem 1rem 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  color: #6b7280;
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-}
-
-.nav-link {
-  padding: 0.75rem 1rem;
-  border-radius: 8px;
-  color: var(--text-muted);
-  text-decoration: none;
-  font-weight: 500;
-  margin-bottom: 0.5rem;
-  transition: all 0.2s ease;
   cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  text-decoration: none;
+}
+
+.grok-rail-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.grok-rail-btn.active {
+  background: #083344;
+  color: #22d3ee;
+  box-shadow: 0 0 14px rgba(6, 182, 212, 0.25);
+}
+
+.grok-rail-btn.active svg {
+  stroke: #22d3ee;
+}
+
+.grok-hamburger-btn {
+  color: #9ca3af;
+}
+
+.grok-hamburger-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.rail-badge-dot {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+  display: none;
+  animation: greenDotPulse 2s infinite ease-in-out;
+}
+
+.rail-badge-dot.active {
+  display: block;
+}
+
+/* Tier 2: Grok Folders Drawer */
+.grok-drawer {
+  width: 240px;
+  background: #08090c;
+  border-right: 1px solid rgba(255, 255, 255, 0.07);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 14px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1), padding 0.22s ease, opacity 0.18s ease;
+}
+
+.grok-sidebar.grok-drawer-collapsed .grok-drawer {
+  width: 0;
+  padding: 16px 0;
+  opacity: 0;
+  border-right: none;
+  pointer-events: none;
+}
+
+.grok-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 2px 12px;
+}
+
+.grok-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.grok-logo-icon {
+  flex-shrink: 0;
+}
+
+.grok-brand-title {
+  font-weight: 800;
+  font-size: 1.15rem;
+  letter-spacing: 0.07em;
+  color: #ffffff;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.grok-drawer-collapse-btn {
+  background: transparent;
+  border: none;
+  color: #71717a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.grok-drawer-collapse-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.grok-search-box {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 7px 11px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 14px;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.grok-search-box:focus-within {
+  border-color: rgba(6, 182, 212, 0.45);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.15);
+}
+
+.grok-search-box svg {
+  color: #6b7280;
+  flex-shrink: 0;
+}
+
+.grok-search-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #ffffff;
+  font-size: 0.84rem;
+  width: 100%;
+  font-family: inherit;
+}
+
+.grok-search-input::placeholder {
+  color: #6b7280;
+}
+
+.grok-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 4px 8px;
+}
+
+.grok-section-title {
+  color: #6b7280;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.grok-add-folder-btn {
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.grok-add-folder-btn:hover {
+  color: #22d3ee;
+  background: rgba(6, 182, 212, 0.15);
+}
+
+.grok-folders-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+
+.grok-folder-item {
   display: flex;
   align-items: center;
   gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: #d1d5db;
+  font-size: 0.86rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+  border: 1px solid transparent;
 }
 
-.nav-link:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text-main);
+.grok-folder-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: #ffffff;
 }
 
-.nav-link.active {
-  background: rgba(6, 182, 212, 0.12);
+.grok-folder-item.active {
+  background: linear-gradient(90deg, #072a38 0%, #0d3846 100%);
   color: #22d3ee;
-  border-left: 3px solid var(--accent-color);
+  font-weight: 600;
+  box-shadow: 0 2px 10px rgba(6, 182, 212, 0.18);
+  border-left: 3px solid #06b6d4;
+}
+
+.grok-folder-item.drag-over {
+  background: rgba(6, 182, 212, 0.25);
+  border-color: #06b6d4;
+}
+
+.grok-folder-icon {
+  font-size: 0.95rem;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  color: #9ca3af;
+}
+
+.grok-folder-item.active .grok-folder-icon {
+  color: #22d3ee;
+}
+
+.grok-folder-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.grok-folder-badge {
+  background: rgba(255, 255, 255, 0.06);
+  color: #9ca3af;
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  margin-left: auto;
+}
+
+.grok-folder-item.active .grok-folder-badge {
+  background: rgba(6, 182, 212, 0.25);
+  color: #67e8f9;
+}
+
+.grok-folder-subitems {
+  margin-left: 18px;
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+  padding-left: 10px;
+  margin-top: 2px;
+  margin-bottom: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.grok-subfolder-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: #9ca3af;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.grok-subfolder-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: #ffffff;
+}
+
+.grok-subfolder-item.active {
+  background: rgba(6, 182, 212, 0.16);
+  color: #22d3ee;
+  font-weight: 600;
+}
+
+.grok-drawer-footer {
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.72rem;
+  color: #6b7280;
+}
+
+.app-version-tag {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.7rem;
+  color: #9ca3af;
 }
 
 .main-content {
   flex: 1;
-  padding: 3rem 4rem;
+  padding: 2.5rem 3rem;
+  min-width: 0;
   overflow-y: auto;
 }
 

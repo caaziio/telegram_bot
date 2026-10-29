@@ -48,16 +48,42 @@ function showAppToast(message, type = 'info', duration = 3000) {
 function parseFlowGroups(raw) {
     try {
         const parsed = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});
+        let groups = Array.isArray(parsed.groups) ? parsed.groups.filter(g => g && g.id && g.name).map(g => ({
+            id: String(g.id),
+            name: String(g.name),
+            color: g.color || 'cyan',
+            parent_id: g.parent_id ? String(g.parent_id) : null,
+            badge: g.badge ? String(g.badge) : null,
+            is_expanded: g.is_expanded !== undefined ? Boolean(g.is_expanded) : true
+        })) : [];
+
+        if (groups.length === 0) {
+            groups = [
+                { id: 'grouped', name: 'Grouped', color: 'cyan' },
+                { id: 'crypto-workflows', name: 'Crypto Workflows', color: 'cyan', is_expanded: true },
+                { id: 'arbitrage', name: 'Arbitrage', color: 'cyan', parent_id: 'crypto-workflows' },
+                { id: 'scalp-bots', name: 'Scalp Bots', color: 'cyan', parent_id: 'crypto-workflows' },
+                { id: 'indicators', name: 'Indicators', color: 'cyan', badge: '34' },
+                { id: 'grid-trades', name: 'Grid Trades', color: 'cyan', badge: '22' }
+            ];
+        }
+
         return {
-            groups: Array.isArray(parsed.groups) ? parsed.groups.filter(g => g && g.id && g.name).map(g => ({
-                id: String(g.id),
-                name: String(g.name),
-                color: g.color || 'indigo'
-            })) : [],
+            groups: groups,
             assignments: parsed.assignments && typeof parsed.assignments === 'object' ? parsed.assignments : {}
         };
     } catch (_) {
-        return { groups: [], assignments: {} };
+        return {
+            groups: [
+                { id: 'grouped', name: 'Grouped', color: 'cyan' },
+                { id: 'crypto-workflows', name: 'Crypto Workflows', color: 'cyan', is_expanded: true },
+                { id: 'arbitrage', name: 'Arbitrage', color: 'cyan', parent_id: 'crypto-workflows' },
+                { id: 'scalp-bots', name: 'Scalp Bots', color: 'cyan', parent_id: 'crypto-workflows' },
+                { id: 'indicators', name: 'Indicators', color: 'cyan', badge: '34' },
+                { id: 'grid-trades', name: 'Grid Trades', color: 'cyan', badge: '22' }
+            ],
+            assignments: {}
+        };
     }
 }
 
@@ -66,8 +92,8 @@ let collapsedFlowGroups = new Set();
 try {
     collapsedFlowGroups = new Set(JSON.parse(localStorage.getItem('teleflow_collapsed_flow_groups') || '[]').map(String));
 } catch (_) {}
-let activeFlowGroupView = 'all';
-try { activeFlowGroupView = localStorage.getItem('teleflow_active_flow_group') || 'all'; } catch (_) {}
+let activeFlowGroupView = 'crypto-workflows';
+try { activeFlowGroupView = localStorage.getItem('teleflow_active_flow_group') || 'crypto-workflows'; } catch (_) {}
 let expandedWorkflowCards = new Set();
 let expandedGroupDrawers = new Set();
 let selectedQuickGroupColor = 'cyan';
@@ -128,14 +154,23 @@ function switchTab(tabId) {
     tabs.forEach(t => {
         const tabEl = document.getElementById('tab-' + t);
         const navEl = document.getElementById('nav-' + t);
+        const railEl = document.getElementById('rail-nav-' + t);
         if (tabEl) tabEl.classList.add('hidden');
         if (navEl) navEl.classList.remove('active');
+        if (railEl) railEl.classList.remove('active');
     });
     
     const targetTab = document.getElementById('tab-' + tabId);
     const targetNav = document.getElementById('nav-' + tabId);
+    const targetRail = document.getElementById('rail-nav-' + tabId);
     if (targetTab) targetTab.classList.remove('hidden');
     if (targetNav) targetNav.classList.add('active');
+    if (targetRail) targetRail.classList.add('active');
+
+    if (tabId === 'workflows') {
+        renderGrokFoldersTree();
+        renderWorkflows();
+    }
 
     if (tabId === 'token-data') {
         const hasCache = renderTokenDataFromCache();
@@ -153,6 +188,127 @@ function selectSystem(system) {
     if (landing) landing.classList.add('hidden');
     try { sessionStorage.setItem('teleflow_active_system', system); } catch (_) {}
     switchTab(system === 'dex' ? 'dex-validated' : 'workflows');
+}
+
+function toggleGrokDrawer() {
+    const sidebar = document.querySelector('.grok-sidebar');
+    if (!sidebar) return;
+    sidebar.classList.toggle('grok-drawer-collapsed');
+    const isCollapsed = sidebar.classList.contains('grok-drawer-collapsed');
+    try {
+        localStorage.setItem('teleflow_grok_drawer_collapsed', isCollapsed ? 'true' : 'false');
+    } catch (_) {}
+}
+
+function handleGrokSearch(query) {
+    renderGrokFoldersTree();
+    const wfSearch = document.getElementById('workflow-search');
+    if (wfSearch) {
+        wfSearch.value = query;
+        renderWorkflows();
+    }
+}
+
+function toggleNotificationsModal() {
+    const isLive = String(settings.cto_auto_scan).toLowerCase() === 'true';
+    showAppToast(isLive ? '● Live Scan is actively monitoring Solana signals.' : 'Live Scan is currently paused.', isLive ? 'success' : 'info');
+}
+
+function renderGrokFoldersTree() {
+    const treeEl = document.getElementById('grok-folders-tree');
+    if (!treeEl) return;
+
+    if (!flowGroups.groups || flowGroups.groups.length === 0) {
+        flowGroups.groups = [
+            { id: 'grouped', name: 'Grouped', color: 'cyan' },
+            { id: 'crypto-workflows', name: 'Crypto Workflows', color: 'cyan', is_expanded: true },
+            { id: 'arbitrage', name: 'Arbitrage', color: 'cyan', parent_id: 'crypto-workflows' },
+            { id: 'scalp-bots', name: 'Scalp Bots', color: 'cyan', parent_id: 'crypto-workflows' },
+            { id: 'indicators', name: 'Indicators', color: 'cyan', badge: '34' },
+            { id: 'grid-trades', name: 'Grid Trades', color: 'cyan', badge: '22' }
+        ];
+        if (activeFlowGroupView === 'all') {
+            activeFlowGroupView = 'crypto-workflows';
+        }
+    }
+
+    const searchQuery = String(document.getElementById('grok-folder-search')?.value || '').trim().toLowerCase();
+    const parentGroups = flowGroups.groups.filter(g => !g.parent_id);
+    const childrenMap = {};
+    flowGroups.groups.forEach(g => {
+        if (g.parent_id) {
+            if (!childrenMap[g.parent_id]) childrenMap[g.parent_id] = [];
+            childrenMap[g.parent_id].push(g);
+        }
+    });
+
+    let html = '';
+
+    parentGroups.forEach(group => {
+        const children = childrenMap[group.id] || [];
+        const hasChildren = children.length > 0;
+        const isParentActive = activeFlowGroupView === group.id;
+
+        const assignedCount = workflows.filter(wf => {
+            const assigned = String(flowGroups.assignments[String(wf.id)] || '');
+            return assigned === group.id;
+        }).length;
+
+        const badgeValue = group.badge || (assignedCount > 0 ? String(assignedCount) : '');
+
+        if (searchQuery && !group.name.toLowerCase().includes(searchQuery) && !children.some(c => c.name.toLowerCase().includes(searchQuery))) {
+            return;
+        }
+
+        html += `
+            <div class="grok-folder-item ${isParentActive ? 'active' : ''}" 
+                 data-group-id="${escapeHtml(group.id)}"
+                 onclick="selectFlowGroup('${escapeHtml(group.id)}')"
+                 ondragover="handleFolderDragOver(event, this)" 
+                 ondragleave="handleFolderDragLeave(event, this)" 
+                 ondrop="dropWorkflowOnFolder(event, '${escapeHtml(group.id)}', this)">
+                <span class="grok-folder-icon">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="${isParentActive ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path>
+                    </svg>
+                </span>
+                <span class="grok-folder-name">${escapeHtml(group.name)}</span>
+                ${badgeValue ? `<span class="grok-folder-badge">${escapeHtml(badgeValue)}</span>` : ''}
+            </div>
+        `;
+
+        if (hasChildren && (isParentActive || group.is_expanded || searchQuery || children.some(c => c.id === activeFlowGroupView))) {
+            html += `<div class="grok-folder-subitems">`;
+            children.forEach(child => {
+                const isChildActive = activeFlowGroupView === child.id;
+                const childCount = workflows.filter(wf => {
+                    const assigned = String(flowGroups.assignments[String(wf.id)] || '');
+                    return assigned === child.id;
+                }).length;
+                const childBadge = child.badge || (childCount > 0 ? String(childCount) : '');
+
+                html += `
+                    <div class="grok-subfolder-item ${isChildActive ? 'active' : ''}"
+                         data-group-id="${escapeHtml(child.id)}"
+                         onclick="event.stopPropagation(); selectFlowGroup('${escapeHtml(child.id)}')"
+                         ondragover="handleFolderDragOver(event, this)" 
+                         ondragleave="handleFolderDragLeave(event, this)" 
+                         ondrop="dropWorkflowOnFolder(event, '${escapeHtml(child.id)}', this)">
+                        <span class="grok-folder-icon">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="${isChildActive ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path>
+                            </svg>
+                        </span>
+                        <span class="grok-folder-name">${escapeHtml(child.name)}</span>
+                        ${childBadge ? `<span class="grok-folder-badge">${escapeHtml(childBadge)}</span>` : ''}
+                    </div>
+                `;
+            });
+            html += `</div>`;
+        }
+    });
+
+    treeEl.innerHTML = html;
 }
 
 function renderWorkflows() {
@@ -183,19 +339,25 @@ function renderWorkflows() {
     grid.innerHTML = '';
     grid.style.display = 'block';
 
+    renderGrokFoldersTree();
+
     const validGroupIds = new Set(flowGroups.groups.map(group => group.id));
     const allSections = [
         ...flowGroups.groups,
         { id: 'ungrouped', name: 'Ungrouped' }
     ];
-    if (activeFlowGroupView !== 'all' && !allSections.some(group => group.id === activeFlowGroupView)) activeFlowGroupView = 'all';
+    if (activeFlowGroupView !== 'all' && !allSections.some(group => group.id === activeFlowGroupView)) activeFlowGroupView = 'crypto-workflows';
     const selectedGroup = activeFlowGroupView;
     const statusFilter = document.getElementById('workflow-status-filter')?.value || 'all';
     const search = String(document.getElementById('workflow-search')?.value || '').trim().toLowerCase();
+    
     const visibleWorkflows = workflows.filter(wf => {
         const assigned = String(flowGroups.assignments[String(wf.id)] || '');
         const resolvedGroup = validGroupIds.has(assigned) ? assigned : 'ungrouped';
-        if (selectedGroup !== 'all' && resolvedGroup !== selectedGroup) return false;
+        if (selectedGroup !== 'all' && resolvedGroup !== selectedGroup) {
+            const childGroups = flowGroups.groups.filter(g => g.parent_id === selectedGroup).map(g => g.id);
+            if (!childGroups.includes(resolvedGroup)) return false;
+        }
         if (statusFilter === 'active' && !wf.is_active) return false;
         if (statusFilter === 'paused' && wf.is_active) return false;
         if (search) {
@@ -204,59 +366,36 @@ function renderWorkflows() {
         }
         return true;
     });
-    const selectedMeta = selectedGroup === 'all' ? { id:'all', name:'All flows' } : allSections.find(group => group.id === selectedGroup);
-    const folderItems = [{ id:'all', name:'All flows' }, ...allSections].map(group => {
-        const isCustom = group.id !== 'all' && group.id !== 'ungrouped';
-        const theme = isCustom ? getGroupTheme(group.color) : null;
-        const count = group.id === 'all' ? workflows.length : workflows.filter(wf => {
-            const assigned = String(flowGroups.assignments[String(wf.id)] || '');
-            const resolved = validGroupIds.has(assigned) ? assigned : 'ungrouped';
-            return resolved === group.id;
-        }).length;
-        const iconStyle = theme ? `background:${theme.bg}; color:${theme.hex}; border:1px solid ${theme.border};` : '';
-        const iconChar = group.id === 'all' ? '✦' : group.id === 'ungrouped' ? '◇' : '📁';
-        return `<div class="flow-folder-item${selectedGroup === group.id ? ' active' : ''}" data-group-id="${escapeHtml(group.id)}" onclick="selectFlowGroup('${escapeHtml(group.id)}')" ondragover="handleFolderDragOver(event, this)" ondragleave="handleFolderDragLeave(event, this)" ondrop="dropWorkflowOnFolder(event, '${escapeHtml(group.id)}', this)">
-            <span class="flow-folder-item-icon" style="${iconStyle}">${iconChar}</span>
-            <span class="flow-folder-item-name">${escapeHtml(group.name)}</span>
-            <span class="flow-folder-item-count">${count}</span>
-            ${isCustom ? `
-                <div class="flow-folder-item-actions">
-                    <button type="button" class="flow-folder-action-btn" onclick="event.stopPropagation(); openFlowGroupEditor('${escapeHtml(group.id)}')" title="Edit group">✏️</button>
-                    <button type="button" class="flow-folder-action-btn delete-btn" onclick="event.stopPropagation(); promptDeleteFlowGroup('${escapeHtml(group.id)}')" title="Delete group at will">🗑️</button>
-                </div>
-            ` : ''}
-        </div>`;
-    }).join('');
 
+    const selectedMeta = allSections.find(group => group.id === selectedGroup) || { id: selectedGroup, name: 'Workflows' };
     const isCustomGroup = selectedGroup !== 'all' && selectedGroup !== 'ungrouped';
     const activeTheme = isCustomGroup ? getGroupTheme(selectedMeta?.color) : null;
 
-    grid.innerHTML = `<div class="workflow-workspace">
-        <aside class="flow-folder-rail"><div class="flow-folder-rail-title"><span>Groups</span><button type="button" class="flow-folder-create-button" onclick="openCreateFlowGroupModal()" title="Create a new group">＋ New</button></div>${folderItems}</aside>
-        <section class="flow-list-panel">
-            <div class="flow-list-heading">
-                <div>
-                    <div style="display:flex;align-items:center;gap:10px;">
-                        ${activeTheme ? `<span style="width:12px;height:12px;border-radius:50%;background:${activeTheme.hex};box-shadow:0 0 10px ${activeTheme.hex};flex-shrink:0;"></span>` : ''}
-                        <h2>${escapeHtml(selectedMeta?.name || 'All flows')}</h2>
-                        ${isCustomGroup ? `<button type="button" class="btn-icon" style="font-size:0.8rem;padding:2px 6px;margin-left:4px;" onclick="openFlowGroupEditor('${escapeHtml(selectedGroup)}')" title="Edit group">✏️</button>` : ''}
-                    </div>
-                    <p style="margin-top:4px;">${visibleWorkflows.length} shown · ${visibleWorkflows.filter(wf => wf.is_active).length} active</p>
+    grid.innerHTML = `
+        <div class="flow-list-heading" style="margin-bottom: 1.5rem;">
+            <div>
+                <div style="display:flex;align-items:center;gap:10px;">
+                    ${activeTheme ? `<span style="width:12px;height:12px;border-radius:50%;background:${activeTheme.hex};box-shadow:0 0 10px ${activeTheme.hex};flex-shrink:0;"></span>` : ''}
+                    <h2>${escapeHtml(selectedMeta?.name || 'All flows')}</h2>
+                    ${isCustomGroup ? `<button type="button" class="btn-icon" style="font-size:0.8rem;padding:2px 6px;margin-left:4px;" onclick="openFlowGroupEditor('${escapeHtml(selectedGroup)}')" title="Edit group">✏️</button>` : ''}
                 </div>
-                <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                    <button type="button" class="flow-group-action" onclick="openModalForGroup('${selectedGroup === 'all' ? 'ungrouped' : escapeHtml(selectedGroup)}')">＋ New flow</button>
-                    ${isCustomGroup ? `
-                        <button type="button" class="flow-group-action" onclick="openAssignFlowsModal('${escapeHtml(selectedGroup)}')">📂 Assign flows</button>
-                        <button type="button" class="flow-group-action" onclick="openFlowGroupEditor('${escapeHtml(selectedGroup)}')">⚙️ Group settings</button>
-                        <button type="button" class="flow-group-action" style="color:#f87171;" onclick="promptDeleteFlowGroup('${escapeHtml(selectedGroup)}')">🗑️ Delete</button>
-                    ` : ''}
-                </div>
+                <p style="margin-top:4px;">${visibleWorkflows.length} shown · ${visibleWorkflows.filter(wf => wf.is_active).length} active</p>
             </div>
-            <div class="workflows-grid flow-group-grid" id="active-flow-grid"></div>
-        </section></div>`;
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <button type="button" class="flow-group-action" onclick="openModalForGroup('${selectedGroup === 'all' ? 'ungrouped' : escapeHtml(selectedGroup)}')">＋ New flow</button>
+                ${isCustomGroup ? `
+                    <button type="button" class="flow-group-action" onclick="openAssignFlowsModal('${escapeHtml(selectedGroup)}')">📂 Assign flows</button>
+                    <button type="button" class="flow-group-action" onclick="openFlowGroupEditor('${escapeHtml(selectedGroup)}')">⚙️ Group settings</button>
+                    <button type="button" class="flow-group-action" style="color:#f87171;" onclick="promptDeleteFlowGroup('${escapeHtml(selectedGroup)}')">🗑️ Delete</button>
+                ` : ''}
+            </div>
+        </div>
+        <div class="workflows-grid flow-group-grid" id="active-flow-grid"></div>
+    `;
+
     const activeGrid = document.getElementById('active-flow-grid');
     if (!visibleWorkflows.length) {
-        activeGrid.innerHTML = `<div class="workflow-empty-state"><strong>${search || statusFilter !== 'all' ? 'No matching flows' : 'This group is empty'}</strong><div style="margin-top:7px;">${search || statusFilter !== 'all' ? 'Try clearing the search or status filter.' : 'Create a flow or drag one into this group.'}</div>${search || statusFilter !== 'all' ? '<button type="button" class="btn-primary" style="margin:18px auto 0;" onclick="clearWorkflowFilters()">Clear filters</button>' : ''}</div>`;
+        activeGrid.innerHTML = `<div class="workflow-empty-state"><strong>${search || statusFilter !== 'all' ? 'No matching flows' : 'This folder is empty'}</strong><div style="margin-top:7px;">${search || statusFilter !== 'all' ? 'Try clearing the search or status filter.' : 'Create a flow or drag one into this folder from the sidebar.'}</div>${search || statusFilter !== 'all' ? '<button type="button" class="btn-primary" style="margin:18px auto 0;" onclick="clearWorkflowFilters()">Clear filters</button>' : ''}</div>`;
     }
     
     visibleWorkflows.forEach(wf => {
@@ -3334,6 +3473,11 @@ async function syncSupabaseData() {
 // ==========================================
 // Application Bootstrapping
 // ==========================================
+try {
+    if (localStorage.getItem('teleflow_grok_drawer_collapsed') === 'true') {
+        document.querySelector('.grok-sidebar')?.classList.add('grok-drawer-collapsed');
+    }
+} catch (_) {}
 renderWorkflows();
 populateTokenWorkflowPresets();
 initializeDexValidated();

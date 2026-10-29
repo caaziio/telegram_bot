@@ -31,7 +31,7 @@ app = Flask(__name__,
             static_folder=os.path.join(current_dir, 'static'))
 
 # Release label format: <major>.<YYYY>.<MM>.<DD>. Update this on each push.
-APP_VERSION = "7.2026.10.30"
+APP_VERSION = "8.2026.10.30"
 
 # Globals for async bridge
 telethon_loop = None
