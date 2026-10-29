@@ -297,11 +297,37 @@ body {
   border-radius: 10px;
 }
 
-/* Nested Workflows & Folders */
+/* Nested Workflows & Folders (Dropdown Accordion) */
 .akoue-workflows-section {
   display: flex;
   flex-direction: column;
   width: 100%;
+}
+
+.akoue-nav-chevron {
+  margin-left: auto;
+  color: #71717a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1), color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.akoue-nav-item:hover .akoue-nav-chevron {
+  color: #ffffff;
+}
+
+.akoue-nav-item.active .akoue-nav-chevron {
+  color: #22d3ee;
+}
+
+.akoue-workflows-section.open .akoue-nav-chevron svg {
+  transform: rotate(180deg);
+}
+
+.akoue-sidebar.collapsed .akoue-nav-chevron {
+  display: none;
 }
 
 .akoue-folders-group {
@@ -311,10 +337,25 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  max-height: 800px;
+  opacity: 1;
+  overflow: hidden;
+  transition: max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease, margin 0.2s ease, padding 0.2s ease;
+}
+
+/* Collapsed state when workflows dropdown is closed */
+.akoue-workflows-section:not(.open) .akoue-folders-group {
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+  margin-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  pointer-events: none;
 }
 
 .akoue-sidebar.collapsed .akoue-folders-group {
-  display: none;
+  display: none !important;
 }
 
 .akoue-folders-header {

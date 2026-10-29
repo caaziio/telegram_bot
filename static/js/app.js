@@ -217,6 +217,31 @@ function toggleGrokRailExpand(forceState) {
     toggleAkoueSidebar(forceState);
 }
 
+function handleWorkflowsNavClick(event) {
+    const section = document.querySelector('.akoue-workflows-section');
+    const sidebar = document.getElementById('akoue-sidebar');
+    
+    // Switch tab to workflows
+    switchTab('workflows');
+    
+    // If sidebar is collapsed into icon rail, expanding it reveals the dropdown
+    if (sidebar && sidebar.classList.contains('collapsed')) {
+        toggleAkoueSidebar(true);
+        if (section) section.classList.add('open');
+        try { localStorage.setItem('akoue_workflows_dropdown_open', 'true'); } catch (_) {}
+        return;
+    }
+    
+    // Toggle dropdown open/closed
+    if (section) {
+        section.classList.toggle('open');
+        const isOpen = section.classList.contains('open');
+        try {
+            localStorage.setItem('akoue_workflows_dropdown_open', isOpen ? 'true' : 'false');
+        } catch (_) {}
+    }
+}
+
 function handleGrokSearch(query) {
     renderGrokFoldersTree();
     const wfSearch = document.getElementById('workflow-search');
@@ -3515,6 +3540,11 @@ try {
             const toggleBtn = document.getElementById('akoue-sidebar-toggle');
             if (toggleBtn) toggleBtn.title = 'Expand sidebar';
         }
+    }
+    const isWfDropdownOpen = localStorage.getItem('akoue_workflows_dropdown_open');
+    const wfSection = document.querySelector('.akoue-workflows-section');
+    if (wfSection && isWfDropdownOpen === 'false') {
+        wfSection.classList.remove('open');
     }
 } catch (_) {}
 
