@@ -807,12 +807,12 @@ function renderFlowGroupsManager(filterQuery = '') {
                             <button type="button" class="color-swatch-btn selected" onclick="cycleFlowGroupColor('${escapeHtml(group.id)}')" style="background:${theme.hex}; color:${theme.hex};" title="Click to cycle theme color"></button>
                         </div>
                         <input class="flow-group-title-input" id="flow-group-name-${escapeHtml(group.id)}" value="${escapeHtml(group.name)}" onchange="renameFlowGroup('${escapeHtml(group.id)}')" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" aria-label="Group name" title="Click to rename" />
-                        <span class="flow-group-badge-pill" style="background:${theme.bg}; color:${theme.text}; border:1px solid ${theme.border};">
-                            ${groupFlows.length} flow${groupFlows.length === 1 ? '' : 's'} · ${activeCount} active
-                        </span>
                     </div>
 
                     <div class="flow-group-card-actions" id="group-actions-${escapeHtml(group.id)}">
+                        <span class="flow-group-badge-pill" style="background:${theme.bg}; color:${theme.text}; border:1px solid ${theme.border};">
+                            ${groupFlows.length} flow${groupFlows.length === 1 ? '' : 's'} · ${activeCount} active
+                        </span>
                         <button type="button" class="flow-group-btn-expand" onclick="toggleGroupDrawer('${escapeHtml(group.id)}')" title="View and manage member workflows">
                             <span>${isDrawerOpen ? '▴ Close' : '▾ Manage Flows'}</span>
                             <span style="opacity:0.6;font-size:0.72rem;">(${groupFlows.length})</span>

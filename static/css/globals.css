@@ -1427,8 +1427,10 @@ body {
   border-radius: 6px;
   padding: 4px 8px;
   transition: all 0.2s;
-  flex: 1;
-  max-width: 280px;
+  width: auto;
+  max-width: 220px;
+  min-width: 100px;
+  flex: 1 1 auto;
 }
 
 .flow-group-title-input:hover {
@@ -1443,18 +1445,23 @@ body {
   box-shadow: 0 0 0 2px var(--accent-glow);
 }
 
-.flow-group-badge-pill {
-  font-size: 0.72rem;
-  font-weight: 600;
-  padding: 3px 8px;
-  border-radius: 20px;
-  white-space: nowrap;
-}
-
 .flow-group-card-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.flow-group-badge-pill {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 20px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
 }
 
 .flow-group-btn-expand {
@@ -1470,6 +1477,8 @@ body {
   cursor: pointer;
   font-weight: 500;
   transition: all 0.15s;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .flow-group-btn-expand:hover {
@@ -1486,6 +1495,8 @@ body {
   font-size: 0.78rem;
   cursor: pointer;
   transition: all 0.15s;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .flow-group-btn-delete:hover {
