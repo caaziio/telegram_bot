@@ -190,14 +190,36 @@ function selectSystem(system) {
     switchTab(system === 'dex' ? 'dex-validated' : 'workflows');
 }
 
-function toggleGrokDrawer() {
+function toggleGrokDrawer(forceState) {
     const sidebar = document.querySelector('.grok-sidebar');
     if (!sidebar) return;
-    sidebar.classList.toggle('grok-drawer-collapsed');
+    if (typeof forceState === 'boolean') {
+        sidebar.classList.toggle('grok-drawer-collapsed', !forceState);
+    } else {
+        sidebar.classList.toggle('grok-drawer-collapsed');
+    }
     const isCollapsed = sidebar.classList.contains('grok-drawer-collapsed');
     try {
         localStorage.setItem('teleflow_grok_drawer_collapsed', isCollapsed ? 'true' : 'false');
     } catch (_) {}
+}
+
+function toggleGrokRailExpand(forceState) {
+    const sidebar = document.querySelector('.grok-sidebar');
+    if (!sidebar) return;
+    if (typeof forceState === 'boolean') {
+        sidebar.classList.toggle('grok-rail-expanded', forceState);
+    } else {
+        sidebar.classList.toggle('grok-rail-expanded');
+    }
+    const isExpanded = sidebar.classList.contains('grok-rail-expanded');
+    try {
+        localStorage.setItem('teleflow_grok_rail_expanded', isExpanded ? 'true' : 'false');
+    } catch (_) {}
+    const expandBtn = document.getElementById('grok-rail-expand-btn');
+    if (expandBtn) {
+        expandBtn.title = isExpanded ? 'Collapse sidebar (icons only)' : 'Expand sidebar (show labels)';
+    }
 }
 
 function handleGrokSearch(query) {
@@ -220,16 +242,8 @@ function renderGrokFoldersTree() {
 
     if (!flowGroups.groups || flowGroups.groups.length === 0) {
         flowGroups.groups = [
-            { id: 'grouped', name: 'Grouped', color: 'cyan' },
-            { id: 'crypto-workflows', name: 'Crypto Workflows', color: 'cyan', is_expanded: true },
-            { id: 'arbitrage', name: 'Arbitrage', color: 'cyan', parent_id: 'crypto-workflows' },
-            { id: 'scalp-bots', name: 'Scalp Bots', color: 'cyan', parent_id: 'crypto-workflows' },
-            { id: 'indicators', name: 'Indicators', color: 'cyan', badge: '34' },
-            { id: 'grid-trades', name: 'Grid Trades', color: 'cyan', badge: '22' }
+            { id: 'narratives', name: 'Narratives', color: 'cyan' }
         ];
-        if (activeFlowGroupView === 'all') {
-            activeFlowGroupView = 'crypto-workflows';
-        }
     }
 
     const searchQuery = String(document.getElementById('grok-folder-search')?.value || '').trim().toLowerCase();
@@ -243,6 +257,27 @@ function renderGrokFoldersTree() {
     });
 
     let html = '';
+
+    // "All flows" option at the top of the tree
+    const isAllActive = activeFlowGroupView === 'all' || !activeFlowGroupView;
+    const totalFlowsCount = workflows ? workflows.length : 0;
+    if (!searchQuery || 'all flows'.includes(searchQuery)) {
+        html += `
+            <div class="grok-folder-item ${isAllActive ? 'active' : ''}" 
+                 data-group-id="all"
+                 onclick="selectFlowGroup('all')">
+                <span class="grok-folder-icon">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="3" width="20" height="14" rx="2"></rect>
+                        <line x1="8" y1="21" x2="16" y2="21"></line>
+                        <line x1="12" y1="17" x2="12" y2="21"></line>
+                    </svg>
+                </span>
+                <span class="grok-folder-name">All flows</span>
+                <span class="grok-folder-badge">${totalFlowsCount > 0 ? totalFlowsCount : ''}</span>
+            </div>
+        `;
+    }
 
     parentGroups.forEach(group => {
         const children = childrenMap[group.id] || [];
@@ -346,7 +381,7 @@ function renderWorkflows() {
         ...flowGroups.groups,
         { id: 'ungrouped', name: 'Ungrouped' }
     ];
-    if (activeFlowGroupView !== 'all' && !allSections.some(group => group.id === activeFlowGroupView)) activeFlowGroupView = 'crypto-workflows';
+    if (activeFlowGroupView !== 'all' && !allSections.some(group => group.id === activeFlowGroupView)) activeFlowGroupView = 'all';
     const selectedGroup = activeFlowGroupView;
     const statusFilter = document.getElementById('workflow-status-filter')?.value || 'all';
     const search = String(document.getElementById('workflow-search')?.value || '').trim().toLowerCase();
@@ -3476,6 +3511,11 @@ async function syncSupabaseData() {
 try {
     if (localStorage.getItem('teleflow_grok_drawer_collapsed') === 'true') {
         document.querySelector('.grok-sidebar')?.classList.add('grok-drawer-collapsed');
+    }
+    if (localStorage.getItem('teleflow_grok_rail_expanded') === 'true') {
+        document.querySelector('.grok-sidebar')?.classList.add('grok-rail-expanded');
+        const expandBtn = document.getElementById('grok-rail-expand-btn');
+        if (expandBtn) expandBtn.title = 'Collapse sidebar (icons only)';
     }
 } catch (_) {}
 renderWorkflows();

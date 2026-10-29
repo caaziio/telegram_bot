@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TeleFlow Dashboard</title>
+    <title>Akoueflow Dashboard</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/globals.css') }}?v={{ app_version }}">
     <style>
         .hidden { display: none !important; }
@@ -341,87 +341,110 @@
     <div class="dashboard-container">
         <!-- Grok Dual-Tier Sidebar -->
         <aside class="grok-sidebar">
-            <!-- Tier 1: Slim Icon Rail -->
-            <div class="grok-rail">
+            <!-- Reopen Drawer Button (visible when drawer is collapsed) -->
+            <button type="button" class="grok-drawer-reopen-btn" onclick="toggleGrokDrawer(true)" title="Open Folders Drawer">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                </svg>
+            </button>
+
+            <!-- Tier 1: Slim Icon Rail (Expandable) -->
+            <div class="grok-rail" id="grok-rail">
                 <div class="grok-rail-top">
-                    <button type="button" class="grok-rail-btn grok-hamburger-btn" onclick="toggleGrokDrawer()" title="Toggle folders panel">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                    <button type="button" class="grok-rail-btn grok-hamburger-btn" onclick="toggleGrokRailExpand()" id="grok-rail-expand-btn" title="Expand sidebar (show labels)">
+                        <svg class="grok-rail-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                        <span class="grok-rail-label grok-rail-brand-text">Akoueflow</span>
                     </button>
                 </div>
                 
                 <div class="grok-rail-nav">
                     <!-- Switch system / Dashboard -->
                     <button type="button" class="grok-rail-btn" onclick="showSystemLanding()" title="Switch System">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg class="grok-rail-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
                             <rect x="14" y="3" width="7" height="7" rx="1.5"></rect>
                             <rect x="14" y="14" width="7" height="7" rx="1.5"></rect>
                             <rect x="3" y="14" width="7" height="7" rx="1.5"></rect>
                         </svg>
+                        <span class="grok-rail-label">Systems</span>
                     </button>
 
                     <!-- Workflows & Folders (Active by default) -->
                     <button type="button" class="grok-rail-btn active" id="rail-nav-workflows" onclick="switchTab('workflows')" title="Workflows & Folders">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg class="grok-rail-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path>
                         </svg>
+                        <span class="grok-rail-label">Workflows</span>
                     </button>
 
                     <!-- Wallet Tracker -->
                     <button type="button" class="grok-rail-btn" id="rail-nav-wallet-tracker" onclick="switchTab('wallet-tracker')" title="Wallet Tracker">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg class="grok-rail-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <circle cx="12" cy="12" r="10"></circle>
                             <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon>
                         </svg>
+                        <span class="grok-rail-label">Wallet Tracker</span>
                     </button>
 
                     <!-- DEX Validated -->
                     <button type="button" class="grok-rail-btn" id="rail-nav-dex-validated" onclick="switchTab('dex-validated')" title="DEX Validated">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg class="grok-rail-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path>
                             <line x1="4" y1="22" x2="4" y2="15"></line>
                         </svg>
+                        <span class="grok-rail-label">DEX Validated</span>
                     </button>
 
                     <!-- Token Wallet Data -->
                     <button type="button" class="grok-rail-btn" id="rail-nav-token-data" onclick="switchTab('token-data')" title="Token Wallet Data">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg class="grok-rail-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <line x1="18" y1="20" x2="18" y2="10"></line>
                             <line x1="12" y1="20" x2="12" y2="4"></line>
                             <line x1="6" y1="20" x2="6" y2="14"></line>
                         </svg>
+                        <span class="grok-rail-label">Token Data</span>
                     </button>
                 </div>
 
                 <div class="grok-rail-bottom">
                     <!-- Notifications Bell -->
                     <button type="button" class="grok-rail-btn" onclick="toggleNotificationsModal()" title="Live Alerts">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg class="grok-rail-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
                             <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
                         </svg>
+                        <span class="grok-rail-label">Live Alerts</span>
                         <span id="rail-bell-dot" class="rail-badge-dot"></span>
                     </button>
 
                     <!-- Settings -->
                     <button type="button" class="grok-rail-btn" id="rail-nav-settings" onclick="switchTab('settings')" title="Settings">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg class="grok-rail-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <circle cx="12" cy="12" r="3"></circle>
                             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
                         </svg>
+                        <span class="grok-rail-label">Settings</span>
                     </button>
                 </div>
             </div>
 
-            <!-- Tier 2: Grok Folders Drawer -->
+            <!-- Tier 2: Akoueflow Folders Drawer -->
             <div class="grok-drawer" id="grok-drawer">
                 <!-- Header: Brand & Collapse Chevron -->
                 <div class="grok-drawer-header">
                     <div class="grok-brand" onclick="switchTab('workflows')">
-                        <svg class="grok-logo-icon" width="22" height="22" viewBox="0 0 24 24" fill="none">
-                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10c4.32 0 8.01-2.73 9.4-6.6a1 1 0 0 0-.94-1.35h-8.46a1 1 0 0 0-1 1v2.1c0 .55.45 1 1 1h4.2c-1.32 1.6-3.32 2.55-5.2 2.55-3.87 0-7-3.13-7-7s3.13-7 7-7c1.88 0 3.61.75 4.88 1.96a1 1 0 0 0 1.4-.04l1.6-1.6a1 1 0 0 0-.05-1.45C17.65 3.32 14.97 2 12 2Z" fill="#06b6d4"/>
+                        <svg class="grok-logo-icon akoueflow-logo" width="22" height="22" viewBox="0 0 24 24" fill="none">
+                            <defs>
+                                <linearGradient id="akoueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                    <stop offset="0%" stop-color="#22d3ee"/>
+                                    <stop offset="100%" stop-color="#0284c7"/>
+                                </linearGradient>
+                            </defs>
+                            <path d="M12 2.5L20.5 18.5C21 19.5 20.2 20.8 19 20.8H5C3.8 20.8 3 19.5 3.5 18.5L12 2.5Z" stroke="url(#akoueGrad)" stroke-width="2.2" stroke-linejoin="round"/>
+                            <path d="M8 15.5C10 13.5 14 13.5 16 15.5" stroke="#22d3ee" stroke-width="2" stroke-linecap="round"/>
+                            <circle cx="12" cy="10" r="1.6" fill="#22d3ee"/>
                         </svg>
-                        <span class="grok-brand-title">GROK</span>
+                        <span class="grok-brand-title">Akoueflow</span>
                     </div>
                     <button type="button" class="grok-drawer-collapse-btn" onclick="toggleGrokDrawer()" title="Collapse Panel">
                         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -452,7 +475,7 @@
                 </div>
 
                 <div class="grok-drawer-footer">
-                    <span>TeleFlow System</span>
+                    <span>Akoueflow System</span>
                     <span class="app-version-tag">v{{ app_version }}</span>
                 </div>
             </div>

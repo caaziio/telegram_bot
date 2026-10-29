@@ -29,9 +29,11 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__,
             template_folder=os.path.join(current_dir, 'templates'),
             static_folder=os.path.join(current_dir, 'static'))
+app.config['TEMPLATES_AUTO_RELOAD'] = True
+app.jinja_env.auto_reload = True
 
 # Release label format: <major>.<YYYY>.<MM>.<DD>. Update this on each push.
-APP_VERSION = "8.2026.10.30"
+APP_VERSION = "9.2026.10.30"
 
 # Globals for async bridge
 telethon_loop = None
