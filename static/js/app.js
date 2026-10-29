@@ -190,36 +190,31 @@ function selectSystem(system) {
     switchTab(system === 'dex' ? 'dex-validated' : 'workflows');
 }
 
-function toggleGrokDrawer(forceState) {
-    const sidebar = document.querySelector('.grok-sidebar');
+function toggleAkoueSidebar(forceState) {
+    const sidebar = document.getElementById('akoue-sidebar') || document.querySelector('.akoue-sidebar') || document.querySelector('.grok-sidebar');
     if (!sidebar) return;
     if (typeof forceState === 'boolean') {
-        sidebar.classList.toggle('grok-drawer-collapsed', !forceState);
+        sidebar.classList.toggle('collapsed', !forceState);
     } else {
-        sidebar.classList.toggle('grok-drawer-collapsed');
+        sidebar.classList.toggle('collapsed');
     }
-    const isCollapsed = sidebar.classList.contains('grok-drawer-collapsed');
+    const isCollapsed = sidebar.classList.contains('collapsed');
     try {
-        localStorage.setItem('teleflow_grok_drawer_collapsed', isCollapsed ? 'true' : 'false');
+        localStorage.setItem('akoue_sidebar_collapsed', isCollapsed ? 'true' : 'false');
     } catch (_) {}
+    const toggleBtn = document.getElementById('akoue-sidebar-toggle');
+    if (toggleBtn) {
+        toggleBtn.title = isCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
+    }
+}
+
+// Backward-compatibility aliases
+function toggleGrokDrawer(forceState) {
+    toggleAkoueSidebar(forceState);
 }
 
 function toggleGrokRailExpand(forceState) {
-    const sidebar = document.querySelector('.grok-sidebar');
-    if (!sidebar) return;
-    if (typeof forceState === 'boolean') {
-        sidebar.classList.toggle('grok-rail-expanded', forceState);
-    } else {
-        sidebar.classList.toggle('grok-rail-expanded');
-    }
-    const isExpanded = sidebar.classList.contains('grok-rail-expanded');
-    try {
-        localStorage.setItem('teleflow_grok_rail_expanded', isExpanded ? 'true' : 'false');
-    } catch (_) {}
-    const expandBtn = document.getElementById('grok-rail-expand-btn');
-    if (expandBtn) {
-        expandBtn.title = isExpanded ? 'Collapse sidebar (icons only)' : 'Expand sidebar (show labels)';
-    }
+    toggleAkoueSidebar(forceState);
 }
 
 function handleGrokSearch(query) {
@@ -375,6 +370,10 @@ function renderWorkflows() {
     grid.style.display = 'block';
 
     renderGrokFoldersTree();
+    const countEl = document.getElementById('akoue-workflows-count');
+    if (countEl && workflows) {
+        countEl.textContent = String(workflows.length);
+    }
 
     const validGroupIds = new Set(flowGroups.groups.map(group => group.id));
     const allSections = [
@@ -3509,15 +3508,30 @@ async function syncSupabaseData() {
 // Application Bootstrapping
 // ==========================================
 try {
-    if (localStorage.getItem('teleflow_grok_drawer_collapsed') === 'true') {
-        document.querySelector('.grok-sidebar')?.classList.add('grok-drawer-collapsed');
-    }
-    if (localStorage.getItem('teleflow_grok_rail_expanded') === 'true') {
-        document.querySelector('.grok-sidebar')?.classList.add('grok-rail-expanded');
-        const expandBtn = document.getElementById('grok-rail-expand-btn');
-        if (expandBtn) expandBtn.title = 'Collapse sidebar (icons only)';
+    if (localStorage.getItem('akoue_sidebar_collapsed') === 'true') {
+        const sidebar = document.getElementById('akoue-sidebar') || document.querySelector('.akoue-sidebar');
+        if (sidebar) {
+            sidebar.classList.add('collapsed');
+            const toggleBtn = document.getElementById('akoue-sidebar-toggle');
+            if (toggleBtn) toggleBtn.title = 'Expand sidebar';
+        }
     }
 } catch (_) {}
+
+document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        const searchInput = document.getElementById('grok-folder-search');
+        if (searchInput) {
+            const sidebar = document.getElementById('akoue-sidebar');
+            if (sidebar && sidebar.classList.contains('collapsed')) {
+                toggleAkoueSidebar(true);
+            }
+            searchInput.focus();
+            searchInput.select();
+        }
+    }
+});
 renderWorkflows();
 populateTokenWorkflowPresets();
 initializeDexValidated();

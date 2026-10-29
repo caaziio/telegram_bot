@@ -40,275 +40,79 @@ body {
   background: #000000;
 }
 
-/* Grok Dual-Tier Sidebar */
+/* ============================================================
+   Unified Modern Akoueflow Sidebar
+   ============================================================ */
+.akoue-sidebar,
 .grok-sidebar {
+  width: 250px;
+  background: #000000;
+  border-right: 1px solid rgba(255, 255, 255, 0.07);
   display: flex;
+  flex-direction: column;
+  height: 100vh;
   position: sticky;
   top: 0;
-  height: 100vh;
   z-index: 100;
   flex-shrink: 0;
-  background: #000000;
   user-select: none;
-}
-
-/* Tier 1: Slim Icon Rail */
-.grok-rail {
-  width: 60px;
-  background: #000000;
-  border-right: 1px solid rgba(255, 255, 255, 0.07);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-start;
-  padding: 14px 0;
-  z-index: 2;
-  transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1), padding 0.22s ease;
-  overflow: hidden;
-  box-sizing: border-box;
-}
-
-.grok-rail-top {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 0 9px;
-  box-sizing: border-box;
-}
-
-.grok-rail-nav {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  margin-top: 14px;
-  margin-bottom: auto;
-  padding: 0 9px;
-  box-sizing: border-box;
-}
-
-.grok-rail-bottom {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 12px 9px 0;
-  box-sizing: border-box;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.grok-rail-btn {
-  width: 42px;
-  height: 42px;
-  border-radius: 10px;
-  background: transparent;
-  border: none;
-  color: #71717a;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
-  position: relative;
-  text-decoration: none;
-  white-space: nowrap;
-  box-sizing: border-box;
-}
-
-.grok-rail-icon {
-  flex-shrink: 0;
-}
-
-.grok-rail-label {
-  display: none;
-  white-space: nowrap;
-  font-size: 0.86rem;
-  font-weight: 500;
-  color: #9ca3af;
-  opacity: 0;
-  transform: translateX(-4px);
-  transition: opacity 0.18s ease, transform 0.18s ease, color 0.15s ease;
-  user-select: none;
-}
-
-.grok-rail-brand-text {
-  font-weight: 700;
-  font-size: 0.96rem;
-  letter-spacing: 0.03em;
-  color: #ffffff;
-}
-
-.grok-rail-btn:hover {
-  color: #ffffff;
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.grok-rail-btn.active {
-  background: #083344;
-  color: #22d3ee;
-  box-shadow: 0 0 14px rgba(6, 182, 212, 0.25);
-}
-
-.grok-rail-btn.active svg {
-  stroke: #22d3ee;
-}
-
-.grok-hamburger-btn {
-  color: #9ca3af;
-}
-
-.grok-hamburger-btn:hover {
-  color: #ffffff;
-  background: rgba(255, 255, 255, 0.06);
-}
-
-/* Expanded state when toggled */
-.grok-sidebar.grok-rail-expanded .grok-rail {
-  width: 200px;
-  padding: 14px 10px;
-  align-items: stretch;
-}
-
-.grok-sidebar.grok-rail-expanded .grok-rail-top,
-.grok-sidebar.grok-rail-expanded .grok-rail-nav,
-.grok-sidebar.grok-rail-expanded .grok-rail-bottom {
-  padding: 0;
-  align-items: stretch;
-}
-
-.grok-sidebar.grok-rail-expanded .grok-rail-btn {
-  width: 100%;
-  height: 40px;
-  justify-content: flex-start;
-  padding: 0 12px;
-  gap: 12px;
-  border-radius: 9px;
-}
-
-.grok-sidebar.grok-rail-expanded .grok-rail-label {
-  display: inline-block;
-  opacity: 1;
-  transform: translateX(0);
-}
-
-.grok-sidebar.grok-rail-expanded .grok-rail-btn:hover .grok-rail-label {
-  color: #ffffff;
-}
-
-.grok-sidebar.grok-rail-expanded .grok-rail-btn.active .grok-rail-label {
-  color: #22d3ee;
-  font-weight: 600;
-}
-
-.grok-sidebar.grok-rail-expanded .rail-badge-dot {
-  right: 14px;
-  top: 17px;
-}
-
-/* Reopen drawer button when drawer is collapsed */
-.grok-drawer-reopen-btn {
-  position: absolute;
-  top: 18px;
-  left: 60px;
-  width: 18px;
-  height: 32px;
-  background: #0d1017;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-left: none;
-  border-radius: 0 6px 6px 0;
-  color: #9ca3af;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  z-index: 10;
-  transition: all 0.18s ease;
-}
-
-.grok-sidebar.grok-rail-expanded .grok-drawer-reopen-btn {
-  left: 200px;
-}
-
-.grok-sidebar.grok-drawer-collapsed .grok-drawer-reopen-btn {
-  display: flex;
-}
-
-.grok-drawer-reopen-btn:hover {
-  color: #22d3ee;
-  background: #151a24;
-  border-color: rgba(6, 182, 212, 0.5);
-}
-
-.rail-badge-dot {
-  position: absolute;
-  top: 9px;
-  right: 9px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #10b981;
-  box-shadow: 0 0 8px #10b981;
-  display: none;
-  animation: greenDotPulse 2s infinite ease-in-out;
-}
-
-.rail-badge-dot.active {
-  display: block;
-}
-
-/* Tier 2: Grok Folders Drawer */
-.grok-drawer {
-  width: 240px;
-  background: #08090c;
-  border-right: 1px solid rgba(255, 255, 255, 0.07);
-  display: flex;
-  flex-direction: column;
-  padding: 16px 14px;
-  overflow-y: auto;
+  transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
   overflow-x: hidden;
-  transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1), padding 0.22s ease, opacity 0.18s ease;
+  box-sizing: border-box;
 }
 
-.grok-sidebar.grok-drawer-collapsed .grok-drawer {
-  width: 0;
-  padding: 16px 0;
-  opacity: 0;
-  border-right: none;
-  pointer-events: none;
+/* Collapsed Mode (Compact 62px) */
+.akoue-sidebar.collapsed,
+.grok-sidebar.collapsed {
+  width: 62px;
 }
 
-.grok-drawer-header {
+/* Header */
+.akoue-sidebar-header {
+  height: 58px;
+  padding: 0 12px 0 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 2px 2px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+  box-sizing: border-box;
 }
 
-.grok-brand {
+.akoue-brand {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   cursor: pointer;
-  user-select: none;
+  text-decoration: none;
+  min-width: 0;
 }
 
-.grok-logo-icon {
+.akoue-brand-logo {
   flex-shrink: 0;
+  filter: drop-shadow(0 0 7px rgba(6, 182, 212, 0.45));
+  transition: transform 0.2s ease;
 }
 
-.grok-brand-title {
+.akoue-brand:hover .akoue-brand-logo {
+  transform: scale(1.06);
+}
+
+.akoue-brand-title {
   font-weight: 800;
-  font-size: 1.15rem;
-  letter-spacing: 0.07em;
+  font-size: 1.05rem;
+  letter-spacing: 0.04em;
   color: #ffffff;
+  white-space: nowrap;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  transition: opacity 0.15s ease;
 }
 
-.grok-drawer-collapse-btn {
+.akoue-sidebar.collapsed .akoue-brand-title {
+  display: none;
+}
+
+.akoue-toggle-btn {
   background: transparent;
   border: none;
   color: #71717a;
@@ -316,118 +120,268 @@ body {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  padding: 4px;
-  border-radius: 6px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   transition: all 0.15s ease;
+  flex-shrink: 0;
 }
 
-.grok-drawer-collapse-btn:hover {
+.akoue-toggle-btn:hover {
   color: #ffffff;
   background: rgba(255, 255, 255, 0.06);
 }
 
-.grok-search-box {
+.akoue-sidebar.collapsed .akoue-sidebar-header {
+  justify-content: center;
+  padding: 0;
+}
+
+.akoue-sidebar.collapsed .akoue-toggle-btn {
+  display: none;
+}
+
+/* Search Box */
+.akoue-search-wrap {
+  padding: 12px 12px 6px;
+  flex-shrink: 0;
+}
+
+.akoue-sidebar.collapsed .akoue-search-wrap {
+  display: none;
+}
+
+.akoue-search-box {
   background: rgba(255, 255, 255, 0.035);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
-  padding: 7px 11px;
+  padding: 6px 10px;
   display: flex;
   align-items: center;
-  gap: 9px;
-  margin-bottom: 14px;
-  transition: border-color 0.2s ease, background 0.2s ease;
+  gap: 8px;
+  transition: all 0.18s ease;
 }
 
-.grok-search-box:focus-within {
-  border-color: rgba(6, 182, 212, 0.45);
-  background: rgba(255, 255, 255, 0.06);
+.akoue-search-box:focus-within {
+  border-color: rgba(6, 182, 212, 0.5);
+  background: rgba(255, 255, 255, 0.05);
   box-shadow: 0 0 10px rgba(6, 182, 212, 0.15);
 }
 
-.grok-search-box svg {
+.akoue-search-box svg {
   color: #6b7280;
   flex-shrink: 0;
 }
 
-.grok-search-input {
+.akoue-search-input {
   background: transparent;
   border: none;
   outline: none;
   color: #ffffff;
-  font-size: 0.84rem;
+  font-size: 0.82rem;
   width: 100%;
   font-family: inherit;
 }
 
-.grok-search-input::placeholder {
+.akoue-search-input::placeholder {
   color: #6b7280;
 }
 
-.grok-section-header {
+.akoue-search-badge {
+  font-size: 0.68rem;
+  color: #71717a;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Body / Navigation items */
+.akoue-sidebar-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px 10px;
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.akoue-sidebar.collapsed .akoue-sidebar-body {
+  padding: 12px 8px;
   align-items: center;
-  padding: 2px 4px 8px;
+  gap: 8px;
 }
 
-.grok-section-title {
-  color: #6b7280;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.grok-add-folder-btn {
+/* Nav Item Button */
+.akoue-nav-item {
+  width: 100%;
+  height: 38px;
+  border-radius: 8px;
   background: transparent;
   border: none;
   color: #9ca3af;
-  font-size: 1.15rem;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  gap: 11px;
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  text-decoration: none;
+  white-space: nowrap;
+  font-size: 0.86rem;
+  font-weight: 500;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.akoue-sidebar.collapsed .akoue-nav-item {
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 10px;
+}
+
+.akoue-nav-icon {
+  flex-shrink: 0;
+  color: inherit;
+  transition: color 0.15s ease;
+}
+
+.akoue-nav-text {
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.akoue-sidebar.collapsed .akoue-nav-text,
+.akoue-sidebar.collapsed .akoue-nav-tag,
+.akoue-sidebar.collapsed .akoue-count-pill,
+.akoue-sidebar.collapsed .akoue-live-status-pill {
+  display: none;
+}
+
+.akoue-nav-item:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.akoue-nav-item.active {
+  background: #083344;
+  color: #22d3ee;
+  box-shadow: 0 0 14px rgba(6, 182, 212, 0.22);
+}
+
+.akoue-nav-item.active .akoue-nav-icon {
+  stroke: #22d3ee;
+}
+
+.akoue-nav-tag {
+  font-size: 0.68rem;
+  color: #71717a;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.02em;
+}
+
+.akoue-count-pill {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #94a3b8;
+  background: rgba(255, 255, 255, 0.07);
+  padding: 1px 7px;
+  border-radius: 10px;
+}
+
+/* Nested Workflows & Folders */
+.akoue-workflows-section {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.akoue-folders-group {
+  margin: 4px 0 6px 12px;
+  padding-left: 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.akoue-sidebar.collapsed .akoue-folders-group {
+  display: none;
+}
+
+.akoue-folders-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 6px 4px;
+}
+
+.akoue-folders-title {
+  color: #6b7280;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.akoue-add-folder-btn {
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  font-size: 1.05rem;
   line-height: 1;
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 2px 5px;
   border-radius: 4px;
   transition: all 0.15s ease;
 }
 
-.grok-add-folder-btn:hover {
+.akoue-add-folder-btn:hover {
   color: #22d3ee;
   background: rgba(6, 182, 212, 0.15);
 }
 
-.grok-folders-tree {
+.akoue-folders-tree {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  flex: 1;
+  gap: 2px;
 }
 
+/* Folder Tree Items */
 .grok-folder-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 8px;
+  gap: 8px;
+  padding: 6px 9px;
+  border-radius: 6px;
   color: #d1d5db;
-  font-size: 0.86rem;
-  font-weight: 500;
+  font-size: 0.83rem;
+  font-weight: 450;
   cursor: pointer;
-  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.15s ease;
   user-select: none;
   border: 1px solid transparent;
 }
 
 .grok-folder-item:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.05);
   color: #ffffff;
 }
 
 .grok-folder-item.active {
-  background: linear-gradient(90deg, #072a38 0%, #0d3846 100%);
+  background: linear-gradient(90deg, rgba(6, 182, 212, 0.18) 0%, rgba(6, 182, 212, 0.06) 100%);
   color: #22d3ee;
   font-weight: 600;
-  box-shadow: 0 2px 10px rgba(6, 182, 212, 0.18);
-  border-left: 3px solid #06b6d4;
+  box-shadow: 0 2px 10px rgba(6, 182, 212, 0.16);
+  border-left: 2px solid #22d3ee;
 }
 
 .grok-folder-item.drag-over {
@@ -436,10 +390,10 @@ body {
 }
 
 .grok-folder-icon {
-  font-size: 0.95rem;
-  flex-shrink: 0;
   display: flex;
   align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
   color: #9ca3af;
 }
 
@@ -455,13 +409,11 @@ body {
 }
 
 .grok-folder-badge {
-  background: rgba(255, 255, 255, 0.06);
+  font-size: 0.7rem;
   color: #9ca3af;
-  border-radius: 999px;
-  padding: 2px 7px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  margin-left: auto;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 6px;
+  border-radius: 8px;
 }
 
 .grok-folder-item.active .grok-folder-badge {
@@ -470,11 +422,9 @@ body {
 }
 
 .grok-folder-subitems {
-  margin-left: 18px;
-  border-left: 1px solid rgba(255, 255, 255, 0.14);
-  padding-left: 10px;
-  margin-top: 2px;
-  margin-bottom: 4px;
+  margin-left: 14px;
+  padding-left: 8px;
+  border-left: 1px dashed rgba(255, 255, 255, 0.08);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -483,37 +433,98 @@ body {
 .grok-subfolder-item {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 6px 8px;
-  border-radius: 6px;
+  gap: 7px;
+  padding: 5px 8px;
+  border-radius: 5px;
   color: #9ca3af;
-  font-size: 0.82rem;
-  font-weight: 500;
+  font-size: 0.8rem;
   cursor: pointer;
   transition: all 0.15s ease;
-  user-select: none;
 }
 
 .grok-subfolder-item:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.05);
   color: #ffffff;
 }
 
 .grok-subfolder-item.active {
-  background: rgba(6, 182, 212, 0.16);
+  background: rgba(6, 182, 212, 0.15);
   color: #22d3ee;
   font-weight: 600;
 }
 
-.grok-drawer-footer {
-  margin-top: auto;
-  padding-top: 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+/* Bottom Footer Dock */
+.akoue-sidebar-footer {
+  padding: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.akoue-sidebar.collapsed .akoue-sidebar-footer {
+  padding: 10px 8px;
   align-items: center;
+  gap: 8px;
+}
+
+.akoue-icon-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.akoue-live-status-pill {
+  font-size: 0.7rem;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+  padding: 2px 7px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.akoue-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+  animation: greenDotPulse 2s infinite ease-in-out;
+}
+
+.rail-badge-dot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+  display: none;
+  animation: greenDotPulse 2s infinite ease-in-out;
+}
+
+.rail-badge-dot.active {
+  display: block;
+}
+
+.akoue-version-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 6px 2px;
+  color: #52525b;
   font-size: 0.72rem;
-  color: #6b7280;
+}
+
+.akoue-sidebar.collapsed .akoue-version-bar {
+  display: none;
 }
 
 .app-version-tag {
