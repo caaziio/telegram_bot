@@ -8,11 +8,52 @@ let currentTgModalRawMessage = '';
 let tokenNameRuleIndex = null;
 let tokenNameDraft = { exact: [], contains: [] };
 
+const FLOW_GROUP_COLORS = [
+    { key: 'cyan', name: 'Cyan', hex: '#06b6d4', text: '#67e8f9', bg: 'rgba(6, 182, 212, 0.16)', border: 'rgba(6, 182, 212, 0.45)', glow: 'rgba(6, 182, 212, 0.35)' },
+    { key: 'emerald', name: 'Emerald', hex: '#10b981', text: '#6ee7b7', bg: 'rgba(16, 185, 129, 0.16)', border: 'rgba(16, 185, 129, 0.45)', glow: 'rgba(16, 185, 129, 0.35)' },
+    { key: 'blue', name: 'Blue', hex: '#3b82f6', text: '#93c5fd', bg: 'rgba(59, 130, 246, 0.16)', border: 'rgba(59, 130, 246, 0.45)', glow: 'rgba(59, 130, 246, 0.35)' },
+    { key: 'amber', name: 'Amber', hex: '#f59e0b', text: '#fcd34d', bg: 'rgba(245, 158, 11, 0.16)', border: 'rgba(245, 158, 11, 0.45)', glow: 'rgba(245, 158, 11, 0.35)' },
+    { key: 'rose', name: 'Rose', hex: '#f43f5e', text: '#fda4af', bg: 'rgba(244, 63, 94, 0.16)', border: 'rgba(244, 63, 94, 0.45)', glow: 'rgba(244, 63, 94, 0.35)' },
+    { key: 'purple', name: 'Purple', hex: '#8b5cf6', text: '#c4b5fd', bg: 'rgba(139, 92, 246, 0.16)', border: 'rgba(139, 92, 246, 0.45)', glow: 'rgba(139, 92, 246, 0.35)' },
+    { key: 'indigo', name: 'Indigo', hex: '#6366f1', text: '#a5b4fc', bg: 'rgba(99, 102, 241, 0.16)', border: 'rgba(99, 102, 241, 0.45)', glow: 'rgba(99, 102, 241, 0.35)' }
+];
+
+function getGroupTheme(colorKey) {
+    return FLOW_GROUP_COLORS.find(c => c.key === colorKey) || FLOW_GROUP_COLORS[0];
+}
+
+function showAppToast(message, type = 'info', duration = 3000) {
+    let container = document.getElementById('app-toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'app-toast-container';
+        container.className = 'app-toast-container';
+        document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    toast.className = `app-toast app-toast--${type}`;
+    const icon = type === 'success' ? '✓' : type === 'error' ? '⚠' : '✦';
+    toast.innerHTML = `
+        <span class="app-toast-icon">${icon}</span>
+        <span class="app-toast-message">${escapeHtml(message)}</span>
+        <button type="button" class="app-toast-close" onclick="this.parentElement.remove()" aria-label="Close notification">×</button>
+    `;
+    container.appendChild(toast);
+    setTimeout(() => {
+        toast.classList.add('app-toast--exiting');
+        setTimeout(() => toast.remove(), 260);
+    }, duration);
+}
+
 function parseFlowGroups(raw) {
     try {
         const parsed = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});
         return {
-            groups: Array.isArray(parsed.groups) ? parsed.groups.filter(g => g && g.id && g.name).map(g => ({ id: String(g.id), name: String(g.name) })) : [],
+            groups: Array.isArray(parsed.groups) ? parsed.groups.filter(g => g && g.id && g.name).map(g => ({
+                id: String(g.id),
+                name: String(g.name),
+                color: g.color || 'indigo'
+            })) : [],
             assignments: parsed.assignments && typeof parsed.assignments === 'object' ? parsed.assignments : {}
         };
     } catch (_) {
@@ -28,6 +69,11 @@ try {
 let activeFlowGroupView = 'all';
 try { activeFlowGroupView = localStorage.getItem('teleflow_active_flow_group') || 'all'; } catch (_) {}
 let expandedWorkflowCards = new Set();
+let expandedGroupDrawers = new Set();
+let selectedQuickGroupColor = 'cyan';
+let selectedModalGroupColor = 'cyan';
+let activeAssignGroupId = null;
+let pendingDeleteGroupId = null;
 
 const TOKEN_NAME_FILTER_PREFIX = 'token_name_filter:';
 
@@ -160,20 +206,52 @@ function renderWorkflows() {
     });
     const selectedMeta = selectedGroup === 'all' ? { id:'all', name:'All flows' } : allSections.find(group => group.id === selectedGroup);
     const folderItems = [{ id:'all', name:'All flows' }, ...allSections].map(group => {
+        const isCustom = group.id !== 'all' && group.id !== 'ungrouped';
+        const theme = isCustom ? getGroupTheme(group.color) : null;
         const count = group.id === 'all' ? workflows.length : workflows.filter(wf => {
             const assigned = String(flowGroups.assignments[String(wf.id)] || '');
             const resolved = validGroupIds.has(assigned) ? assigned : 'ungrouped';
             return resolved === group.id;
         }).length;
-        return `<button type="button" class="flow-folder-item${selectedGroup === group.id ? ' active' : ''}" data-group-id="${escapeHtml(group.id)}" onclick="selectFlowGroup('${escapeHtml(group.id)}')" ondragover="handleFolderDragOver(event, this)" ondragleave="handleFolderDragLeave(event, this)" ondrop="dropWorkflowOnFolder(event, '${escapeHtml(group.id)}', this)">
-            <span class="flow-folder-item-icon">${group.id === 'all' ? '✦' : group.id === 'ungrouped' ? '◇' : '▰'}</span><span class="flow-folder-item-name">${escapeHtml(group.name)}</span><span class="flow-folder-item-count">${count}</span>
-        </button>`;
+        const iconStyle = theme ? `background:${theme.bg}; color:${theme.hex}; border:1px solid ${theme.border};` : '';
+        const iconChar = group.id === 'all' ? '✦' : group.id === 'ungrouped' ? '◇' : '📁';
+        return `<div class="flow-folder-item${selectedGroup === group.id ? ' active' : ''}" data-group-id="${escapeHtml(group.id)}" onclick="selectFlowGroup('${escapeHtml(group.id)}')" ondragover="handleFolderDragOver(event, this)" ondragleave="handleFolderDragLeave(event, this)" ondrop="dropWorkflowOnFolder(event, '${escapeHtml(group.id)}', this)">
+            <span class="flow-folder-item-icon" style="${iconStyle}">${iconChar}</span>
+            <span class="flow-folder-item-name">${escapeHtml(group.name)}</span>
+            <span class="flow-folder-item-count">${count}</span>
+            ${isCustom ? `
+                <div class="flow-folder-item-actions">
+                    <button type="button" class="flow-folder-action-btn" onclick="event.stopPropagation(); openFlowGroupEditor('${escapeHtml(group.id)}')" title="Edit group">✏️</button>
+                    <button type="button" class="flow-folder-action-btn delete-btn" onclick="event.stopPropagation(); promptDeleteFlowGroup('${escapeHtml(group.id)}')" title="Delete group at will">🗑️</button>
+                </div>
+            ` : ''}
+        </div>`;
     }).join('');
+
+    const isCustomGroup = selectedGroup !== 'all' && selectedGroup !== 'ungrouped';
+    const activeTheme = isCustomGroup ? getGroupTheme(selectedMeta?.color) : null;
+
     grid.innerHTML = `<div class="workflow-workspace">
         <aside class="flow-folder-rail"><div class="flow-folder-rail-title"><span>Groups</span><button type="button" class="flow-folder-create-button" onclick="openCreateFlowGroupModal()" title="Create a new group">＋ New</button></div>${folderItems}</aside>
         <section class="flow-list-panel">
-            <div class="flow-list-heading"><div><h2>${escapeHtml(selectedMeta?.name || 'All flows')}</h2><p>${visibleWorkflows.length} shown · ${visibleWorkflows.filter(wf => wf.is_active).length} active</p></div>
-            <div style="display:flex;gap:6px;"><button type="button" class="flow-group-action" onclick="openModalForGroup('${selectedGroup === 'all' ? 'ungrouped' : escapeHtml(selectedGroup)}')">＋ New flow</button>${selectedGroup !== 'all' && selectedGroup !== 'ungrouped' ? `<button type="button" class="flow-group-action" onclick="openFlowGroupEditor('${escapeHtml(selectedGroup)}')">Manage group</button>` : ''}</div></div>
+            <div class="flow-list-heading">
+                <div>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        ${activeTheme ? `<span style="width:12px;height:12px;border-radius:50%;background:${activeTheme.hex};box-shadow:0 0 10px ${activeTheme.hex};flex-shrink:0;"></span>` : ''}
+                        <h2>${escapeHtml(selectedMeta?.name || 'All flows')}</h2>
+                        ${isCustomGroup ? `<button type="button" class="btn-icon" style="font-size:0.8rem;padding:2px 6px;margin-left:4px;" onclick="openFlowGroupEditor('${escapeHtml(selectedGroup)}')" title="Edit group">✏️</button>` : ''}
+                    </div>
+                    <p style="margin-top:4px;">${visibleWorkflows.length} shown · ${visibleWorkflows.filter(wf => wf.is_active).length} active</p>
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    <button type="button" class="flow-group-action" onclick="openModalForGroup('${selectedGroup === 'all' ? 'ungrouped' : escapeHtml(selectedGroup)}')">＋ New flow</button>
+                    ${isCustomGroup ? `
+                        <button type="button" class="flow-group-action" onclick="openAssignFlowsModal('${escapeHtml(selectedGroup)}')">📂 Assign flows</button>
+                        <button type="button" class="flow-group-action" onclick="openFlowGroupEditor('${escapeHtml(selectedGroup)}')">⚙️ Group settings</button>
+                        <button type="button" class="flow-group-action" style="color:#f87171;" onclick="promptDeleteFlowGroup('${escapeHtml(selectedGroup)}')">🗑️ Delete</button>
+                    ` : ''}
+                </div>
+            </div>
             <div class="workflows-grid flow-group-grid" id="active-flow-grid"></div>
         </section></div>`;
     const activeGrid = document.getElementById('active-flow-grid');
@@ -198,7 +276,7 @@ function renderWorkflows() {
                 </div>
                 <div style="display:flex;align-items:center;gap:10px;">
                     <span class="workflow-compact-rule-count">${(wf.rules || []).length} rule${(wf.rules || []).length === 1 ? '' : 's'}</span>
-                    <div class="status-badge" style="${!wf.is_active ? 'background: rgba(239, 68, 68, 0.1); color: #ef4444;' : ''}">
+                    <div class="status-badge ${wf.is_active ? 'status-active' : 'status-paused'}">
                         ${wf.is_active ? 'Active' : 'Paused'}
                     </div>
                 </div>
@@ -237,7 +315,7 @@ function renderWorkflows() {
                         color = '#10b981';
                     } else if (r.rule_type === 'migrated') {
                         label = `🧬 Migrated: ${r.search_text === 'no' ? 'No' : 'Yes'}`;
-                        color = '#6366f1';
+                        color = '#06b6d4';
                     } else if (r.rule_type === 'show_wallet') {
                         label = `👛 Wallet: ${r.search_text === 'no' ? 'No' : 'Yes'}`;
                         color = '#0ea5e9';
@@ -254,7 +332,7 @@ function renderWorkflows() {
                         color = '#f43f5e';
                     } else if (r.rule_type === 'replace') {
                         label = `🔄 Replace: "${r.search_text}" -> "${r.replace_text}"`;
-                        color = '#8b5cf6';
+                        color = '#0284c7';
                     } else if (r.rule_type === 'append') {
                         label = `➕ Append: "${r.replace_text}"`;
                         color = '#06b6d4';
@@ -267,10 +345,16 @@ function renderWorkflows() {
             <div class="workflow-footer">
                 <div style="display:flex;align-items:center;gap:8px;min-width:0;">
                     <div class="rules-count">${(wf.rules || []).length} Rules</div>
-                    <select class="workflow-quick-move" title="Move to group" onchange="moveWorkflowToGroup(${wf.id}, this.value)">
-                        <option value="" ${!validGroupIds.has(String(flowGroups.assignments[String(wf.id)] || '')) ? 'selected' : ''}>Ungrouped</option>
-                        ${flowGroups.groups.map(group => `<option value="${escapeHtml(group.id)}" ${String(flowGroups.assignments[String(wf.id)] || '') === group.id ? 'selected' : ''}>${escapeHtml(group.name)}</option>`).join('')}
-                    </select>
+                    ${(() => {
+                        const curGroupId = String(flowGroups.assignments[String(wf.id)] || '');
+                        const curGroup = flowGroups.groups.find(g => g.id === curGroupId);
+                        const curTheme = curGroup ? getGroupTheme(curGroup.color) : null;
+                        const style = curTheme ? `border-color:${curTheme.border};background:${curTheme.bg};color:${curTheme.text};font-weight:600;` : '';
+                        return `<select class="workflow-quick-move" style="${style}" title="Move to group" onchange="moveWorkflowToGroup(${wf.id}, this.value)">
+                            <option value="" ${!validGroupIds.has(curGroupId) ? 'selected' : ''}>Ungrouped</option>
+                            ${flowGroups.groups.map(group => `<option value="${escapeHtml(group.id)}" ${curGroupId === group.id ? 'selected' : ''}>📁 ${escapeHtml(group.name)}</option>`).join('')}
+                        </select>`;
+                    })()}
                 </div>
                 <div style="display: flex; gap: 8px;">
                     <button class="btn-icon" onclick="duplicateWorkflow(${wf.id})" title="Duplicate Workflow">
@@ -391,13 +475,21 @@ async function dropWorkflowOnFolder(event, groupId, item) {
 async function moveWorkflowToGroup(workflowId, groupId) {
     const key = String(workflowId);
     const previous = flowGroups.assignments[key];
+    const wf = workflows.find(w => String(w.id) === key);
+    const targetGroup = flowGroups.groups.find(g => g.id === String(groupId));
+    const targetName = targetGroup ? targetGroup.name : 'Ungrouped';
+    
     if (groupId) flowGroups.assignments[key] = String(groupId);
     else delete flowGroups.assignments[key];
+    
     renderWorkflows();
-    if (!await saveFlowGroups()) {
+    if (!await saveFlowGroups(false)) {
         if (previous) flowGroups.assignments[key] = previous;
         else delete flowGroups.assignments[key];
         renderWorkflows();
+        showAppToast('Failed to update workflow group', 'error');
+    } else {
+        showAppToast(`"${wf ? wf.name : 'Workflow'}" moved to ${targetName}`, 'success');
     }
 }
 
@@ -423,12 +515,31 @@ async function saveFlowGroups(showError = true) {
         settings.workflow_groups = serialized;
         return true;
     } catch (error) {
-        if (showError) alert('Failed to save workflow groups: ' + error.message);
+        if (showError) showAppToast('Failed to save workflow groups: ' + error.message, 'error');
         return false;
     }
 }
 
+function initColorPicker(containerId, activeColor, onSelect) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = FLOW_GROUP_COLORS.map(c => `
+        <button type="button" class="color-swatch-btn ${c.key === activeColor ? 'selected' : ''}" data-color="${c.key}" style="background:${c.hex}; color:${c.hex};" title="${c.name}"></button>
+    `).join('');
+    container.querySelectorAll('.color-swatch-btn').forEach(btn => {
+        btn.onclick = () => {
+            const colorKey = btn.dataset.color;
+            container.querySelectorAll('.color-swatch-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            onSelect(colorKey);
+        };
+    });
+}
+
 function openFlowGroupsModal() {
+    initColorPicker('quick-group-color-picker', selectedQuickGroupColor, color => {
+        selectedQuickGroupColor = color;
+    });
     renderFlowGroupsManager();
     document.getElementById('flow-groups-modal')?.classList.remove('hidden');
 }
@@ -437,54 +548,255 @@ function closeFlowGroupsModal() {
     document.getElementById('flow-groups-modal')?.classList.add('hidden');
 }
 
-function ensureCreateFlowGroupModal() {
-    if (document.getElementById('create-flow-group-modal')) return;
-    document.body.insertAdjacentHTML('beforeend', `
-        <div id="create-flow-group-modal" class="modal-overlay hidden">
-            <div class="modal-content" style="max-width:460px;">
-                <div class="header" style="margin-bottom:1.25rem;">
-                    <div><h2>Create Group</h2><p style="color:var(--text-muted);font-size:.82rem;margin-top:4px;">Give this workflow folder a clear name.</p></div>
-                    <button class="btn-icon" type="button" onclick="closeCreateFlowGroupModal()" aria-label="Close create group dialog">×</button>
-                </div>
-                <label for="new-flow-group-name" style="display:block;color:var(--text-muted);font-size:.82rem;margin-bottom:7px;">Group name</label>
-                <input id="new-flow-group-name" class="form-input" placeholder="e.g. Boost Orders" onkeydown="handleFlowGroupNameKey(event)" />
-                <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:1.25rem;">
-                    <button type="button" class="btn-icon" style="padding:0 1rem;" onclick="closeCreateFlowGroupModal()">Cancel</button>
-                    <button type="button" class="btn-primary" onclick="createFlowGroup()">Create Group</button>
-                </div>
-            </div>
-        </div>`);
-}
-
 function openCreateFlowGroupModal() {
-    ensureCreateFlowGroupModal();
     const input = document.getElementById('new-flow-group-name');
     if (input) input.value = '';
+    selectedModalGroupColor = 'cyan';
+    initColorPicker('create-group-color-picker', selectedModalGroupColor, color => {
+        selectedModalGroupColor = color;
+    });
     document.getElementById('create-flow-group-modal')?.classList.remove('hidden');
-    setTimeout(() => input?.focus(), 0);
+    setTimeout(() => input?.focus(), 50);
 }
 
 function closeCreateFlowGroupModal() {
     document.getElementById('create-flow-group-modal')?.classList.add('hidden');
 }
 
-function renderFlowGroupsManager() {
+function filterFlowGroupsManager(query) {
+    renderFlowGroupsManager(String(query || '').trim().toLowerCase());
+}
+
+function renderFlowGroupsManager(filterQuery = '') {
     const container = document.getElementById('flow-groups-list');
+    const badge = document.getElementById('flow-groups-total-badge');
+    if (badge) badge.innerText = `${flowGroups.groups.length} Group${flowGroups.groups.length === 1 ? '' : 's'}`;
     if (!container) return;
+
     if (!flowGroups.groups.length) {
-        container.innerHTML = '<p style="color:var(--text-muted);font-size:.86rem;padding:1rem 0;">No groups to manage yet. Use the + beside Groups to create one.</p>';
+        container.innerHTML = `
+            <div style="text-align:center;padding:2.5rem 1rem;color:var(--text-muted);border:1px dashed var(--border-color);border-radius:12px;">
+                <div style="font-size:2rem;margin-bottom:8px;">📁</div>
+                <strong style="color:#f3f4f6;display:block;margin-bottom:6px;">No Groups Created Yet</strong>
+                <p style="font-size:.84rem;max-width:320px;margin:0 auto 14px;">Use the quick creator above to make your first workflow folder.</p>
+            </div>`;
         return;
     }
-    container.innerHTML = flowGroups.groups.map(group => {
-        const count = Object.values(flowGroups.assignments).filter(value => String(value) === group.id).length;
-        return `<div class="flow-group-manager-row">
-            <span style="display:flex;flex-direction:column;gap:1px;"><button type="button" class="btn-icon" onclick="moveFlowGroup('${escapeHtml(group.id)}', -1)" title="Move group up">▴</button><button type="button" class="btn-icon" onclick="moveFlowGroup('${escapeHtml(group.id)}', 1)" title="Move group down">▾</button></span>
-            <input class="form-input" id="flow-group-name-${escapeHtml(group.id)}" value="${escapeHtml(group.name)}" aria-label="Group name" />
-            <span class="flow-group-count">${count} flow${count === 1 ? '' : 's'}</span>
-            <button type="button" class="btn-icon" onclick="renameFlowGroup('${escapeHtml(group.id)}')" title="Save name">✓</button>
-            <button type="button" class="btn-icon" style="color:#ef4444;" onclick="deleteFlowGroup('${escapeHtml(group.id)}')" title="Delete group">×</button>
-        </div>`;
+
+    const filtered = filterQuery ? flowGroups.groups.filter(g => g.name.toLowerCase().includes(filterQuery)) : flowGroups.groups;
+
+    if (!filtered.length) {
+        container.innerHTML = `<p style="color:var(--text-muted);font-size:.86rem;padding:2rem 0;text-align:center;">No groups match "<strong>${escapeHtml(filterQuery)}</strong>".</p>`;
+        return;
+    }
+
+    container.innerHTML = filtered.map(group => {
+        const theme = getGroupTheme(group.color);
+        const groupFlows = workflows.filter(wf => String(flowGroups.assignments[String(wf.id)] || '') === group.id);
+        const activeCount = groupFlows.filter(wf => wf.is_active).length;
+        const isDrawerOpen = expandedGroupDrawers.has(group.id);
+        const otherFlows = workflows.filter(wf => String(flowGroups.assignments[String(wf.id)] || '') !== group.id);
+
+        return `
+            <div class="flow-group-card" id="flow-group-card-${escapeHtml(group.id)}" style="border-left: 4px solid ${theme.hex};">
+                <div class="flow-group-card-header">
+                    <div class="flow-group-card-left">
+                        <div class="flow-group-reorder-btns">
+                            <button type="button" class="flow-group-reorder-btn" onclick="moveFlowGroup('${escapeHtml(group.id)}', -1)" title="Move group up">▲</button>
+                            <button type="button" class="flow-group-reorder-btn" onclick="moveFlowGroup('${escapeHtml(group.id)}', 1)" title="Move group down">▼</button>
+                        </div>
+                        <div class="color-dropdown-wrapper" style="position:relative;">
+                            <button type="button" class="color-swatch-btn selected" onclick="cycleFlowGroupColor('${escapeHtml(group.id)}')" style="background:${theme.hex}; color:${theme.hex};" title="Click to cycle theme color"></button>
+                        </div>
+                        <input class="flow-group-title-input" id="flow-group-name-${escapeHtml(group.id)}" value="${escapeHtml(group.name)}" onchange="renameFlowGroup('${escapeHtml(group.id)}')" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" aria-label="Group name" title="Click to rename" />
+                        <span class="flow-group-badge-pill" style="background:${theme.bg}; color:${theme.text}; border:1px solid ${theme.border};">
+                            ${groupFlows.length} flow${groupFlows.length === 1 ? '' : 's'} · ${activeCount} active
+                        </span>
+                    </div>
+
+                    <div class="flow-group-card-actions" id="group-actions-${escapeHtml(group.id)}">
+                        <button type="button" class="flow-group-btn-expand" onclick="toggleGroupDrawer('${escapeHtml(group.id)}')" title="View and manage member workflows">
+                            <span>${isDrawerOpen ? '▴ Close' : '▾ Manage Flows'}</span>
+                            <span style="opacity:0.6;font-size:0.72rem;">(${groupFlows.length})</span>
+                        </button>
+                        <button type="button" class="flow-group-btn-delete" onclick="showInlineGroupDelete('${escapeHtml(group.id)}')" title="Delete group at will">
+                            🗑️ Delete
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Inline delete confirmation banner -->
+                <div class="flow-group-delete-banner hidden" id="group-delete-banner-${escapeHtml(group.id)}">
+                    <p>⚠️ Delete <strong>${escapeHtml(group.name)}</strong>? Its ${groupFlows.length} workflow(s) will move to Ungrouped.</p>
+                    <div style="display:flex;gap:8px;">
+                        <button type="button" class="btn-icon" style="font-size:0.76rem;padding:3px 8px;" onclick="hideInlineGroupDelete('${escapeHtml(group.id)}')">Cancel</button>
+                        <button type="button" class="btn-primary" style="background:linear-gradient(135deg,#dc2626,#ef4444);font-size:0.76rem;padding:3px 9px;" onclick="deleteFlowGroup('${escapeHtml(group.id)}')">Confirm Delete</button>
+                    </div>
+                </div>
+
+                <!-- Expandable workflows drawer -->
+                ${isDrawerOpen ? `
+                    <div class="flow-group-drawer">
+                        <div class="flow-group-drawer-heading">
+                            <span>Workflows in this group (${groupFlows.length})</span>
+                            <button type="button" class="flow-folder-create-button" onclick="openAssignFlowsModal('${escapeHtml(group.id)}')" style="font-size:0.72rem;">Bulk Select Flows</button>
+                        </div>
+                        
+                        <div class="flow-group-flows-list">
+                            ${groupFlows.length ? groupFlows.map(wf => `
+                                <div class="flow-group-flow-item">
+                                    <div class="flow-group-flow-info">
+                                        <span class="flow-status-dot ${wf.is_active ? 'active' : 'paused'}" title="${wf.is_active ? 'Active' : 'Paused'}"></span>
+                                        <strong class="flow-group-flow-title" title="${escapeHtml(wf.name || 'Unnamed')}">${escapeHtml(wf.name || 'Unnamed')}</strong>
+                                        <span class="flow-group-flow-target">${escapeHtml(wf.target_channel || (wf.target_channel_id ? 'Chat ' + wf.target_channel_id : 'Fallback'))}</span>
+                                    </div>
+                                    <div class="flow-group-flow-actions">
+                                        <select class="flow-group-flow-move-select" onchange="moveWorkflowToGroup(${wf.id}, this.value)" title="Move to another group">
+                                            <option value="${escapeHtml(group.id)}" selected>In this group</option>
+                                            <option value="">Move to Ungrouped</option>
+                                            ${flowGroups.groups.filter(g => g.id !== group.id).map(g => `<option value="${escapeHtml(g.id)}">Move to ${escapeHtml(g.name)}</option>`).join('')}
+                                        </select>
+                                        <button type="button" class="flow-group-flow-btn-remove" onclick="removeWorkflowFromGroup(${wf.id}, '${escapeHtml(group.name)}')" title="Remove from this group">✕</button>
+                                    </div>
+                                </div>
+                            `).join('') : '<div style="color:var(--text-muted);font-size:0.8rem;text-align:center;padding:12px 0;">No workflows in this group yet. Add one below!</div>'}
+                        </div>
+
+                        ${otherFlows.length ? `
+                            <div class="flow-group-add-bar">
+                                <select id="add-to-group-select-${escapeHtml(group.id)}" class="form-input" style="flex:1;font-size:0.78rem;padding:5px 8px;">
+                                    <option value="">Select workflow to add...</option>
+                                    ${otherFlows.map(wf => {
+                                        const curId = flowGroups.assignments[String(wf.id)];
+                                        const curGrp = flowGroups.groups.find(g => g.id === curId);
+                                        const curLabel = curGrp ? ` (${curGrp.name})` : ' (Ungrouped)';
+                                        return `<option value="${wf.id}">${escapeHtml(wf.name || 'Unnamed')}${curLabel}</option>`;
+                                    }).join('')}
+                                </select>
+                                <button type="button" class="btn-primary" onclick="quickAddWorkflowToGroup('${escapeHtml(group.id)}')" style="font-size:0.76rem;padding:5px 10px;white-space:nowrap;">+ Add</button>
+                            </div>
+                        ` : ''}
+                    </div>
+                ` : ''}
+            </div>
+        `;
     }).join('');
+}
+
+function toggleGroupDrawer(groupId) {
+    if (expandedGroupDrawers.has(groupId)) expandedGroupDrawers.delete(groupId);
+    else expandedGroupDrawers.add(groupId);
+    renderFlowGroupsManager();
+}
+
+function showInlineGroupDelete(groupId) {
+    document.getElementById(`group-delete-banner-${groupId}`)?.classList.remove('hidden');
+}
+
+function hideInlineGroupDelete(groupId) {
+    document.getElementById(`group-delete-banner-${groupId}`)?.classList.add('hidden');
+}
+
+async function quickAddWorkflowToGroup(groupId) {
+    const select = document.getElementById(`add-to-group-select-${groupId}`);
+    const workflowId = select?.value;
+    if (!workflowId) return;
+    await moveWorkflowToGroup(workflowId, groupId);
+    renderFlowGroupsManager();
+}
+
+async function removeWorkflowFromGroup(workflowId, groupName) {
+    await moveWorkflowToGroup(workflowId, '');
+    renderFlowGroupsManager();
+}
+
+async function cycleFlowGroupColor(groupId) {
+    const group = flowGroups.groups.find(g => g.id === groupId);
+    if (!group) return;
+    const currentIndex = FLOW_GROUP_COLORS.findIndex(c => c.key === (group.color || 'indigo'));
+    const nextTheme = FLOW_GROUP_COLORS[(currentIndex + 1) % FLOW_GROUP_COLORS.length];
+    group.color = nextTheme.key;
+    renderFlowGroupsManager();
+    renderWorkflows();
+    if (await saveFlowGroups(false)) {
+        showAppToast(`Group color updated to ${nextTheme.name}`, 'info');
+    }
+}
+
+async function quickCreateGroup() {
+    const input = document.getElementById('quick-group-name-input');
+    const name = String(input?.value || '').trim();
+    if (!name) {
+        showAppToast('Please enter a group name', 'error');
+        return;
+    }
+    if (flowGroups.groups.some(g => g.name.toLowerCase() === name.toLowerCase())) {
+        showAppToast('A group with that name already exists', 'error');
+        return;
+    }
+    const id = `group_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+    flowGroups.groups.push({ id, name, color: selectedQuickGroupColor });
+    if (await saveFlowGroups()) {
+        input.value = '';
+        renderFlowGroupsManager();
+        renderWorkflows();
+        showAppToast(`Group "${name}" created!`, 'success');
+    } else {
+        flowGroups.groups = flowGroups.groups.filter(g => g.id !== id);
+    }
+}
+
+function handleQuickGroupKey(event) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    quickCreateGroup();
+}
+
+async function createFlowGroup() {
+    const input = document.getElementById('new-flow-group-name');
+    const name = String(input?.value || '').trim();
+    if (!name) {
+        showAppToast('Please enter a group name', 'error');
+        return;
+    }
+    if (flowGroups.groups.some(g => g.name.toLowerCase() === name.toLowerCase())) {
+        showAppToast('A group with that name already exists', 'error');
+        return;
+    }
+    const id = `group_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+    flowGroups.groups.push({ id, name, color: selectedModalGroupColor });
+    if (await saveFlowGroups()) {
+        input.value = '';
+        closeCreateFlowGroupModal();
+        renderFlowGroupsManager();
+        renderWorkflows();
+        showAppToast(`Group "${name}" created!`, 'success');
+    } else {
+        flowGroups.groups = flowGroups.groups.filter(g => g.id !== id);
+    }
+}
+
+async function renameFlowGroup(groupId) {
+    const group = flowGroups.groups.find(item => item.id === groupId);
+    const input = document.getElementById(`flow-group-name-${groupId}`);
+    const name = String(input?.value || '').trim();
+    if (!group || !name || name === group.name) return;
+    if (flowGroups.groups.some(item => item.id !== groupId && item.name.toLowerCase() === name.toLowerCase())) {
+        showAppToast('A group with that name already exists', 'error');
+        input.value = group.name;
+        return;
+    }
+    const previous = group.name;
+    group.name = name;
+    if (!await saveFlowGroups(false)) {
+        group.name = previous;
+        input.value = previous;
+        showAppToast('Failed to rename group', 'error');
+    } else {
+        renderFlowGroupsManager();
+        renderWorkflows();
+        showAppToast(`Renamed group to "${name}"`, 'success');
+    }
 }
 
 async function moveFlowGroup(groupId, direction) {
@@ -494,64 +806,59 @@ async function moveFlowGroup(groupId, direction) {
     [flowGroups.groups[index], flowGroups.groups[target]] = [flowGroups.groups[target], flowGroups.groups[index]];
     renderFlowGroupsManager();
     renderWorkflows();
-    if (!await saveFlowGroups()) {
+    if (!await saveFlowGroups(false)) {
         [flowGroups.groups[index], flowGroups.groups[target]] = [flowGroups.groups[target], flowGroups.groups[index]];
         renderFlowGroupsManager();
         renderWorkflows();
     }
 }
 
-async function createFlowGroup() {
-    const input = document.getElementById('new-flow-group-name');
-    const name = String(input?.value || '').trim();
-    if (!name) return;
-    if (flowGroups.groups.some(group => group.name.toLowerCase() === name.toLowerCase())) {
-        alert('A group with that name already exists.');
-        return;
+function promptDeleteFlowGroup(groupId) {
+    const group = flowGroups.groups.find(g => g.id === groupId);
+    if (!group) return;
+    pendingDeleteGroupId = groupId;
+    const title = document.getElementById('delete-group-modal-title');
+    const desc = document.getElementById('delete-group-modal-desc');
+    const confirmBtn = document.getElementById('confirm-delete-group-btn');
+    const count = Object.values(flowGroups.assignments).filter(val => String(val) === groupId).length;
+    if (title) title.innerText = `Delete "${group.name}"?`;
+    if (desc) desc.innerText = `All ${count} workflow(s) in this group will be safely preserved and moved to "Ungrouped". No rules or data will be deleted.`;
+    if (confirmBtn) {
+        confirmBtn.onclick = () => {
+            deleteFlowGroup(groupId);
+            closeDeleteFlowGroupModal();
+        };
     }
-    const id = `group_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
-    flowGroups.groups.push({ id, name });
-    if (await saveFlowGroups()) {
-        input.value = '';
-        closeCreateFlowGroupModal();
-        renderFlowGroupsManager();
-        renderWorkflows();
-    } else {
-        flowGroups.groups = flowGroups.groups.filter(group => group.id !== id);
-    }
+    document.getElementById('delete-flow-group-modal')?.classList.remove('hidden');
 }
 
-async function renameFlowGroup(groupId) {
-    const group = flowGroups.groups.find(item => item.id === groupId);
-    const input = document.getElementById(`flow-group-name-${groupId}`);
-    const name = String(input?.value || '').trim();
-    if (!group || !name) return;
-    if (flowGroups.groups.some(item => item.id !== groupId && item.name.toLowerCase() === name.toLowerCase())) {
-        alert('A group with that name already exists.');
-        return;
-    }
-    const previous = group.name;
-    group.name = name;
-    if (!await saveFlowGroups()) group.name = previous;
-    renderFlowGroupsManager();
-    renderWorkflows();
+function closeDeleteFlowGroupModal() {
+    pendingDeleteGroupId = null;
+    document.getElementById('delete-flow-group-modal')?.classList.add('hidden');
 }
 
 async function deleteFlowGroup(groupId) {
     const group = flowGroups.groups.find(item => item.id === groupId);
-    if (!group || !confirm(`Delete group "${group.name}"? Its flows will move to Ungrouped.`)) return;
+    if (!group) return;
     const previousGroups = flowGroups.groups.map(item => ({ ...item }));
     const previousAssignments = { ...flowGroups.assignments };
     flowGroups.groups = flowGroups.groups.filter(item => item.id !== groupId);
     Object.keys(flowGroups.assignments).forEach(workflowId => {
         if (String(flowGroups.assignments[workflowId]) === groupId) delete flowGroups.assignments[workflowId];
     });
+    if (activeFlowGroupView === groupId) {
+        activeFlowGroupView = 'all';
+        try { localStorage.setItem('teleflow_active_flow_group', 'all'); } catch (_) {}
+    }
+    renderFlowGroupsManager();
+    renderWorkflows();
     if (await saveFlowGroups()) {
-        renderFlowGroupsManager();
-        renderWorkflows();
+        showAppToast(`Group "${group.name}" deleted. Flows moved to Ungrouped.`, 'info');
     } else {
         flowGroups.groups = previousGroups;
         flowGroups.assignments = previousAssignments;
+        renderFlowGroupsManager();
+        renderWorkflows();
     }
 }
 
@@ -559,6 +866,106 @@ function handleFlowGroupNameKey(event) {
     if (event.key !== 'Enter') return;
     event.preventDefault();
     createFlowGroup();
+}
+
+/* Bulk Assign Flows to Group Modal */
+function openAssignFlowsModal(groupId) {
+    const group = flowGroups.groups.find(g => g.id === groupId);
+    if (!group) return;
+    activeAssignGroupId = groupId;
+    const title = document.getElementById('assign-flows-title');
+    if (title) title.innerText = `Assign Workflows to "${group.name}"`;
+    const searchInput = document.getElementById('assign-flows-search');
+    if (searchInput) searchInput.value = '';
+    renderAssignFlowsList();
+    document.getElementById('assign-flows-modal')?.classList.remove('hidden');
+}
+
+function closeAssignFlowsModal() {
+    activeAssignGroupId = null;
+    document.getElementById('assign-flows-modal')?.classList.add('hidden');
+}
+
+function filterAssignFlowsList(search) {
+    renderAssignFlowsList(String(search || '').trim().toLowerCase());
+}
+
+function renderAssignFlowsList(search = '') {
+    const container = document.getElementById('assign-flows-list');
+    if (!container || !activeAssignGroupId) return;
+    const filtered = workflows.filter(wf => {
+        if (!search) return true;
+        return (wf.name || '').toLowerCase().includes(search) || (wf.target_channel || '').toLowerCase().includes(search);
+    });
+
+    if (!filtered.length) {
+        container.innerHTML = '<p style="color:var(--text-muted);font-size:0.84rem;text-align:center;padding:2rem 0;">No matching workflows found.</p>';
+        updateAssignFlowsSummary();
+        return;
+    }
+
+    container.innerHTML = filtered.map(wf => {
+        const isAssigned = String(flowGroups.assignments[String(wf.id)] || '') === activeAssignGroupId;
+        const curGroupId = String(flowGroups.assignments[String(wf.id)] || '');
+        const otherGroup = curGroupId && curGroupId !== activeAssignGroupId ? flowGroups.groups.find(g => g.id === curGroupId) : null;
+        return `
+            <label class="assign-flow-item ${isAssigned ? 'checked' : ''}" onclick="toggleAssignFlowItem(event, this)">
+                <input type="checkbox" class="assign-flow-checkbox" value="${wf.id}" ${isAssigned ? 'checked' : ''} onchange="this.closest('.assign-flow-item').classList.toggle('checked', this.checked); updateAssignFlowsSummary();" />
+                <span class="flow-status-dot ${wf.is_active ? 'active' : 'paused'}"></span>
+                <strong style="color:#f3f4f6;font-size:0.86rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(wf.name || 'Unnamed')}</strong>
+                <span style="font-size:0.74rem;color:var(--text-muted);background:rgba(255,255,255,0.04);padding:2px 6px;border-radius:4px;">${escapeHtml(wf.target_channel || 'Fallback')}</span>
+                ${otherGroup ? `<span style="font-size:0.7rem;color:#fcd34d;background:rgba(245,158,11,0.12);padding:2px 6px;border-radius:4px;">Currently: ${escapeHtml(otherGroup.name)}</span>` : ''}
+            </label>
+        `;
+    }).join('');
+    updateAssignFlowsSummary();
+}
+
+function toggleAssignFlowItem(event, labelEl) {
+    if (event.target.tagName === 'INPUT') return;
+    const checkbox = labelEl.querySelector('input[type="checkbox"]');
+    if (!checkbox) return;
+    checkbox.checked = !checkbox.checked;
+    labelEl.classList.toggle('checked', checkbox.checked);
+    updateAssignFlowsSummary();
+}
+
+function setAllAssignFlows(checkAll) {
+    const checkboxes = document.querySelectorAll('#assign-flows-list .assign-flow-checkbox');
+    checkboxes.forEach(cb => {
+        cb.checked = checkAll;
+        cb.closest('.assign-flow-item')?.classList.toggle('checked', checkAll);
+    });
+    updateAssignFlowsSummary();
+}
+
+function updateAssignFlowsSummary() {
+    const summary = document.getElementById('assign-flows-summary');
+    if (!summary) return;
+    const total = document.querySelectorAll('#assign-flows-list .assign-flow-checkbox').length;
+    const checked = document.querySelectorAll('#assign-flows-list .assign-flow-checkbox:checked').length;
+    summary.innerText = `${checked} of ${total} workflows selected`;
+}
+
+async function saveAssignFlows() {
+    if (!activeAssignGroupId) return;
+    const group = flowGroups.groups.find(g => g.id === activeAssignGroupId);
+    const checkboxes = document.querySelectorAll('#assign-flows-list .assign-flow-checkbox');
+    checkboxes.forEach(cb => {
+        const wfId = String(cb.value);
+        if (cb.checked) {
+            flowGroups.assignments[wfId] = activeAssignGroupId;
+        } else if (flowGroups.assignments[wfId] === activeAssignGroupId) {
+            delete flowGroups.assignments[wfId];
+        }
+    });
+
+    renderWorkflows();
+    renderFlowGroupsManager();
+    closeAssignFlowsModal();
+    if (await saveFlowGroups()) {
+        showAppToast(`Workflows updated for "${group ? group.name : 'Group'}"`, 'success');
+    }
 }
 
 function openModal() {
@@ -624,7 +1031,7 @@ function renderRules() {
         if (rule.rule_type === 'token_age') badgeColor = '#3b82f6';
         else if (rule.rule_type === 'market_cap') badgeColor = '#10b981';
         else if (rule.rule_type === 'dex_payment') badgeColor = '#06b6d4';
-        else if (rule.rule_type === 'migrated') badgeColor = '#6366f1';
+        else if (rule.rule_type === 'migrated') badgeColor = '#06b6d4';
         else if (rule.rule_type === 'performance') badgeColor = '#f59e0b';
         else if (rule.rule_type === 'liquidity') badgeColor = '#14b8a6';
         else if (rule.rule_type === 'volume') badgeColor = '#0ea5e9';
@@ -1364,7 +1771,7 @@ function handleChannelSearch(type) {
             } else if (c.type === 'Group') {
                 typeBadge = `<span style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.3); font-weight: 500;">👥 Group</span>`;
             } else {
-                typeBadge = `<span style="background: rgba(139, 92, 246, 0.15); color: #a78bfa; font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(139, 92, 246, 0.3); font-weight: 500;">📢 Channel</span>`;
+                typeBadge = `<span style="background: rgba(6, 182, 212, 0.15); color: #67e8f9; font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(6, 182, 212, 0.3); font-weight: 500;">📢 Channel</span>`;
             }
             
             div.innerHTML = `
@@ -1714,8 +2121,8 @@ async function scanWalletHistory() {
                         </div>
                         
                         ${s.last_bought_token ? `
-                        <div style="margin-top: 8px; margin-bottom: 8px; padding: 8px; background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.2); border-radius: 6px;">
-                            <div style="font-size: 0.72rem; color: #a78bfa; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
+                        <div style="margin-top: 8px; margin-bottom: 8px; padding: 8px; background: rgba(6, 182, 212, 0.08); border: 1px solid rgba(6, 182, 212, 0.2); border-radius: 6px;">
+                            <div style="font-size: 0.72rem; color: #22d3ee; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
                                 🪙 Last Token Bought Before Payment:
                             </div>
                             <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
@@ -1723,7 +2130,7 @@ async function scanWalletHistory() {
                                     <span style="font-weight: bold; color: white; font-size: 0.82rem;" title="${s.last_bought_token_name || ''}">${s.last_bought_token_name || 'Unknown Token'}</span>
                                     <span style="font-family: monospace; color: var(--text-muted); font-size: 0.7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: all;" title="${s.last_bought_token}">${s.last_bought_token}</span>
                                 </div>
-                                <a href="https://dexscreener.com/solana/${s.last_bought_token}" target="_blank" class="btn-primary" style="padding: 3px 8px; font-size: 0.7rem; border-radius: 4px; text-decoration: none; background: #8b5cf6; color: white; flex-shrink: 0; font-weight: 600; box-shadow: none;">
+                                <a href="https://dexscreener.com/solana/${s.last_bought_token}" target="_blank" class="btn-primary" style="padding: 3px 8px; font-size: 0.7rem; border-radius: 4px; text-decoration: none; background: #06b6d4; color: white; flex-shrink: 0; font-weight: 600; box-shadow: none;">
                                     Dexscreener ↗
                                 </a>
                             </div>
@@ -1878,19 +2285,19 @@ async function loadRealtimePayments() {
                 const tokenDisplayName = p.token_name ? p.token_name : (p.mint === 'SOL' ? 'SOL' : p.mint.slice(0,6) + '...');
                 
                 return `
-                    <div class="result-success" style="padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.1); border-left: 3px solid #8b5cf6; margin-bottom: 0.5rem;">
+                    <div class="result-success" style="padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.1); border-left: 3px solid #06b6d4; margin-bottom: 0.5rem;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                            <span style="font-weight:600; color:#c084fc; font-size:0.82rem;">💳 Incoming Transfer</span>
+                            <span style="font-weight:600; color:#22d3ee; font-size:0.82rem;">💳 Incoming Transfer</span>
                             <span style="font-size:0.72rem; color:var(--text-muted);">${dateStr}</span>
                         </div>
                         <div style="font-size:0.95rem; font-weight:bold; color:white; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
                             <span>+${p.amount.toFixed(4)} ${tokenDisplayName}</span>
-                            <span style="color:#c084fc; font-size:0.9rem;">${amountUsdText}</span>
+                            <span style="color:#22d3ee; font-size:0.9rem;">${amountUsdText}</span>
                         </div>
                         <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px; display:flex; flex-direction:column; gap:4px;">
                             <div style="display:flex; justify-content:space-between; align-items:center;">
                                 <span>Sender: <span style="font-family:monospace; color:#60a5fa; user-select:all;">${p.sender_address.slice(0,10)}...${p.sender_address.slice(-6)}</span></span>
-                                <button onclick="openWalletTxModal('${p.sender_address}')" class="btn-primary" style="padding: 3px 8px; font-size: 0.72rem; border-radius: 4px; box-shadow: none; background: rgba(139, 92, 246, 0.2); border: 1px solid rgba(139, 92, 246, 0.4); color: #c084fc;">
+                                <button onclick="openWalletTxModal('${p.sender_address}')" class="btn-primary" style="padding: 3px 8px; font-size: 0.72rem; border-radius: 4px; box-shadow: none; background: rgba(6, 182, 212, 0.16); border: 1px solid rgba(6, 182, 212, 0.4); color: #67e8f9;">
                                     Inspect Wallet ↗
                                 </button>
                             </div>
@@ -1936,15 +2343,17 @@ function updateLiveScanButtonUI() {
     if (!btn) return;
     const isActive = str(settings.cto_auto_scan).toLowerCase() === 'true';
     if (isActive) {
-        btn.innerHTML = '🟢 Live Scan Active';
-        btn.style.background = 'rgba(16, 185, 129, 0.15)';
-        btn.style.borderColor = '#10b981';
-        btn.style.color = '#10b981';
+        btn.innerHTML = '<span class="status-dot-green"></span> Live Scan Active';
+        btn.style.background = 'rgba(16, 185, 129, 0.14)';
+        btn.style.borderColor = 'rgba(16, 185, 129, 0.45)';
+        btn.style.color = '#34d399';
+        btn.style.boxShadow = '0 0 16px rgba(16, 185, 129, 0.2)';
     } else {
-        btn.innerHTML = '⚫ Start Live Scan';
+        btn.innerHTML = '● Live Scan';
         btn.style.background = 'rgba(255, 255, 255, 0.05)';
         btn.style.borderColor = 'rgba(255, 255, 255, 0.15)';
         btn.style.color = 'var(--text-muted)';
+        btn.style.boxShadow = 'none';
     }
 }
 
@@ -1955,15 +2364,13 @@ function updateTrackerStatusUI() {
     const isPolling = String(settings.wallet_tracker_poll_enabled).toLowerCase() === 'true';
     const isLiveScan = String(settings.cto_auto_scan).toLowerCase() === 'true';
     if (hasAddress && (isPolling || isLiveScan)) {
-        indicator.innerHTML = 'Active';
-        indicator.style.background = 'rgba(16, 185, 129, 0.15)';
-        indicator.style.borderColor = '#10b981';
-        indicator.style.color = '#10b981';
+        indicator.textContent = 'Active';
+        indicator.className = 'status-badge status-active';
+        indicator.removeAttribute('style');
     } else {
-        indicator.innerHTML = 'Inactive';
-        indicator.style.background = 'rgba(255, 255, 255, 0.05)';
-        indicator.style.borderColor = 'rgba(255, 255, 255, 0.15)';
-        indicator.style.color = 'var(--text-muted)';
+        indicator.textContent = 'Inactive';
+        indicator.className = 'status-badge status-paused';
+        indicator.removeAttribute('style');
     }
 }
 
@@ -2299,9 +2706,9 @@ function renderTokenDataFromCache() {
         const badge = document.getElementById('td-sync-badge');
         if (badge) {
             badge.innerText = '⚡ Cached (Syncing fresh...)';
-            badge.style.color = '#818cf8';
-            badge.style.borderColor = 'rgba(99, 102, 241, 0.3)';
-            badge.style.background = 'rgba(99, 102, 241, 0.15)';
+            badge.style.color = '#22d3ee';
+            badge.style.borderColor = 'rgba(6, 182, 212, 0.3)';
+            badge.style.background = 'rgba(6, 182, 212, 0.15)';
         }
         return true;
     } catch (e) {

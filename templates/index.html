@@ -245,11 +245,11 @@
             align-items: center;
             justify-content: center;
             padding: 24px;
-            background: #0f1115;
-            background-image: radial-gradient(circle at 20% 30%, rgba(99,102,241,.16), transparent 34%), radial-gradient(circle at 80% 65%, rgba(16,185,129,.12), transparent 34%);
+            background: #000000;
+            background-image: radial-gradient(circle at 20% 30%, rgba(6,182,212,.12), transparent 34%), radial-gradient(circle at 80% 65%, rgba(16,185,129,.10), transparent 34%);
         }
         .system-landing__inner { width: min(900px, 100%); text-align: center; }
-        .system-landing__brand { color: #a5b4fc; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; font-size: .78rem; }
+        .system-landing__brand { color: #22d3ee; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; font-size: .78rem; }
         .system-landing h1 { font-size: clamp(2rem, 5vw, 3.5rem); margin: 14px 0 10px; }
         .system-landing__subtitle { color: var(--text-muted); margin-bottom: 34px; }
         .system-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
@@ -263,12 +263,12 @@
             cursor: pointer;
             transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
         }
-        .system-option:hover { transform: translateY(-4px); border-color: #818cf8; box-shadow: 0 18px 45px rgba(0,0,0,.28); }
+        .system-option:hover { transform: translateY(-4px); border-color: #06b6d4; box-shadow: 0 18px 45px rgba(0,0,0,.35); }
         .system-option--dex:hover { border-color: #10b981; }
         .system-option__icon { font-size: 2rem; margin-bottom: 18px; }
         .system-option h2 { margin-bottom: 8px; font-size: 1.35rem; }
         .system-option p { color: var(--text-muted); line-height: 1.55; font-size: .9rem; }
-        .system-option__action { display: inline-block; margin-top: 22px; font-weight: 700; color: #a5b4fc; }
+        .system-option__action { display: inline-block; margin-top: 22px; font-weight: 700; color: #22d3ee; }
         .system-option--dex .system-option__action { color: #6ee7b7; }
         .system-switcher { margin: 0 0 20px; padding: 9px 12px; width: 100%; justify-content: center; }
         .workflow-page-header { align-items:flex-start; gap:24px; }
@@ -280,8 +280,8 @@
         .flow-folder-rail-title { display:flex;align-items:center;justify-content:space-between;padding:4px 8px 12px;color:var(--text-muted);font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em; }
         .flow-folder-item { width:100%;display:flex;align-items:center;gap:9px;border:0;background:transparent;color:var(--text-muted);padding:10px;border-radius:9px;cursor:pointer;text-align:left;font:inherit;margin-bottom:3px; }
         .flow-folder-item:hover { color:white;background:rgba(255,255,255,.04); }
-        .flow-folder-item.active { color:white;background:rgba(99,102,241,.15);box-shadow:inset 2px 0 #818cf8; }
-        .flow-folder-item.drag-over { background:rgba(99,102,241,.25);outline:1px solid #818cf8; }
+        .flow-folder-item.active { color:white;background:rgba(6,182,212,.14);box-shadow:inset 2px 0 #06b6d4; }
+        .flow-folder-item.drag-over { background:rgba(6,182,212,.22);outline:1px solid #06b6d4; }
         .flow-folder-item-icon { width:25px;height:25px;display:grid;place-items:center;border-radius:7px;background:rgba(255,255,255,.05);flex:0 0 auto; }
         .flow-folder-item-name { flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.84rem;font-weight:600; }
         .flow-folder-item-count { font-size:.7rem;color:var(--text-muted); }
@@ -293,10 +293,10 @@
         .flow-list-heading h2 { font-size:1.1rem;margin-bottom:4px; }
         .flow-list-heading p { color:var(--text-muted);font-size:.78rem; }
         .flow-group-section { margin-bottom: 1.5rem; border:1px solid var(--border-color); border-radius:14px; background:rgba(255,255,255,.012); overflow:hidden; transition:border-color .2s, background .2s; }
-        .flow-group-section.drag-over { border-color:#818cf8; background:rgba(99,102,241,.08); }
+        .flow-group-section.drag-over { border-color:#06b6d4; background:rgba(6,182,212,.08); }
         .flow-group-header { width:100%; display:flex; justify-content:space-between; align-items:center; gap:12px; color:white; background:rgba(255,255,255,.025); padding:14px 16px; font:inherit; font-weight:700; }
         .flow-group-header-main { display:flex;align-items:center;gap:10px;min-width:0;cursor:pointer;flex:1; }
-        .flow-group-folder { width:34px;height:34px;border-radius:9px;display:grid;place-items:center;background:rgba(99,102,241,.13);color:#a5b4fc;flex:0 0 auto; }
+        .flow-group-folder { width:34px;height:34px;border-radius:9px;display:grid;place-items:center;background:rgba(6,182,212,.12);color:#22d3ee;flex:0 0 auto; }
         .flow-group-title { overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
         .flow-group-summary { color:var(--text-muted);font-size:.74rem;font-weight:500;margin-top:3px; }
         .flow-group-actions { display:flex;align-items:center;gap:5px; }
@@ -403,7 +403,7 @@
                         <button class="btn-primary" type="button" onclick="openTesterModal()" style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); color: #6ee7b7; box-shadow: none;">
                             Test Flow
                         </button>
-                        <button class="btn-primary" type="button" onclick="openFlowGroupsModal()" style="background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.4);color:#a5b4fc;box-shadow:none;">
+                        <button class="btn-primary" type="button" onclick="openFlowGroupsModal()" style="background:rgba(6,182,212,.12);border:1px solid rgba(6,182,212,.4);color:#67e8f9;box-shadow:none;">
                             Manage Groups
                         </button>
                         <button class="btn-primary" onclick="openModal()">
@@ -700,11 +700,11 @@
 
                     <!-- Right Panel: Real-Time Log & Database payments -->
                     <div class="workflow-card" style="flex: 1; min-width: 320px; display: flex; flex-direction: column; height: 550px;">
-                        <h3 style="margin-bottom: 1rem; font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; justify-content: space-between; color: #8b5cf6;">
+                        <h3 style="margin-bottom: 1rem; font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; justify-content: space-between; color: #22d3ee;">
                             <div style="display: flex; align-items: center; gap: 8px;">
                                 📝 <span>Real-Time Payments Log</span>
                             </div>
-                            <button onclick="loadRealtimePayments()" class="btn-icon" style="color:#8b5cf6; font-size: 1.1rem;">🔄</button>
+                            <button onclick="loadRealtimePayments()" class="btn-icon" style="color:#22d3ee; font-size: 1.1rem;">🔄</button>
                         </h3>
                         <div id="realtime-payments-container" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; color: var(--text-muted); padding-right: 4px;">
                             Loading payments history...
@@ -719,7 +719,7 @@
                     <div class="header-title">
                         <div style="display: flex; align-items: center; gap: 12px;">
                             <h1>Token Wallet Data</h1>
-                            <div id="td-sync-badge" style="font-size: 0.75rem; padding: 3px 10px; border-radius: 20px; background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3); font-weight: 500;">
+                            <div id="td-sync-badge" style="font-size: 0.75rem; padding: 3px 10px; border-radius: 20px; background: rgba(6, 182, 212, 0.12); color: #22d3ee; border: 1px solid rgba(6, 182, 212, 0.3); font-weight: 500;">
                                 ⚡ Cache Enabled
                             </div>
                         </div>
@@ -748,7 +748,7 @@
                 <!-- KPI Stats Grid -->
                 <div class="stats-grid">
                     <div class="stat-card">
-                        <div class="stat-icon-wrapper" style="background: rgba(99, 102, 241, 0.15); color: #818cf8;">
+                        <div class="stat-icon-wrapper" style="background: rgba(6, 182, 212, 0.15); color: #22d3ee;">
                             📊
                         </div>
                         <div class="stat-content">
@@ -792,9 +792,9 @@
                         <div class="form-group" style="margin-bottom: 0; min-width: 250px; flex: 2;">
                             <label style="display: flex; justify-content: space-between; align-items: center;">
                                 <span>⚡ Apply Workflow Rules Preset</span>
-                                <span style="font-size: 0.72rem; color: #818cf8;">Auto-loads workflow rules</span>
+                                <span style="font-size: 0.72rem; color: #22d3ee;">Auto-loads workflow rules</span>
                             </label>
-                            <select class="form-input" id="td-workflow-preset" onchange="applyWorkflowPresetToFilters()" style="-webkit-appearance: none; background: rgba(99, 102, 241, 0.12); border-color: rgba(99, 102, 241, 0.35); color: #c7d2fe; font-weight: 500;">
+                            <select class="form-input" id="td-workflow-preset" onchange="applyWorkflowPresetToFilters()" style="-webkit-appearance: none; background: rgba(6, 182, 212, 0.12); border-color: rgba(6, 182, 212, 0.35); color: #a5f3fc; font-weight: 500;">
                                 <option value="">No Preset (Custom Filters)</option>
                             </select>
                         </div>
@@ -999,11 +999,11 @@
                                 <input type="checkbox" id="td-enriched-only" onchange="loadTokenWalletData(1)" style="accent-color: var(--accent-color); width: 16px; height: 16px; cursor: pointer;" checked>
                                 <span>Show Matched Tokens Only (Non-SOL)</span>
                             </label>
-                            <span id="td-active-filters-count" style="font-size: 0.78rem; background: rgba(99, 102, 241, 0.15); color: #818cf8; padding: 2px 8px; border-radius: 12px; display: none;">0 filters active</span>
+                            <span id="td-active-filters-count" style="font-size: 0.78rem; background: rgba(6, 182, 212, 0.15); color: #22d3ee; padding: 2px 8px; border-radius: 12px; display: none;">0 filters active</span>
                         </div>
 
                         <div style="display: flex; gap: 10px; align-items: center;">
-                            <button onclick="syncSupabaseData()" id="btn-sync-supabase" title="Pull latest updates from Supabase database" style="background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.4); border-radius: 6px; padding: 4px 11px; color: #a5b4fc; font-size: 0.8rem; font-weight: 500; cursor: pointer; transition: all 0.2s ease;">
+                            <button onclick="syncSupabaseData()" id="btn-sync-supabase" title="Pull latest updates from Supabase database" style="background: rgba(6, 182, 212, 0.15); border: 1px solid rgba(6, 182, 212, 0.4); border-radius: 6px; padding: 4px 11px; color: #67e8f9; font-size: 0.8rem; font-weight: 500; cursor: pointer; transition: all 0.2s ease;">
                                 ⚡ Sync Supabase
                             </button>
                             <button onclick="resetTokenFilters()" style="background: none; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 4px 10px; color: var(--text-muted); font-size: 0.8rem; cursor: pointer; transition: all 0.2s ease;">
@@ -1143,12 +1143,12 @@
                             
                             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 8px; margin-top: 1rem;">
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem;" onclick="addRule('token_age')">+ Add Token Age</button>
-                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #8b5cf6;" onclick="addRule('market_cap')">+ Add Market Cap</button>
+                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #10b981;" onclick="addRule('market_cap')">+ Add Market Cap</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #f59e0b;" onclick="addRule('performance')">+ Add Performance</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #14b8a6;" onclick="addRule('liquidity')">+ Add Liquidity</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #0ea5e9;" onclick="addRule('volume')">+ Add Volume</button>
-                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #10b981;" onclick="addRule('dex_payment')">+ Add DEX Payment</button>
-                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #6366f1;" onclick="addRule('migrated')">+ Add Migration Filter</button>
+                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #059669;" onclick="addRule('dex_payment')">+ Add DEX Payment</button>
+                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #06b6d4;" onclick="addRule('migrated')">+ Add Migration Filter</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #0ea5e9;" onclick="addRule('show_wallet')">+ Show Wallet</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #ef4444;" onclick="addRule('exclude_platform')">+ Exclude Platform</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #ec4899;" onclick="addRule('token_name')">+ Add Token Name</button>
@@ -1167,14 +1167,20 @@
 
         <!-- Create Flow Group -->
         <div id="create-flow-group-modal" class="modal-overlay hidden">
-            <div class="modal-content" style="max-width:460px;">
+            <div class="modal-content" style="max-width:480px;">
                 <div class="header" style="margin-bottom:1.25rem;">
-                    <div><h2>Create Group</h2><p style="color:var(--text-muted);font-size:.82rem;margin-top:4px;">Give this workflow folder a clear name.</p></div>
+                    <div><h2>Create Flow Group</h2><p style="color:var(--text-muted);font-size:.82rem;margin-top:4px;">Organize workflows with a custom folder name and color.</p></div>
                     <button class="btn-icon" type="button" onclick="closeCreateFlowGroupModal()" aria-label="Close create group dialog">×</button>
                 </div>
-                <label for="new-flow-group-name" style="display:block;color:var(--text-muted);font-size:.82rem;margin-bottom:7px;">Group name</label>
-                <input id="new-flow-group-name" class="form-input" placeholder="e.g. Boost Orders" onkeydown="handleFlowGroupNameKey(event)" />
-                <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:1.25rem;">
+                <div class="form-group">
+                    <label for="new-flow-group-name">Group Name</label>
+                    <input id="new-flow-group-name" class="form-input" placeholder="e.g. VIP Signals, Moonshots" onkeydown="handleFlowGroupNameKey(event)" />
+                </div>
+                <div class="form-group" style="margin-top:12px;">
+                    <label style="display:block;margin-bottom:8px;font-size:.82rem;color:var(--text-muted);">Color Accent</label>
+                    <div id="create-group-color-picker" class="flow-group-color-row"></div>
+                </div>
+                <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:1.5rem;">
                     <button type="button" class="btn-icon" style="padding:0 1rem;" onclick="closeCreateFlowGroupModal()">Cancel</button>
                     <button type="button" class="btn-primary" onclick="createFlowGroup()">Create Group</button>
                 </div>
@@ -1183,12 +1189,78 @@
 
         <!-- Flow Groups Manager -->
         <div id="flow-groups-modal" class="modal-overlay hidden">
-            <div class="modal-content" style="max-width:620px;">
-                <div class="header" style="margin-bottom:1.25rem;">
-                    <div><h2>Manage Flow Groups</h2><p style="color:var(--text-muted);font-size:.82rem;margin-top:4px;">Deleting a group moves its flows to Ungrouped.</p></div>
+            <div class="modal-content flow-groups-modal-content">
+                <div class="header" style="margin-bottom:0.75rem; border-bottom:1px solid var(--border-color); padding-bottom:1rem;">
+                    <div>
+                        <div style="display:flex;align-items:center;gap:10px;">
+                            <h2 style="font-size:1.3rem;">Manage Flow Groups</h2>
+                            <span id="flow-groups-total-badge" class="flow-group-badge-pill" style="background:rgba(6,182,212,.15);color:#67e8f9;border:1px solid rgba(6,182,212,.4);">0 Groups</span>
+                        </div>
+                        <p style="color:var(--text-muted);font-size:.82rem;margin-top:4px;">Edit folder names, customize colors, manage workflows inside each group, and delete groups safely.</p>
+                    </div>
                     <button class="btn-icon" type="button" onclick="closeFlowGroupsModal()" aria-label="Close group manager">×</button>
                 </div>
-                <div id="flow-groups-list"></div>
+
+                <div class="flow-group-creator-bar">
+                    <div style="font-size:.78rem;font-weight:700;color:#22d3ee;text-transform:uppercase;letter-spacing:.05em;">Quick Create Group</div>
+                    <div class="flow-group-creator-inputs">
+                        <input id="quick-group-name-input" class="form-input" placeholder="Group name (e.g. Scalping, Whale Alerts)..." onkeydown="handleQuickGroupKey(event)" style="flex:1;" />
+                        <div id="quick-group-color-picker" class="flow-group-color-row"></div>
+                        <button type="button" class="btn-primary" onclick="quickCreateGroup()" style="white-space:nowrap;padding:0.6rem 1rem;">＋ Add Group</button>
+                    </div>
+                </div>
+
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;">
+                    <input id="flow-group-filter-input" class="form-input" placeholder="Filter groups by name..." oninput="filterFlowGroupsManager(this.value)" style="max-width:280px;font-size:.82rem;padding:6px 10px;" />
+                    <span style="font-size:.75rem;color:var(--text-muted);">Deleting a group moves its flows to <strong>Ungrouped</strong>.</span>
+                </div>
+
+                <div id="flow-groups-list" class="flow-groups-modal-body"></div>
+            </div>
+        </div>
+
+        <!-- Assign Flows to Group Modal -->
+        <div id="assign-flows-modal" class="modal-overlay hidden" style="z-index:1150;">
+            <div class="modal-content" style="max-width:640px;width:95%;max-height:85vh;display:flex;flex-direction:column;">
+                <div class="header" style="margin-bottom:.75rem;border-bottom:1px solid var(--border-color);padding-bottom:1rem;">
+                    <div>
+                        <h2 id="assign-flows-title" style="font-size:1.25rem;">Assign Workflows</h2>
+                        <p style="color:var(--text-muted);font-size:.82rem;margin-top:4px;">Check all flows that should belong to this group.</p>
+                    </div>
+                    <button class="btn-icon" type="button" onclick="closeAssignFlowsModal()" aria-label="Close assign flows">×</button>
+                </div>
+                <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                    <input id="assign-flows-search" class="form-input" placeholder="Search flows..." oninput="filterAssignFlowsList(this.value)" style="flex:1;font-size:.82rem;" />
+                    <div style="display:flex;gap:6px;">
+                        <button type="button" class="btn-icon" style="font-size:.75rem;padding:4px 8px;border:1px solid var(--border-color);" onclick="setAllAssignFlows(true)">Select All</button>
+                        <button type="button" class="btn-icon" style="font-size:.75rem;padding:4px 8px;border:1px solid var(--border-color);" onclick="setAllAssignFlows(false)">Deselect All</button>
+                    </div>
+                </div>
+                <div id="assign-flows-list" class="assign-flows-list"></div>
+                <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--border-color);padding-top:1rem;margin-top:.5rem;">
+                    <span id="assign-flows-summary" style="font-size:.78rem;color:var(--text-muted);">0 flows selected</span>
+                    <div style="display:flex;gap:10px;">
+                        <button type="button" class="btn-icon" style="padding:0 1rem;" onclick="closeAssignFlowsModal()">Cancel</button>
+                        <button type="button" class="btn-primary" onclick="saveAssignFlows()">Save Assignments</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Delete Group Confirmation Modal -->
+        <div id="delete-flow-group-modal" class="modal-overlay hidden" style="z-index:1200;">
+            <div class="modal-content" style="max-width:440px;text-align:center;">
+                <div style="width:48px;height:48px;border-radius:50%;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#ef4444;display:grid;place-items:center;margin:0 auto 1rem;font-size:1.4rem;">
+                    🗑️
+                </div>
+                <h2 id="delete-group-modal-title" style="font-size:1.2rem;margin-bottom:.5rem;">Delete Group</h2>
+                <p id="delete-group-modal-desc" style="color:var(--text-muted);font-size:.85rem;line-height:1.5;margin-bottom:1.5rem;">
+                    Are you sure you want to delete this group? All workflows inside will be safely moved to Ungrouped.
+                </p>
+                <div style="display:flex;justify-content:center;gap:10px;">
+                    <button type="button" class="btn-icon" style="padding:0.6rem 1.25rem;" onclick="closeDeleteFlowGroupModal()">Cancel</button>
+                    <button type="button" class="btn-primary" id="confirm-delete-group-btn" style="background:linear-gradient(135deg,#dc2626,#ef4444);padding:0.6rem 1.25rem;">Delete Group</button>
+                </div>
             </div>
         </div>
 
@@ -1297,6 +1369,9 @@
             </div>
         </div>
     </div>
+
+    <!-- Toast Notification Container -->
+    <div id="app-toast-container" class="app-toast-container"></div>
 
     <!-- Inject data from Jinja -->
     <script>
