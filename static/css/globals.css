@@ -69,6 +69,17 @@ body {
   letter-spacing: -0.5px;
 }
 
+.app-version {
+  margin-top: auto;
+  padding: 0.75rem 1rem 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  color: #6b7280;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
 .nav-link {
   padding: 0.75rem 1rem;
   border-radius: 8px;
@@ -333,6 +344,14 @@ body {
     gap: 0.25rem;
     flex: 1;
     justify-content: flex-end;
+  }
+
+  .app-version {
+    margin-top: 0;
+    padding: 0.35rem 0 0.35rem 0.75rem;
+    border-top: 0;
+    border-left: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 0.62rem;
   }
 
   .nav-link {

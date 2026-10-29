@@ -5,6 +5,38 @@ let currentTokenDataPage = 1;
 let tokenDataSearchTimer = null;
 let tokenDataAutoRefreshInterval = null;
 let currentTgModalRawMessage = '';
+let tokenNameRuleIndex = null;
+let tokenNameDraft = { exact: [], contains: [] };
+
+const TOKEN_NAME_FILTER_PREFIX = 'token_name_filter:';
+
+function parseTokenNameFilter(value) {
+    if (typeof value !== 'string' || !value.startsWith(TOKEN_NAME_FILTER_PREFIX)) return null;
+    try {
+        const parsed = JSON.parse(value.slice(TOKEN_NAME_FILTER_PREFIX.length));
+        return {
+            exact: Array.isArray(parsed.exact) ? parsed.exact.map(String).filter(Boolean) : [],
+            contains: Array.isArray(parsed.contains) ? parsed.contains.map(String).filter(Boolean) : []
+        };
+    } catch (_) {
+        return null;
+    }
+}
+
+function encodeTokenNameFilter(filter) {
+    return TOKEN_NAME_FILTER_PREFIX + JSON.stringify(filter);
+}
+
+function tokenNameFilterSummary(rule) {
+    const filter = parseTokenNameFilter(rule.search_text);
+    if (!filter) return rule.search_text || 'Legacy regex';
+    return `${filter.exact.length} exact, ${filter.contains.length} contains`;
+}
+
+function tokenNameFilterCounts(rule) {
+    const filter = parseTokenNameFilter(rule.search_text);
+    return filter || { exact: [], contains: [] };
+}
 
 function escapeHtml(text) {
     if (text === null || text === undefined) return '';
@@ -114,7 +146,7 @@ function renderWorkflows() {
                         color = '#ef4444';
                     } else if (r.rule_type === 'token_name') {
                         const mode = (r.replace_text || 'include').toLowerCase() === 'exclude' ? '🚫 Excl' : '✅ Incl';
-                        label = `🏷️ Name (${mode}): "${r.search_text || '.*'}"`;
+                        label = `🏷️ Name (${mode}): ${tokenNameFilterSummary(r)}`;
                         color = '#ec4899';
                     } else if (r.rule_type === 'filter') {
                         const mode = (r.replace_text || 'include').toLowerCase() === 'exclude' ? '🚫 Drop' : '✅ Pass';
@@ -210,8 +242,7 @@ function renderRules() {
     container.innerHTML = '';
     currentRules.forEach((rule, index) => {
         const div = document.createElement('div');
-        div.className = 'rule-row';
-        div.style = 'display: grid; grid-template-columns: 130px 1fr auto; gap: 1rem; align-items: center; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); padding: 10px 14px; border-radius: 8px; margin-bottom: 10px;';
+        div.className = `rule-row${rule.rule_type === 'token_name' ? ' token-name-rule-row' : ''}`;
         
         let badgeColor = 'var(--accent-color)';
         if (rule.rule_type === 'token_age') badgeColor = '#3b82f6';
@@ -226,11 +257,12 @@ function renderRules() {
         else if (rule.rule_type === 'token_name') badgeColor = '#ec4899';
         else if (rule.rule_type === 'filter') badgeColor = '#f43f5e';
         
-        let badgeHtml = `<div style="display: flex; align-items: center;">
-            <span class="status-badge" style="background: ${badgeColor}; color: white; width: 100%; text-align: center; justify-content: center; display: inline-flex;">${rule.rule_type.toUpperCase()}</span>
+        const ruleLabel = rule.rule_type === 'token_name' ? 'TOKEN NAME FILTER' : rule.rule_type.replaceAll('_', ' ').toUpperCase();
+        let badgeHtml = `<div class="rule-row__badge" style="display: flex; align-items: center;">
+            <span class="status-badge" style="background: ${badgeColor}; color: white; width: auto; min-width: 120px; padding: 6px 12px; text-align: center; justify-content: center; display: inline-flex;">${ruleLabel}</span>
         </div>`;
         
-        let fieldsHtml = '<div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; flex: 1;">';
+        let fieldsHtml = `<div class="rule-row__fields${rule.rule_type === 'token_name' ? ' token-name-rule-fields' : ''}" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; flex: 1;">`;
         
         if (rule.rule_type === 'token_age') {
             const ageType = rule.search_text || 'creation';
@@ -319,14 +351,20 @@ function renderRules() {
             `;
         } else if (rule.rule_type === 'token_name') {
             const mode = (rule.replace_text || 'include').toLowerCase();
+            const counts = tokenNameFilterCounts(rule);
             fieldsHtml += `
-                <label style="font-size:0.85rem; color:var(--text-muted)">Mode:</label>
-                <select class="form-input" style="width:165px" onchange="updateRule(${index}, 'replace_text', this.value)">
-                    <option value="include" ${mode === 'include' ? 'selected' : ''}>Must Match (Include)</option>
-                    <option value="exclude" ${mode === 'exclude' ? 'selected' : ''}>Must Not Match (Exclude)</option>
-                </select>
-                <label style="font-size:0.85rem; color:var(--text-muted)">Regex:</label>
-                <input class="form-input" style="flex: 1; min-width: 170px;" placeholder="e.g. AI|SOL|PEPE" value="${rule.search_text !== undefined && rule.search_text !== null ? rule.search_text : '.*'}" oninput="updateRule(${index}, 'search_text', this.value)" title="Case-insensitive regular expression. Use | to match alternatives.">
+                <div class="token-name-mode-group">
+                    <label class="token-name-field-label">When a name matches</label>
+                    <select class="form-input" style="width:100%;" onchange="updateRule(${index}, 'replace_text', this.value)">
+                        <option value="include" ${mode === 'include' ? 'selected' : ''}>Allow this token</option>
+                        <option value="exclude" ${mode === 'exclude' ? 'selected' : ''}>Block this token</option>
+                    </select>
+                </div>
+                <div class="token-name-counts" aria-label="Configured name matches">
+                    <span class="token-name-count"><strong>${counts.exact.length}</strong> Exact</span>
+                    <span class="token-name-count"><strong>${counts.contains.length}</strong> Contains</span>
+                </div>
+                <button type="button" class="btn-primary token-name-edit-button" style="padding:0.5rem 0.9rem; white-space:nowrap; box-shadow:none;" onclick="openTokenNameFilterModal(${index})">Edit list</button>
             `;
         } else if (rule.rule_type === 'filter') {
             const mode = (rule.replace_text || 'include').toLowerCase();
@@ -347,7 +385,7 @@ function renderRules() {
         }
         fieldsHtml += '</div>';
         
-        let deleteHtml = `<div style="display: flex; align-items: center; justify-content: flex-end;">
+        let deleteHtml = `<div class="rule-row__remove" style="display: flex; align-items: center; justify-content: flex-end;">
             <button type="button" class="btn-icon" style="color: #ef4444; padding: 4px;" onclick="removeRule(${index})">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
             </button>
@@ -365,7 +403,7 @@ function addRule(type) {
     } else if (type === 'show_wallet') {
         newRule.search_text = 'yes';
     } else if (type === 'token_name') {
-        newRule.search_text = '.*';
+        newRule.search_text = encodeTokenNameFilter({ exact: [], contains: [] });
         newRule.replace_text = 'include';
     } else if (type === 'filter') {
         newRule.search_text = '';
@@ -374,6 +412,73 @@ function addRule(type) {
         newRule.search_text = '24h';
     }
     currentRules.push(newRule);
+    renderRules();
+    if (type === 'token_name') openTokenNameFilterModal(currentRules.length - 1);
+}
+
+function openTokenNameFilterModal(index) {
+    const rule = currentRules[index];
+    if (!rule || rule.rule_type !== 'token_name') return;
+    tokenNameRuleIndex = index;
+    const parsed = parseTokenNameFilter(rule.search_text);
+    tokenNameDraft = parsed ? { exact: [...parsed.exact], contains: [...parsed.contains] } : { exact: [], contains: [] };
+    document.getElementById('token-name-filter-error')?.classList.add('hidden');
+    renderTokenNameEntries();
+    document.getElementById('token-name-filter-modal')?.classList.remove('hidden');
+    setTimeout(() => document.getElementById('token-name-exact-input')?.focus(), 0);
+}
+
+function closeTokenNameFilterModal() {
+    document.getElementById('token-name-filter-modal')?.classList.add('hidden');
+    tokenNameRuleIndex = null;
+}
+
+function renderTokenNameEntries() {
+    ['exact', 'contains'].forEach(type => {
+        const list = document.getElementById(`token-name-${type}-list`);
+        if (!list) return;
+        const entries = tokenNameDraft[type];
+        list.innerHTML = entries.length ? entries.map((entry, index) => `
+            <div class="token-name-entry">
+                <span>${escapeHtml(entry)}</span>
+                <button type="button" class="btn-icon" style="color:#f87171; padding:0 3px;" onclick="removeTokenNameEntry('${type}', ${index})" aria-label="Remove ${escapeHtml(entry)}">×</button>
+            </div>`).join('') : '<p style="font-size:0.78rem; color:var(--text-muted); margin-top:10px;">No entries added yet.</p>';
+    });
+}
+
+function addTokenNameEntry(type) {
+    const input = document.getElementById(`token-name-${type}-input`);
+    const rawValue = String(input?.value || '');
+    // Trimming outside the quotes keeps intentional spaces inside, e.g. "Mr ".
+    const value = rawValue.trim();
+    if (!value || !['exact', 'contains'].includes(type)) return;
+    if (!tokenNameDraft[type].some(entry => entry.toLowerCase() === value.toLowerCase())) tokenNameDraft[type].push(value);
+    input.value = '';
+    document.getElementById('token-name-filter-error')?.classList.add('hidden');
+    renderTokenNameEntries();
+    input.focus();
+}
+
+function removeTokenNameEntry(type, index) {
+    if (!['exact', 'contains'].includes(type)) return;
+    tokenNameDraft[type].splice(index, 1);
+    renderTokenNameEntries();
+}
+
+function handleTokenNameEntryKey(event, type) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    addTokenNameEntry(type);
+}
+
+function saveTokenNameFilter() {
+    if (tokenNameRuleIndex === null) return;
+    if (!tokenNameDraft.exact.length && !tokenNameDraft.contains.length) {
+        document.getElementById('token-name-filter-error')?.classList.remove('hidden');
+        return;
+    }
+    currentRules[tokenNameRuleIndex].search_text = encodeTokenNameFilter(tokenNameDraft);
+    closeTokenNameFilterModal();
     renderRules();
 }
 

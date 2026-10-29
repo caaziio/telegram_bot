@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TeleFlow Dashboard</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/globals.css') }}?v=25">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/globals.css') }}?v=27">
     <style>
         .hidden { display: none !important; }
         
@@ -29,6 +29,130 @@
             max-height: 90vh;
             overflow-y: auto;
             box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+        }
+
+        .token-name-columns {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1rem;
+        }
+        .token-name-column {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 1rem;
+        }
+        .token-name-entry {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            background: rgba(236,72,153,0.1);
+            border: 1px solid rgba(236,72,153,0.3);
+            border-radius: 6px;
+            padding: 7px 9px;
+            margin-top: 7px;
+            overflow-wrap: anywhere;
+        }
+        .rule-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            grid-template-areas:
+                "badge remove"
+                "fields fields";
+            gap: 0.85rem 1rem;
+            align-items: center;
+            background: rgba(255,255,255,0.018);
+            border: 1px solid rgba(255,255,255,0.075);
+            padding: 16px;
+            border-radius: 12px;
+            margin-bottom: 10px;
+        }
+        .rule-row__badge { grid-area: badge; }
+        .rule-row__fields { grid-area: fields; }
+        .rule-row__remove { grid-area: remove; }
+        .token-name-rule-row {
+            position: relative;
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: stretch !important;
+            gap: 14px;
+        }
+        .token-name-rule-row .rule-row__badge {
+            padding-right: 42px;
+        }
+        .token-name-rule-row .rule-row__remove {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+        }
+        .token-name-rule-fields {
+            display: grid !important;
+            grid-template-columns: minmax(220px, 1.3fr) minmax(150px, 0.8fr) auto;
+            gap: 16px !important;
+            width: 100%;
+            padding-top: 14px;
+            border-top: 1px solid rgba(255,255,255,0.07);
+        }
+        .token-name-mode-group {
+            display: grid;
+            gap: 7px;
+            min-width: 0;
+        }
+        .token-name-field-label {
+            color: var(--text-muted);
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        .token-name-counts {
+            display: flex;
+            align-items: flex-end;
+            gap: 7px;
+            padding-bottom: 2px;
+        }
+        .token-name-count {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 7px 9px;
+            border-radius: 7px;
+            background: rgba(255,255,255,0.045);
+            border: 1px solid rgba(255,255,255,0.075);
+            color: #d1d5db;
+            font-size: 0.78rem;
+            white-space: nowrap;
+        }
+        .token-name-count strong { color: white; }
+        .token-name-edit-button {
+            align-self: end;
+            min-height: 38px;
+            background: rgba(236,72,153,0.12) !important;
+            border: 1px solid rgba(236,72,153,0.48) !important;
+            color: #f9a8d4 !important;
+        }
+        .token-name-rule-summary {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            color: var(--text-muted);
+            font-size: 0.82rem;
+            margin-top: 8px;
+        }
+        .token-name-rule-summary::before {
+            content: '';
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #10b981;
+            box-shadow: 0 0 0 3px rgba(16,185,129,0.12);
+        }
+        @media (max-width: 680px) {
+            .token-name-columns { grid-template-columns: 1fr; }
+            .token-name-rule-fields { grid-template-columns: 1fr; }
+            .token-name-rule-fields .btn-primary { width: 100%; }
+            .token-name-mode-group .form-input { width: 100% !important; }
         }
         
         .form-group {
@@ -153,6 +277,8 @@
                     Token Wallet Data
                 </div>
             </nav>
+
+            <div class="app-version" title="Release version">Version {{ app_version }}</div>
         </aside>
 
         <!-- Main Content -->
@@ -802,7 +928,7 @@
 
         <!-- Editor Modal -->
         <div id="workflow-modal" class="modal-overlay hidden">
-            <div class="modal-content">
+            <div class="modal-content" style="max-width: 780px;">
                 <div class="header" style="margin-bottom: 1.5rem;">
                     <h2 id="modal-title">New Workflow</h2>
                     <button class="btn-icon" type="button" onclick="closeModal()">
@@ -835,7 +961,7 @@
                         <div style="background: rgba(255,255,255,0.03); padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
                             <div id="rules-container"></div>
                             
-                            <div style="display: flex; gap: 10px; margin-top: 1rem; flex-wrap: wrap;">
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 8px; margin-top: 1rem;">
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem;" onclick="addRule('token_age')">+ Add Token Age</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #8b5cf6;" onclick="addRule('market_cap')">+ Add Market Cap</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #f59e0b;" onclick="addRule('performance')">+ Add Performance</button>
@@ -856,6 +982,49 @@
                         <button type="submit" class="btn-primary">Save Workflow</button>
                     </div>
                 </form>
+            </div>
+        </div>
+
+        <!-- Token Name Filter Modal (opened from the workflow editor) -->
+        <div id="token-name-filter-modal" class="modal-overlay hidden" style="z-index: 1100;">
+            <div class="modal-content" style="max-width: 780px;">
+                <div class="header" style="margin-bottom: 0.75rem;">
+                    <div>
+                        <h2 style="font-size: 1.25rem;">Configure Token Name Filter</h2>
+                        <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Add each word or phrase as a separate entry. Matching is not case-sensitive.</p>
+                    </div>
+                    <button class="btn-icon" type="button" onclick="closeTokenNameFilterModal()" aria-label="Close token name filter">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                </div>
+
+                <div class="token-name-columns">
+                    <section class="token-name-column">
+                        <h3 style="font-size: 0.95rem; margin-bottom: 4px;">Exact words / phrases</h3>
+                        <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 10px;">The complete token name must equal the entry.</p>
+                        <div style="display:flex; gap:7px;">
+                            <input id="token-name-exact-input" class="form-input" placeholder="e.g. Pepe Coin" onkeydown="handleTokenNameEntryKey(event, 'exact')" />
+                            <button type="button" class="btn-primary" onclick="addTokenNameEntry('exact')">Add</button>
+                        </div>
+                        <div id="token-name-exact-list"></div>
+                    </section>
+
+                    <section class="token-name-column">
+                        <h3 style="font-size: 0.95rem; margin-bottom: 4px;">Contains words / phrases</h3>
+                        <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 10px;">Unquoted entries match whole words. Use quotes to preserve literal spaces, e.g. &quot;Mr &quot;.</p>
+                        <div style="display:flex; gap:7px;">
+                            <input id="token-name-contains-input" class="form-input" placeholder='e.g. AI or "Mr "' onkeydown="handleTokenNameEntryKey(event, 'contains')" />
+                            <button type="button" class="btn-primary" onclick="addTokenNameEntry('contains')">Add</button>
+                        </div>
+                        <div id="token-name-contains-list"></div>
+                    </section>
+                </div>
+
+                <p id="token-name-filter-error" class="hidden" style="color:#f87171; font-size:0.82rem; margin-top:0.8rem;">Add at least one exact or contains entry.</p>
+                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:1.25rem;">
+                    <button type="button" class="btn-icon" style="padding:0 1rem;" onclick="closeTokenNameFilterModal()">Cancel</button>
+                    <button type="button" class="btn-primary" onclick="saveTokenNameFilter()">Apply Filter</button>
+                </div>
             </div>
         </div>
 
@@ -927,6 +1096,6 @@
         const initialWorkflows = {{ workflows | tojson | safe }};
         const initialSettings = {{ settings | tojson | safe }};
     </script>
-    <script src="{{ url_for('static', filename='js/app.js') }}?v=34"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v=38"></script>
 </body>
 </html>

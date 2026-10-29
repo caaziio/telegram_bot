@@ -4,6 +4,7 @@ import os
 import threading
 import re
 import logging
+import json
 from datetime import datetime, timezone
 import time
 import requests
@@ -28,6 +29,9 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__,
             template_folder=os.path.join(current_dir, 'templates'),
             static_folder=os.path.join(current_dir, 'static'))
+
+# Release label format: <major>.<YYYY>.<MM>.<DD>. Update this on each push.
+APP_VERSION = "1.2026.10.29"
 
 # Globals for async bridge
 telethon_loop = None
@@ -1211,8 +1215,6 @@ def process_message_logic(text, rules, context=None):
         elif rule_type == 'token_name':
             pattern = (rule.get('search_text') or '').strip()
             mode = (rule.get('replace_text') or 'include').strip().lower()
-            if not pattern:
-                pattern = '.*'
 
             # Extract token/project name
             token_name = context.get('token_name') or context.get('project_name')
@@ -1227,22 +1229,61 @@ def process_message_logic(text, rules, context=None):
                     else:
                         token_name = ""
 
-            debug_log(f"      [TOKEN NAME] token_name='{token_name}', pattern='{pattern}', mode='{mode}'")
+            structured_filter = None
+            filter_prefix = 'token_name_filter:'
+            if pattern.startswith(filter_prefix):
+                try:
+                    structured_filter = json.loads(pattern[len(filter_prefix):])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    structured_filter = {'exact': [], 'contains': []}
 
-            is_matched = regex_matches(token_name, pattern)
+            if structured_filter is not None:
+                normalized_name = token_name.casefold().strip()
+                exact_names = []
+                for value in structured_filter.get('exact', []):
+                    entry = str(value)
+                    if len(entry) >= 2 and entry[0] == entry[-1] == '"':
+                        entry = entry[1:-1]
+                    else:
+                        entry = entry.strip()
+                    if entry:
+                        exact_names.append(entry.casefold())
+
+                contained_entries = []
+                for value in structured_filter.get('contains', []):
+                    entry = str(value)
+                    is_quoted = len(entry) >= 2 and entry[0] == entry[-1] == '"'
+                    literal = entry[1:-1] if is_quoted else entry.strip()
+                    if literal:
+                        contained_entries.append((literal.casefold(), is_quoted))
+
+                contains_match = any(
+                    literal in normalized_name if is_quoted
+                    else re.search(rf'(?<!\w){re.escape(literal)}(?!\w)', normalized_name, re.IGNORECASE) is not None
+                    for literal, is_quoted in contained_entries
+                )
+                is_matched = normalized_name in exact_names or contains_match
+                filter_description = f"{len(exact_names)} exact / {len(contained_entries)} contains"
+            else:
+                # Backward compatibility for workflows saved with the old regex input.
+                pattern = pattern or '.*'
+                is_matched = regex_matches(token_name, pattern)
+                filter_description = pattern
+
+            debug_log(f"      [TOKEN NAME] token_name='{token_name}', filter='{filter_description}', mode='{mode}'")
 
             if mode == 'exclude':
                 if is_matched and token_name:
-                    debug_log(f"      [TOKEN NAME] DROPPING: Token name '{token_name}' matched excluded pattern '{pattern}'")
-                    return None, True, f"Dropped by Token Name Filter (Token '{token_name}' matched excluded pattern '{pattern}')"
+                    debug_log(f"      [TOKEN NAME] DROPPING: Token name '{token_name}' matched excluded filter '{filter_description}'")
+                    return None, True, f"Dropped by Token Name Filter (Token '{token_name}' matched excluded filter)"
                 else:
-                    debug_log(f"      [TOKEN NAME] PASSED: Token name '{token_name}' did not match excluded pattern '{pattern}'")
+                    debug_log(f"      [TOKEN NAME] PASSED: Token name '{token_name}' did not match excluded filter '{filter_description}'")
             else:  # mode == 'include' (default)
                 if not is_matched:
-                    debug_log(f"      [TOKEN NAME] DROPPING: Token name '{token_name or 'Unknown'}' did not match required pattern '{pattern}'")
-                    return None, True, f"Dropped by Token Name Filter (Token '{token_name or 'Unknown'}' did not match required pattern '{pattern}')"
+                    debug_log(f"      [TOKEN NAME] DROPPING: Token name '{token_name or 'Unknown'}' did not match required filter '{filter_description}'")
+                    return None, True, f"Dropped by Token Name Filter (Token '{token_name or 'Unknown'}' did not match required filter)"
                 else:
-                    debug_log(f"      [TOKEN NAME] PASSED: Token name '{token_name}' matched required pattern '{pattern}'")
+                    debug_log(f"      [TOKEN NAME] PASSED: Token name '{token_name}' matched required filter '{filter_description}'")
 
         # WORD FILTER LOGIC
         elif rule_type == 'filter':
@@ -1290,7 +1331,7 @@ def process_message(text, rules, message_date):
 def index():
     workflows = get_workflows()
     settings = get_settings()
-    return render_template('index.html', workflows=workflows, settings=settings)
+    return render_template('index.html', workflows=workflows, settings=settings, app_version=APP_VERSION)
 
 @app.route('/api/workflows', methods=['POST'])
 def create_workflow():
