@@ -7,6 +7,10 @@ let tokenDataAutoRefreshInterval = null;
 let currentTgModalRawMessage = '';
 let tokenNameRuleIndex = null;
 let tokenNameDraft = { exact: [], contains: [] };
+let dexValidatedRuntime = null;
+let dexValidatedStatusTimer = null;
+let dexValidatedCountdownTimer = null;
+let dexValidatedRenderedResults = [];
 
 const FLOW_GROUP_COLORS = [
     { key: 'cyan', name: 'Cyan', hex: '#06b6d4', text: '#67e8f9', bg: 'rgba(6, 182, 212, 0.16)', border: 'rgba(6, 182, 212, 0.45)', glow: 'rgba(6, 182, 212, 0.35)' },
@@ -522,6 +526,11 @@ function renderWorkflows() {
                         iconSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>';
                         label = `DEX Pay: $${minP}-$${maxP}${labelText}`;
                         color = '#10b981';
+                    } else if (r.rule_type === 'category') {
+                        const labels = { boost: 'Boost', cto: 'CTO', dex_profile: 'DEX Profile', dex_ad: 'DEX Ad' };
+                        iconSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>';
+                        label = `Category: ${labels[r.search_text] || r.search_text || 'Boost'}`;
+                        color = '#8b5cf6';
                     } else if (r.rule_type === 'migrated') {
                         iconSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/></svg>';
                         label = `Migrated: ${r.search_text === 'no' ? 'No' : 'Yes'}`;
@@ -1254,6 +1263,7 @@ function renderRules() {
         if (rule.rule_type === 'token_age') badgeColor = '#3b82f6';
         else if (rule.rule_type === 'market_cap') badgeColor = '#10b981';
         else if (rule.rule_type === 'dex_payment') badgeColor = '#06b6d4';
+        else if (rule.rule_type === 'category') badgeColor = '#8b5cf6';
         else if (rule.rule_type === 'migrated') badgeColor = '#06b6d4';
         else if (rule.rule_type === 'performance') badgeColor = '#f59e0b';
         else if (rule.rule_type === 'liquidity') badgeColor = '#14b8a6';
@@ -1331,6 +1341,17 @@ function renderRules() {
                 <input type="number" class="form-input" style="width:75px" placeholder="∞" value="${(rule.time_max !== undefined && rule.time_max !== null) ? rule.time_max : ''}" oninput="updateRule(${index}, 'time_max', this.value)">
                 <label style="font-size:0.85rem; color:var(--text-muted)">Label:</label>
                 <input class="form-input" style="width:105px" placeholder="e.g. CTO" value="${rule.search_text || ''}" oninput="updateRule(${index}, 'search_text', this.value)">
+            `;
+        } else if (rule.rule_type === 'category') {
+            const category = rule.search_text || 'boost';
+            fieldsHtml += `
+                <label style="font-size:0.85rem;color:var(--text-muted)">Allow category:</label>
+                <select class="form-input" style="width:180px" onchange="updateRule(${index}, 'search_text', this.value)">
+                    <option value="boost" ${category === 'boost' ? 'selected' : ''}>Boost</option>
+                    <option value="cto" ${category === 'cto' ? 'selected' : ''}>CTO</option>
+                    <option value="dex_profile" ${category === 'dex_profile' ? 'selected' : ''}>DEX Profile</option>
+                    <option value="dex_ad" ${category === 'dex_ad' ? 'selected' : ''}>DEX Ad</option>
+                </select>
             `;
         } else if (rule.rule_type === 'migrated') {
             const isMigrated = rule.search_text || 'yes';
@@ -1416,6 +1437,8 @@ function addRule(type) {
         newRule.replace_text = 'include';
     } else if (type === 'volume') {
         newRule.search_text = '24h';
+    } else if (type === 'category') {
+        newRule.search_text = 'boost';
     }
     currentRules.push(newRule);
     renderRules();
@@ -2066,18 +2089,75 @@ function updateDexValidatedStatus() {
     badge.style.background = active ? 'rgba(16,185,129,.12)' : 'rgba(255,255,255,.05)';
 }
 
+function updateDexValidatedCountdown() {
+    const el = document.getElementById('dex-monitor-countdown');
+    if (!el || !dexValidatedRuntime) return;
+    if (!dexValidatedRuntime.active) {
+        el.textContent = 'Paused';
+        return;
+    }
+    if (!dexValidatedRuntime.last_checked_at) {
+        el.textContent = 'Starting…';
+        return;
+    }
+    const nextCheck = dexValidatedRuntime.next_check_at
+        ? new Date(dexValidatedRuntime.next_check_at).getTime()
+        : new Date(dexValidatedRuntime.last_checked_at).getTime() + Number(dexValidatedRuntime.interval || 10) * 1000;
+    const remaining = Math.max(0, Math.ceil((nextCheck - Date.now()) / 1000));
+    el.textContent = `${remaining}s`;
+}
+
+async function refreshDexValidatedStatus() {
+    try {
+        const response = await fetch('/api/dex-validated/status', { cache: 'no-store' });
+        const result = await readJsonResponse(response, 'DEX Validated status');
+        if (!response.ok || !result.success) throw new Error(result.error || 'Status unavailable');
+        dexValidatedRuntime = result.status || {};
+
+        const setText = (id, value) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value;
+        };
+        const checkedAt = dexValidatedRuntime.last_checked_at
+            ? new Date(dexValidatedRuntime.last_checked_at).toLocaleTimeString()
+            : 'Never';
+        setText('dex-monitor-last-check', checkedAt);
+        setText('dex-monitor-scan-time', dexValidatedRuntime.last_scan_seconds == null ? '—' : `${dexValidatedRuntime.last_scan_seconds}s`);
+        setText('dex-monitor-latency', dexValidatedRuntime.last_detection_seconds == null ? '—' : `${dexValidatedRuntime.last_detection_seconds}s`);
+        setText('dex-monitor-events', `${dexValidatedRuntime.last_new_events || 0} / ${dexValidatedRuntime.last_forwarded || 0}`);
+        setText('dex-monitor-checks', String(dexValidatedRuntime.total_checks || 0));
+
+        settings.dex_validated_auto_scan = dexValidatedRuntime.active ? 'true' : 'false';
+        updateDexValidatedStatus();
+        updateDexValidatedCountdown();
+    } catch (error) {
+        const el = document.getElementById('dex-monitor-countdown');
+        if (el) el.textContent = 'Offline';
+    }
+}
+
 async function saveDexValidatedSettings(showConfirmation = true) {
     const workflowId = document.getElementById('dex-validated-workflow')?.value || 'active_all';
     const target = document.getElementById('dex-validated-target')?.value.trim() || '';
-    const interval = document.getElementById('dex-validated-interval')?.value || '60';
+    const interval = document.getElementById('dex-validated-interval')?.value || '10';
     const autoScan = !!document.getElementById('dex-validated-auto')?.checked;
     const testMode = !!document.getElementById('dex-validated-test')?.checked;
+    const includeBoosts = !!document.getElementById('dex-validated-include-boosts')?.checked;
+    const includeCto = !!document.getElementById('dex-validated-include-cto')?.checked;
+    const includeDex = !!document.getElementById('dex-validated-include-dex')?.checked;
+    if (!includeBoosts && !includeCto && !includeDex) {
+        alert('Select at least one validated signal type.');
+        return false;
+    }
     const payload = {
         dex_validated_workflow_id: workflowId,
         dex_validated_target_channel: target,
         dex_validated_scan_interval: interval,
         dex_validated_auto_scan: autoScan ? 'true' : 'false',
-        dex_validated_test_mode: testMode ? 'true' : 'false'
+        dex_validated_test_mode: testMode ? 'true' : 'false',
+        dex_validated_include_boosts: includeBoosts ? 'true' : 'false',
+        dex_validated_include_cto: includeCto ? 'true' : 'false',
+        dex_validated_include_dex: includeDex ? 'true' : 'false'
     };
     try {
         const response = await fetch('/api/settings', {
@@ -2087,6 +2167,7 @@ async function saveDexValidatedSettings(showConfirmation = true) {
         if (!response.ok || !result.success) throw new Error(result.error || 'Unable to save settings');
         Object.assign(settings, payload);
         updateDexValidatedStatus();
+        refreshDexValidatedStatus();
         if (showConfirmation) alert('DEX Validated settings saved.');
         return true;
     } catch (error) {
@@ -2099,27 +2180,138 @@ function renderDexValidatedResults(results) {
     const container = document.getElementById('dex-validated-results');
     const count = document.getElementById('dex-validated-count');
     if (!container) return;
+    dexValidatedRenderedResults = Array.isArray(results) ? results : [];
+    const isTestMode = String(settings.dex_validated_test_mode || 'false').toLowerCase() === 'true';
     if (count) count.textContent = String(results.length);
     if (!results.length) {
-        container.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:3rem 1rem;">No new approved Dexscreener events were found.</div>';
+        container.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:3rem 1rem;">No new published Dexscreener events were found.</div>';
         return;
     }
-    container.innerHTML = results.map(item => {
+    container.innerHTML = results.map((item, index) => {
         const status = item.status || 'dropped';
         const color = status === 'passed' ? '#10b981' : status === 'duplicate' ? '#f59e0b' : '#ef4444';
-        const label = status === 'passed' ? 'Forwarded' : status === 'duplicate' ? 'Duplicate' : 'Dropped';
+        const label = status === 'passed' ? (isTestMode ? 'Passed · Preview' : 'Forwarded') : status === 'duplicate' ? 'Duplicate' : 'Dropped';
         const ca = escapeHtml(item.ca || 'Unknown');
-        const chart = item.dex_url ? `<a href="${escapeHtml(item.dex_url)}" target="_blank" rel="noopener" style="color:#60a5fa;text-decoration:none;">Chart ↗</a>` : '';
-        return `<div style="padding:14px;border:1px solid var(--border-color);border-left:3px solid ${color};border-radius:9px;background:rgba(0,0,0,.16);">
+        const chart = item.dex_url ? `<a href="${escapeHtml(item.dex_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#60a5fa;text-decoration:none;">Chart ↗</a>` : '';
+        const canPreview = !!item.ca;
+        return `<div ${canPreview ? `role="button" tabindex="0" data-dex-preview-index="${index}"` : ''} style="padding:14px;border:1px solid var(--border-color);border-left:3px solid ${color};border-radius:9px;background:rgba(0,0,0,.16);${canPreview ? 'cursor:pointer;' : ''}">
             <div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:8px;"><strong>${escapeHtml(item.name || 'Unknown token')}</strong><span style="color:${color};font-size:.78rem;font-weight:700;">${label}</span></div>
             <div style="font-size:.76rem;color:var(--text-muted);word-break:break-all;margin-bottom:8px;">${ca}</div>
             <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;font-size:.8rem;margin-bottom:8px;">
                 <span>Event: <strong>${escapeHtml(item.signal_type || 'DEX order')}</strong></span><span>Status: <strong>${escapeHtml(item.order_status || 'approved')}</strong></span>
                 <span>MC: <strong>${escapeHtml(item.market_cap || 'Unknown')}</strong></span><span>Age: <strong>${escapeHtml(item.age || 'Unknown')}</strong></span>
             </div>
-            <div style="display:flex;justify-content:space-between;gap:10px;color:var(--text-muted);font-size:.77rem;"><span>${escapeHtml(item.reason || '')}</span>${chart}</div>
+            <div style="display:flex;justify-content:space-between;gap:10px;color:var(--text-muted);font-size:.77rem;"><span>${escapeHtml(item.reason || '')}</span><span style="display:flex;gap:10px;align-items:center;">${canPreview ? '<button type="button" class="dex-preview-button" style="border:1px solid rgba(96,165,250,.45);background:rgba(96,165,250,.12);color:#93c5fd;border-radius:6px;padding:4px 8px;cursor:pointer;white-space:nowrap;">View details</button>' : ''}${chart}</span></div>
         </div>`;
     }).join('');
+
+    container.querySelectorAll('[data-dex-preview-index]').forEach(card => {
+        const open = () => openDexValidatedPreview(Number(card.dataset.dexPreviewIndex));
+        card.addEventListener('click', event => {
+            if (event.target.closest('a')) return;
+            open();
+        });
+        card.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                open();
+            }
+        });
+    });
+}
+
+async function openDexValidatedPreview(index) {
+    const item = dexValidatedRenderedResults[index];
+    if (!item) return;
+    const formatPreviewUsd = value => {
+        const number = Number(value || 0);
+        if (number >= 1_000_000) return `$${(number / 1_000_000).toFixed(2)}M`;
+        if (number >= 1_000) return `$${(number / 1_000).toFixed(2)}K`;
+        return `$${number.toFixed(2)}`;
+    };
+    const category = String(item.signal_type || 'DEX').toUpperCase();
+    const orderLabels = {
+        BOOST: 'Token Boost',
+        CTO: 'Community Takeover',
+        DEX: 'Token Profile',
+        DEX_PROFILE: 'Token Profile',
+        DEX_AD: 'Token Ad'
+    };
+    const orderLabel = orderLabels[category.replace(' ', '_')] || 'Dexscreener Event';
+    const status = String(item.order_status || 'approved').toUpperCase();
+    const statusIcon = status === 'APPROVED' ? '✅' : status === 'PROCESSING' ? '⏳' : '❓';
+    const fallbackMessage = [
+        `🚀 PROJECT: ${String(item.name || 'Unknown token').toUpperCase()} 🚀`,
+        '━━━━━━━━━━━',
+        `💰 Market Cap: ${item.market_cap || 'Unknown'}`,
+        `🌐 Platform: ${item.platform || 'Solana (SOL)'}`,
+        `🧬 CA: ${item.ca || 'Unknown'}`,
+        '━━━━━━━━━━━',
+        '',
+        '⏱️ TOKEN TIMINGS',
+        `┃ Category: ${category}`,
+        `┃ Age (From creation): ${item.age || 'Unknown'}`,
+        '┃ Age (After migration): Unknown',
+        `┃ Order: 📦 ${orderLabel}`,
+        '┃ DEX Payment: $0.00 USD',
+        '┃ Migrated: Unknown',
+        '┃ Current DEX: Unknown',
+        `┃ Status: ${statusIcon} ${status}`,
+        '┃ Order Placed: Unknown',
+        '',
+        '📊 PRICE PERFORMANCE',
+        `┃ 🟩 5m: ${Number(item.perf_5m || 0) >= 0 ? '+' : ''}${Number(item.perf_5m || 0).toFixed(2)}%`,
+        `┃ ⚡ 1h: ${Number(item.perf_1h || 0) >= 0 ? '+' : ''}${Number(item.perf_1h || 0).toFixed(2)}%`,
+        `┃ 📉 6h: ${Number(item.perf_6h || 0) >= 0 ? '+' : ''}${Number(item.perf_6h || 0).toFixed(2)}%`,
+        `┃ 🟥 24h: ${Number(item.perf_24h || 0) >= 0 ? '+' : ''}${Number(item.perf_24h || 0).toFixed(2)}%`,
+        '',
+        '💧 LIQUIDITY & VOLUME',
+        `┃ Liquidity: ${formatPreviewUsd(item.liquidity_usd)}`,
+        `┃ 5m Volume: ${formatPreviewUsd(item.volume_5m)}`,
+        `┃ 1h Volume: ${formatPreviewUsd(item.volume_1h)}`,
+        `┃ 6h Volume: ${formatPreviewUsd(item.volume_6h)}`,
+        `┃ 24h Volume: ${formatPreviewUsd(item.volume_24h)}`,
+        '━━━━━━━━━━━',
+        `📈 Chart: ${item.dex_url || 'Unavailable'}`
+    ].join('\n');
+    let previewMessage = item.formatted_message || '';
+    openTgMsgModal(
+        encodeURIComponent(previewMessage || 'Loading complete signal details…'),
+        encodeURIComponent(item.name || 'Token')
+    );
+    if (!previewMessage) {
+        try {
+            const response = await fetch('/api/dex-validated/details', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    ca: item.ca,
+                    signal_type: item.signal_type,
+                    order_status: item.order_status,
+                    payment_timestamp: item.payment_timestamp
+                })
+            });
+            const payload = await readJsonResponse(response, 'DEX Validated details');
+            if (!response.ok || !payload.success) throw new Error(payload.error || 'Unable to load details');
+            previewMessage = payload.result?.formatted_message || fallbackMessage;
+            item.formatted_message = previewMessage;
+            currentTgModalRawMessage = previewMessage;
+            const content = document.getElementById('tg-msg-content');
+            if (content) content.innerText = previewMessage;
+        } catch (error) {
+            previewMessage = fallbackMessage;
+            currentTgModalRawMessage = previewMessage;
+            const content = document.getElementById('tg-msg-content');
+            if (content) content.innerText = previewMessage;
+            showAppToast(`Live enrichment unavailable: ${error.message}`, 'error', 5000);
+        }
+    }
+    const subtitle = document.getElementById('tg-msg-modal-subtitle');
+    if (subtitle) {
+        subtitle.textContent = item.status === 'passed'
+            ? 'Exact message sent or ready for Telegram'
+            : `${String(item.status || 'result').toUpperCase()}: ${item.reason || 'Signal did not pass the workflow'}`;
+    }
 }
 
 async function runDexValidatedScan() {
@@ -2140,6 +2332,7 @@ async function runDexValidatedScan() {
         const result = await readJsonResponse(response, 'DEX Validated scanner');
         if (!response.ok || !result.success) throw new Error(result.error || 'Scan failed');
         renderDexValidatedResults(result.results || []);
+        await refreshDexValidatedStatus();
     } catch (error) {
         if (container) container.innerHTML = `<div class="result-error">${escapeHtml(error.message)}</div>`;
     } finally {
@@ -2152,11 +2345,20 @@ function initializeDexValidated() {
     const interval = document.getElementById('dex-validated-interval');
     const autoScan = document.getElementById('dex-validated-auto');
     const testMode = document.getElementById('dex-validated-test');
+    const includeBoosts = document.getElementById('dex-validated-include-boosts');
+    const includeCto = document.getElementById('dex-validated-include-cto');
+    const includeDex = document.getElementById('dex-validated-include-dex');
     if (target) target.value = settings.dex_validated_target_channel || '';
-    if (interval) interval.value = ['30','60','120','300'].includes(String(settings.dex_validated_scan_interval)) ? String(settings.dex_validated_scan_interval) : '60';
+    if (interval) interval.value = ['2','5','10','30','60','120','300'].includes(String(settings.dex_validated_scan_interval)) ? String(settings.dex_validated_scan_interval) : '5';
     if (autoScan) autoScan.checked = String(settings.dex_validated_auto_scan || 'false').toLowerCase() === 'true';
     if (testMode) testMode.checked = String(settings.dex_validated_test_mode || 'false').toLowerCase() === 'true';
+    if (includeBoosts) includeBoosts.checked = String(settings.dex_validated_include_boosts || 'true').toLowerCase() === 'true';
+    if (includeCto) includeCto.checked = String(settings.dex_validated_include_cto || 'true').toLowerCase() === 'true';
+    if (includeDex) includeDex.checked = String(settings.dex_validated_include_dex || 'true').toLowerCase() === 'true';
     updateDexValidatedStatus();
+    refreshDexValidatedStatus();
+    if (!dexValidatedStatusTimer) dexValidatedStatusTimer = setInterval(refreshDexValidatedStatus, 2000);
+    if (!dexValidatedCountdownTimer) dexValidatedCountdownTimer = setInterval(updateDexValidatedCountdown, 1000);
 }
 
 
@@ -3355,8 +3557,10 @@ function openTgMsgModal(encodedMsg, encodedTokenName) {
     const modal = document.getElementById('tg-msg-modal');
     const title = document.getElementById('tg-msg-modal-title');
     const content = document.getElementById('tg-msg-content');
+    const subtitle = document.getElementById('tg-msg-modal-subtitle');
 
     if (title) title.innerText = `Telegram Message: ${tokenName}`;
+    if (subtitle) subtitle.innerText = 'Exact message sent or formatted for Telegram';
     if (content) content.innerText = rawMsg || '(No formatted message content available)';
     if (modal) modal.classList.remove('hidden');
 }

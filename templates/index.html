@@ -154,6 +154,9 @@
             .token-name-rule-fields .btn-primary { width: 100%; }
             .token-name-mode-group .form-input { width: 100% !important; }
         }
+        .dex-monitor-grid { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:10px; margin-bottom:1rem; }
+        @media (max-width: 1100px) { .dex-monitor-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+        @media (max-width: 680px) { .dex-monitor-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
         
         .form-group {
             margin-bottom: 1.5rem;
@@ -526,10 +529,20 @@
                 <div class="header">
                     <div class="header-title">
                         <h1>DEX Validated</h1>
-                        <p>Forward Dexscreener-confirmed orders and boosts after your workflow filters pass</p>
+                        <p>Forward newly published Dexscreener CTO, Boost, Profile, and Ad events after workflow filters pass</p>
                     </div>
                     <span id="dex-validated-status" class="status-badge">Inactive</span>
                 </div>
+
+                <div class="dex-monitor-grid" id="dex-monitor-grid">
+                    <div class="workflow-card" style="padding:14px;"><div style="font-size:.72rem;color:var(--text-muted);">NEXT FETCH</div><strong id="dex-monitor-countdown" style="display:block;margin-top:6px;font-size:1.2rem;color:#67e8f9;">—</strong></div>
+                    <div class="workflow-card" style="padding:14px;"><div style="font-size:.72rem;color:var(--text-muted);">LAST CHECK</div><strong id="dex-monitor-last-check" style="display:block;margin-top:6px;font-size:.92rem;">Never</strong></div>
+                    <div class="workflow-card" style="padding:14px;"><div style="font-size:.72rem;color:var(--text-muted);">SCAN TIME</div><strong id="dex-monitor-scan-time" style="display:block;margin-top:6px;font-size:1.2rem;">—</strong></div>
+                    <div class="workflow-card" style="padding:14px;"><div style="font-size:.72rem;color:var(--text-muted);">DETECTION</div><strong id="dex-monitor-latency" style="display:block;margin-top:6px;font-size:1.2rem;color:#6ee7b7;">—</strong></div>
+                    <div class="workflow-card" style="padding:14px;"><div style="font-size:.72rem;color:var(--text-muted);">NEW / FORWARDED</div><strong id="dex-monitor-events" style="display:block;margin-top:6px;font-size:1.2rem;">0 / 0</strong></div>
+                    <div class="workflow-card" style="padding:14px;"><div style="font-size:.72rem;color:var(--text-muted);">TOTAL CHECKS</div><strong id="dex-monitor-checks" style="display:block;margin-top:6px;font-size:1.2rem;">0</strong></div>
+                </div>
+                <p style="margin:-.35rem 0 1rem;color:var(--text-muted);font-size:.76rem;">Detection shows publish-to-fetch latency when Dexscreener supplies a publication timestamp. Boost and Profile feeds do not provide one, so their latency displays as —.</p>
 
                 <div class="tester-container" style="align-items: stretch; margin-bottom: 2rem;">
                     <div class="workflow-card" style="flex: 1; min-width: 320px;">
@@ -548,18 +561,30 @@
                         <div class="form-group">
                             <label>Scan interval</label>
                             <select id="dex-validated-interval" class="form-input">
+                                <option value="2">2 seconds (real-time)</option>
+                                <option value="5">5 seconds (recommended)</option>
+                                <option value="10">10 seconds</option>
                                 <option value="30">30 seconds</option>
                                 <option value="60">1 minute</option>
                                 <option value="120">2 minutes</option>
                                 <option value="300">5 minutes</option>
                             </select>
                         </div>
+                        <div class="form-group">
+                            <label>Validated signal types</label>
+                            <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;">
+                                <label style="display:flex;align-items:center;gap:8px;padding:10px;border:1px solid var(--border-color);border-radius:8px;cursor:pointer;"><input type="checkbox" id="dex-validated-include-boosts" checked> Boost</label>
+                                <label style="display:flex;align-items:center;gap:8px;padding:10px;border:1px solid var(--border-color);border-radius:8px;cursor:pointer;"><input type="checkbox" id="dex-validated-include-cto" checked> CTO</label>
+                                <label style="display:flex;align-items:center;gap:8px;padding:10px;border:1px solid var(--border-color);border-radius:8px;cursor:pointer;"><input type="checkbox" id="dex-validated-include-dex" checked> DEX</label>
+                            </div>
+                            <small style="display:block;color:var(--text-muted);margin-top:6px;">Signals are triggered when they appear in Dexscreener's published latest feeds.</small>
+                        </div>
                         <div style="display:flex; justify-content:space-between; align-items:center; padding:14px 0; border-top:1px solid var(--border-color);">
                             <div><strong>Automatic scanning</strong><div style="font-size:.78rem;color:var(--text-muted);margin-top:4px;">Independent from SOL Payment</div></div>
                             <label class="switch"><input type="checkbox" id="dex-validated-auto"><span class="slider"></span></label>
                         </div>
                         <div style="display:flex; justify-content:space-between; align-items:center; padding:14px 0; border-top:1px solid var(--border-color);">
-                            <div><strong>Test mode</strong><div style="font-size:.78rem;color:var(--text-muted);margin-top:4px;">Do not persist duplicate records</div></div>
+                            <div><strong>Test mode</strong><div style="font-size:.78rem;color:var(--text-muted);margin-top:4px;">Preview passing messages without Telegram sends or database writes</div></div>
                             <label class="switch"><input type="checkbox" id="dex-validated-test"><span class="slider"></span></label>
                         </div>
                         <div style="display:flex; gap:10px; margin-top:16px;">
@@ -581,7 +606,7 @@
 
                 <div class="workflow-card">
                     <h3 style="margin-bottom:.75rem;">What qualifies</h3>
-                    <p style="color:var(--text-muted);line-height:1.6;font-size:.88rem;">This system processes Dexscreener orders only after their status is <strong style="color:#6ee7b7;">approved</strong>. Candidate tokens come from the latest profile and boost feeds. Exact duplicate events are skipped using contract address, order type, payment timestamp, and status.</p>
+                    <p style="color:var(--text-muted);line-height:1.6;font-size:.88rem;">This system reacts to Dexscreener's published latest feeds: community takeovers become <strong style="color:#6ee7b7;">CTO</strong> signals, active boosts become <strong style="color:#6ee7b7;">Boost</strong> signals, and profiles or ads become <strong style="color:#6ee7b7;">DEX</strong> signals. Exact duplicate events are skipped by contract, category, publication marker, and status.</p>
                 </div>
             </div>
 
@@ -1264,6 +1289,7 @@
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #14b8a6;" onclick="addRule('liquidity')">+ Add Liquidity</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #0ea5e9;" onclick="addRule('volume')">+ Add Volume</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #059669;" onclick="addRule('dex_payment')">+ Add DEX Payment</button>
+                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #8b5cf6;" onclick="addRule('category')">+ Add Category</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #06b6d4;" onclick="addRule('migrated')">+ Add Migration Filter</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #0ea5e9;" onclick="addRule('show_wallet')">+ Show Wallet</button>
                                 <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #ef4444;" onclick="addRule('exclude_platform')">+ Exclude Platform</button>
@@ -1457,6 +1483,7 @@
                     </div>
                 </div>
             </div>
+        </div>
         <!-- Telegram Formatted Message Preview Modal -->
         <div id="tg-msg-modal" class="modal-overlay hidden">
             <div class="modal-content" style="max-width: 650px;">
