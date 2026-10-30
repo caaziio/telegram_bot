@@ -32,11 +32,15 @@ function showAppToast(message, type = 'info', duration = 3000) {
     }
     const toast = document.createElement('div');
     toast.className = `app-toast app-toast--${type}`;
-    const icon = type === 'success' ? '✓' : type === 'error' ? '⚠' : '✦';
+    const icon = type === 'success' 
+        ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' 
+        : type === 'error' 
+        ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>' 
+        : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
     toast.innerHTML = `
         <span class="app-toast-icon">${icon}</span>
         <span class="app-toast-message">${escapeHtml(message)}</span>
-        <button type="button" class="app-toast-close" onclick="this.parentElement.remove()" aria-label="Close notification">×</button>
+        <button type="button" class="app-toast-close" onclick="this.parentElement.remove()" aria-label="Close notification"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     `;
     container.appendChild(toast);
     setTimeout(() => {
@@ -436,16 +440,16 @@ function renderWorkflows() {
                 <div style="display:flex;align-items:center;gap:10px;">
                     ${activeTheme ? `<span style="width:12px;height:12px;border-radius:50%;background:${activeTheme.hex};box-shadow:0 0 10px ${activeTheme.hex};flex-shrink:0;"></span>` : ''}
                     <h2>${escapeHtml(selectedMeta?.name || 'All flows')}</h2>
-                    ${isCustomGroup ? `<button type="button" class="btn-icon" style="font-size:0.8rem;padding:2px 6px;margin-left:4px;" onclick="openFlowGroupEditor('${escapeHtml(selectedGroup)}')" title="Edit group">✏️</button>` : ''}
+                    ${isCustomGroup ? `<button type="button" class="btn-icon" style="padding:2px 6px;margin-left:4px;" onclick="openFlowGroupEditor('${escapeHtml(selectedGroup)}')" title="Edit group"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>` : ''}
                 </div>
                 <p style="margin-top:4px;">${visibleWorkflows.length} shown · ${visibleWorkflows.filter(wf => wf.is_active).length} active</p>
             </div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                <button type="button" class="flow-group-action" onclick="openModalForGroup('${selectedGroup === 'all' ? 'ungrouped' : escapeHtml(selectedGroup)}')">＋ New flow</button>
+                <button type="button" class="flow-group-action" onclick="openModalForGroup('${selectedGroup === 'all' ? 'ungrouped' : escapeHtml(selectedGroup)}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>New flow</button>
                 ${isCustomGroup ? `
-                    <button type="button" class="flow-group-action" onclick="openAssignFlowsModal('${escapeHtml(selectedGroup)}')">📂 Assign flows</button>
-                    <button type="button" class="flow-group-action" onclick="openFlowGroupEditor('${escapeHtml(selectedGroup)}')">⚙️ Group settings</button>
-                    <button type="button" class="flow-group-action" style="color:#f87171;" onclick="promptDeleteFlowGroup('${escapeHtml(selectedGroup)}')">🗑️ Delete</button>
+                    <button type="button" class="flow-group-action" onclick="openAssignFlowsModal('${escapeHtml(selectedGroup)}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Assign flows</button>
+                    <button type="button" class="flow-group-action" onclick="openFlowGroupEditor('${escapeHtml(selectedGroup)}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Group settings</button>
+                    <button type="button" class="flow-group-action" style="color:#f87171;" onclick="promptDeleteFlowGroup('${escapeHtml(selectedGroup)}')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>Delete</button>
                 ` : ''}
             </div>
         </div>
@@ -469,7 +473,7 @@ function renderWorkflows() {
         card.innerHTML = `
             <div class="workflow-header">
                 <div style="display:flex;align-items:center;gap:10px;min-width:0;">
-                    <span class="workflow-card-chevron">${isExpanded ? '▾' : '▸'}</span>
+                    <span class="workflow-card-chevron"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transform:${isExpanded ? 'rotate(90deg)' : 'rotate(0deg)'};transition:transform 0.15s ease;"><polyline points="9 18 15 12 9 6"/></svg></span>
                     <div class="workflow-title">${wf.name || 'Unnamed Flow'}</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:10px;">
@@ -480,64 +484,78 @@ function renderWorkflows() {
                 </div>
             </div>
             <div class="workflow-compact-target">
-                <span>📢 Target Group:</span>
+                <span style="display:inline-flex;align-items:center;gap:4px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>Target Group:</span>
                 <strong style="color: #f3f4f6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 80%;" title="${wf.target_channel || wf.target_channel_id || 'Fallback Group'}">${wf.target_channel || (wf.target_channel_id ? `Chat ${wf.target_channel_id}` : 'Fallback Group')}</strong>
             </div>
             ${isExpanded ? `<div class="workflow-card-details"><div class="workflow-rules-preview" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 1.5rem; min-height: 40px; align-content: flex-start;">
                 ${(wf.rules && wf.rules.length > 0) ? wf.rules.map(r => {
                     let label = '';
+                    let iconSvg = '';
                     let color = 'var(--accent-color)';
                     if (r.rule_type === 'token_age') {
                         const type = r.search_text === 'migration' ? 'Migr' : 'Creat';
-                        label = `⏱️ Age (${type}): ${r.time_min || 0}-${r.time_max || '∞'}m`;
+                        iconSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
+                        label = `Age (${type}): ${r.time_min || 0}-${r.time_max || '∞'}m`;
                         color = '#3b82f6';
                     } else if (r.rule_type === 'market_cap') {
                         let minMC = r.time_min ? (Number(r.time_min) >= 1000000 ? (Number(r.time_min)/1000000).toFixed(1) + 'M' : Number(r.time_min) >= 1000 ? (Number(r.time_min)/1000).toFixed(1) + 'K' : r.time_min) : '0';
                         let maxMC = r.time_max ? (Number(r.time_max) >= 1000000 ? (Number(r.time_max)/1000000).toFixed(1) + 'M' : Number(r.time_max) >= 1000 ? (Number(r.time_max)/1000).toFixed(1) + 'K' : r.time_max) : '∞';
-                        label = `💰 MC: $${minMC}-$${maxMC}`;
+                        iconSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>';
+                        label = `MC: $${minMC}-$${maxMC}`;
                         color = '#10b981';
                     } else if (r.rule_type === 'performance') {
-                        label = `📊 Perf (${r.search_text || '5m'}): ${r.time_min || '-∞'}% to ${r.time_max || '∞'}%`;
+                        iconSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>';
+                        label = `Perf (${r.search_text || '5m'}): ${r.time_min || '-∞'}% to ${r.time_max || '∞'}%`;
                         color = '#f59e0b';
                     } else if (r.rule_type === 'liquidity') {
-                        label = `💧 Liquidity: $${r.time_min || 0}-$${r.time_max || '∞'}`;
+                        iconSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>';
+                        label = `Liquidity: $${r.time_min || 0}-$${r.time_max || '∞'}`;
                         color = '#14b8a6';
                     } else if (r.rule_type === 'volume') {
-                        label = `📊 Volume (${r.search_text || '24h'}): $${r.time_min || 0}-$${r.time_max || '∞'}`;
+                        iconSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>';
+                        label = `Volume (${r.search_text || '24h'}): $${r.time_min || 0}-$${r.time_max || '∞'}`;
                         color = '#0ea5e9';
                     } else if (r.rule_type === 'dex_payment') {
                         let minP = (r.time_min !== undefined && r.time_min !== null && r.time_min !== '') ? r.time_min : '0';
                         let maxP = (r.time_max !== undefined && r.time_max !== null && r.time_max !== '') ? r.time_max : '∞';
                         let labelText = r.search_text ? ` (${r.search_text})` : '';
-                        label = `💳 DEX Pay: $${minP}-$${maxP}${labelText}`;
+                        iconSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>';
+                        label = `DEX Pay: $${minP}-$${maxP}${labelText}`;
                         color = '#10b981';
                     } else if (r.rule_type === 'migrated') {
-                        label = `🧬 Migrated: ${r.search_text === 'no' ? 'No' : 'Yes'}`;
+                        iconSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/></svg>';
+                        label = `Migrated: ${r.search_text === 'no' ? 'No' : 'Yes'}`;
                         color = '#06b6d4';
                     } else if (r.rule_type === 'show_wallet') {
-                        label = `👛 Wallet: ${r.search_text === 'no' ? 'No' : 'Yes'}`;
+                        iconSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7h-7a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2Z"/><path d="M4 17V5a2 2 0 0 1 2-2h12"/></svg>';
+                        label = `Wallet: ${r.search_text === 'no' ? 'No' : 'Yes'}`;
                         color = '#0ea5e9';
                     } else if (r.rule_type === 'exclude_platform') {
-                        label = `🚫 Exclude: ${r.search_text}`;
+                        iconSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>';
+                        label = `Exclude: ${r.search_text}`;
                         color = '#ef4444';
                     } else if (r.rule_type === 'token_name') {
-                        const mode = (r.replace_text || 'include').toLowerCase() === 'exclude' ? '🚫 Excl' : '✅ Incl';
-                        label = `🏷️ Name (${mode}): ${tokenNameFilterSummary(r)}`;
+                        const mode = (r.replace_text || 'include').toLowerCase() === 'exclude' ? 'Excl' : 'Incl';
+                        iconSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>';
+                        label = `Name (${mode}): ${tokenNameFilterSummary(r)}`;
                         color = '#ec4899';
                     } else if (r.rule_type === 'filter') {
-                        const mode = (r.replace_text || 'include').toLowerCase() === 'exclude' ? '🚫 Drop' : '✅ Pass';
-                        label = `💬 Words (${mode}): "${r.search_text || ''}"`;
+                        const mode = (r.replace_text || 'include').toLowerCase() === 'exclude' ? 'Drop' : 'Pass';
+                        iconSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+                        label = `Words (${mode}): "${r.search_text || ''}"`;
                         color = '#f43f5e';
                     } else if (r.rule_type === 'replace') {
-                        label = `🔄 Replace: "${r.search_text}" -> "${r.replace_text}"`;
+                        iconSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>';
+                        label = `Replace: "${r.search_text}" -> "${r.replace_text}"`;
                         color = '#0284c7';
                     } else if (r.rule_type === 'append') {
-                        label = `➕ Append: "${r.replace_text}"`;
+                        iconSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+                        label = `Append: "${r.replace_text}"`;
                         color = '#06b6d4';
                     } else {
                         label = r.rule_type.toUpperCase();
                     }
-                    return `<span style="background: rgba(255,255,255,0.03); border: 1px solid ${color}; color: #f3f4f6; font-size: 0.78rem; padding: 4px 8px; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px; font-weight: 500;">${label}</span>`;
+                    return `<span style="background: rgba(255,255,255,0.03); border: 1px solid ${color}; color: #f3f4f6; font-size: 0.78rem; padding: 4px 8px; border-radius: 6px; display: inline-flex; align-items: center; gap: 5px; font-weight: 500;">${iconSvg}${label}</span>`;
                 }).join('') : '<span style="color: var(--text-muted); font-size: 0.85rem; font-style: italic;">No active rules configured</span>'}
             </div>
             <div class="workflow-footer">
@@ -550,7 +568,7 @@ function renderWorkflows() {
                         const style = curTheme ? `border-color:${curTheme.border};background:${curTheme.bg};color:${curTheme.text};font-weight:600;` : '';
                         return `<select class="workflow-quick-move" style="${style}" title="Move to group" onchange="moveWorkflowToGroup(${wf.id}, this.value)">
                             <option value="" ${!validGroupIds.has(curGroupId) ? 'selected' : ''}>Ungrouped</option>
-                            ${flowGroups.groups.map(group => `<option value="${escapeHtml(group.id)}" ${curGroupId === group.id ? 'selected' : ''}>📁 ${escapeHtml(group.name)}</option>`).join('')}
+                            ${flowGroups.groups.map(group => `<option value="${escapeHtml(group.id)}" ${curGroupId === group.id ? 'selected' : ''}>${escapeHtml(group.name)}</option>`).join('')}
                         </select>`;
                     })()}
                 </div>
@@ -593,7 +611,10 @@ function toggleFlowGroupSection(button) {
     const groupId = String(section.dataset.groupId || '');
     if (groupGrid.classList.contains('hidden')) collapsedFlowGroups.add(groupId);
     else collapsedFlowGroups.delete(groupId);
-    if (chevron) chevron.textContent = groupGrid.classList.contains('hidden') ? '▸' : '▾';
+    if (chevron) {
+        const isHidden = groupGrid.classList.contains('hidden');
+        chevron.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transform:${isHidden ? 'rotate(0deg)' : 'rotate(90deg)'};transition:transform 0.15s ease;"><polyline points="9 18 15 12 9 6"/></svg>`;
+    }
     try { localStorage.setItem('teleflow_collapsed_flow_groups', JSON.stringify([...collapsedFlowGroups])); } catch (_) {}
 }
 
@@ -774,7 +795,9 @@ function renderFlowGroupsManager(filterQuery = '') {
     if (!flowGroups.groups.length) {
         container.innerHTML = `
             <div style="text-align:center;padding:2.5rem 1rem;color:var(--text-muted);border:1px dashed var(--border-color);border-radius:12px;">
-                <div style="font-size:2rem;margin-bottom:8px;">📁</div>
+                <div style="margin-bottom:8px;display:flex;justify-content:center;">
+                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                </div>
                 <strong style="color:#f3f4f6;display:block;margin-bottom:6px;">No Groups Created Yet</strong>
                 <p style="font-size:.84rem;max-width:320px;margin:0 auto 14px;">Use the quick creator above to make your first workflow folder.</p>
             </div>`;
@@ -800,8 +823,8 @@ function renderFlowGroupsManager(filterQuery = '') {
                 <div class="flow-group-card-header">
                     <div class="flow-group-card-left">
                         <div class="flow-group-reorder-btns">
-                            <button type="button" class="flow-group-reorder-btn" onclick="moveFlowGroup('${escapeHtml(group.id)}', -1)" title="Move group up">▲</button>
-                            <button type="button" class="flow-group-reorder-btn" onclick="moveFlowGroup('${escapeHtml(group.id)}', 1)" title="Move group down">▼</button>
+                            <button type="button" class="flow-group-reorder-btn" onclick="moveFlowGroup('${escapeHtml(group.id)}', -1)" title="Move group up"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg></button>
+                            <button type="button" class="flow-group-reorder-btn" onclick="moveFlowGroup('${escapeHtml(group.id)}', 1)" title="Move group down"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
                         </div>
                         <div class="color-dropdown-wrapper" style="position:relative;">
                             <button type="button" class="color-swatch-btn selected" onclick="cycleFlowGroupColor('${escapeHtml(group.id)}')" style="background:${theme.hex}; color:${theme.hex};" title="Click to cycle theme color"></button>
@@ -814,18 +837,20 @@ function renderFlowGroupsManager(filterQuery = '') {
                             ${groupFlows.length} flow${groupFlows.length === 1 ? '' : 's'} · ${activeCount} active
                         </span>
                         <button type="button" class="flow-group-btn-expand" onclick="toggleGroupDrawer('${escapeHtml(group.id)}')" title="View and manage member workflows">
-                            <span>${isDrawerOpen ? '▴ Close' : '▾ Manage Flows'}</span>
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transform:${isDrawerOpen ? 'rotate(180deg)' : 'rotate(0deg)'};transition:transform 0.15s ease;"><polyline points="6 9 12 15 18 9"/></svg>
+                            <span>${isDrawerOpen ? 'Close' : 'Manage Flows'}</span>
                             <span style="opacity:0.6;font-size:0.72rem;">(${groupFlows.length})</span>
                         </button>
                         <button type="button" class="flow-group-btn-delete" onclick="showInlineGroupDelete('${escapeHtml(group.id)}')" title="Delete group at will">
-                            🗑️ Delete
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                            <span>Delete</span>
                         </button>
                     </div>
                 </div>
 
                 <!-- Inline delete confirmation banner -->
                 <div class="flow-group-delete-banner hidden" id="group-delete-banner-${escapeHtml(group.id)}">
-                    <p>⚠️ Delete <strong>${escapeHtml(group.name)}</strong>? Its ${groupFlows.length} workflow(s) will move to Ungrouped.</p>
+                    <p style="display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>Delete <strong>${escapeHtml(group.name)}</strong>? Its ${groupFlows.length} workflow(s) will move to Ungrouped.</p>
                     <div style="display:flex;gap:8px;">
                         <button type="button" class="btn-icon" style="font-size:0.76rem;padding:3px 8px;" onclick="hideInlineGroupDelete('${escapeHtml(group.id)}')">Cancel</button>
                         <button type="button" class="btn-primary" style="background:linear-gradient(135deg,#dc2626,#ef4444);font-size:0.76rem;padding:3px 9px;" onclick="deleteFlowGroup('${escapeHtml(group.id)}')">Confirm Delete</button>
@@ -854,7 +879,7 @@ function renderFlowGroupsManager(filterQuery = '') {
                                             <option value="">Move to Ungrouped</option>
                                             ${flowGroups.groups.filter(g => g.id !== group.id).map(g => `<option value="${escapeHtml(g.id)}">Move to ${escapeHtml(g.name)}</option>`).join('')}
                                         </select>
-                                        <button type="button" class="flow-group-flow-btn-remove" onclick="removeWorkflowFromGroup(${wf.id}, '${escapeHtml(group.name)}')" title="Remove from this group">✕</button>
+                                        <button type="button" class="flow-group-flow-btn-remove" onclick="removeWorkflowFromGroup(${wf.id}, '${escapeHtml(group.name)}')" title="Remove from this group"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                                     </div>
                                 </div>
                             `).join('') : '<div style="color:var(--text-muted);font-size:0.8rem;text-align:center;padding:12px 0;">No workflows in this group yet. Add one below!</div>'}
@@ -1422,7 +1447,7 @@ function renderTokenNameEntries() {
         list.innerHTML = entries.length ? entries.map((entry, index) => `
             <div class="token-name-entry">
                 <span>${escapeHtml(entry)}</span>
-                <button type="button" class="btn-icon" style="color:#f87171; padding:0 3px;" onclick="removeTokenNameEntry('${type}', ${index})" aria-label="Remove ${escapeHtml(entry)}">×</button>
+                <button type="button" class="btn-icon" style="color:#f87171; padding:0 3px;" onclick="removeTokenNameEntry('${type}', ${index})" aria-label="Remove ${escapeHtml(entry)}"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>`).join('') : '<p style="font-size:0.78rem; color:var(--text-muted); margin-top:10px;">No entries added yet.</p>';
     });
 }
@@ -1917,7 +1942,7 @@ if (webhookUrlInput) {
         warningDiv.style.color = '#f59e0b';
         warningDiv.style.fontSize = '0.8rem';
         warningDiv.style.lineHeight = '1.4';
-        warningDiv.innerHTML = '⚠️ <strong>Localhost Detected:</strong> Helius cannot send webhooks to a local URL. You must expose port 5000 using a tunnel (e.g., <code>ngrok http 5000</code>) and paste your public tunnel URL in Helius Developer Portal pointing to <code>/api/helius/webhook</code>.';
+        warningDiv.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" style="display:inline-block;vertical-align:-2px;margin-right:6px;"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><strong>Localhost Detected:</strong> Helius cannot send webhooks to a local URL. You must expose port 5000 using a tunnel (e.g., <code>ngrok http 5000</code>) and paste your public tunnel URL in Helius Developer Portal pointing to <code>/api/helius/webhook</code>.';
         webhookUrlInput.parentNode.appendChild(warningDiv);
     }
 }
@@ -1965,11 +1990,11 @@ function handleChannelSearch(type) {
             
             let typeBadge = '';
             if (c.type === 'User') {
-                typeBadge = `<span style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(59, 130, 246, 0.3); font-weight: 500;">👤 User</span>`;
+                typeBadge = `<span style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(59, 130, 246, 0.3); font-weight: 500; display:inline-flex; align-items:center; gap:4px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> User</span>`;
             } else if (c.type === 'Group') {
-                typeBadge = `<span style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.3); font-weight: 500;">👥 Group</span>`;
+                typeBadge = `<span style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.3); font-weight: 500; display:inline-flex; align-items:center; gap:4px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> Group</span>`;
             } else {
-                typeBadge = `<span style="background: rgba(6, 182, 212, 0.15); color: #67e8f9; font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(6, 182, 212, 0.3); font-weight: 500;">📢 Channel</span>`;
+                typeBadge = `<span style="background: rgba(6, 182, 212, 0.15); color: #67e8f9; font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(6, 182, 212, 0.3); font-weight: 500; display:inline-flex; align-items:center; gap:4px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg> Channel</span>`;
             }
             
             div.innerHTML = `
@@ -2263,14 +2288,16 @@ async function scanWalletHistory() {
                     if (s.test_status === 'passed') {
                         testBadgeHtml = `
                             <div style="margin-bottom: 10px; padding: 6px 10px; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px; display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: #34d399; font-weight: 600;">
-                                🟢 PASSED WORKFLOW CHECKLIST
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                                <span>PASSED WORKFLOW CHECKLIST</span>
                             </div>
                         `;
                     } else if (s.test_status === 'dropped') {
                         testBadgeHtml = `
                             <div style="margin-bottom: 10px; padding: 6px 10px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 6px; display: flex; flex-direction: column; gap: 2px; font-size: 0.78rem; color: #f87171; font-weight: 500;">
                                 <div style="font-weight: 700; color: #fca5a5; display: flex; align-items: center; gap: 6px;">
-                                    🔴 DROPPED BY WORKFLOW
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                                    <span>DROPPED BY WORKFLOW</span>
                                 </div>
                                 <div style="font-size: 0.72rem; color: #fca5a5; margin-top: 2px;">Reason: ${s.test_reason}</div>
                             </div>
@@ -2278,7 +2305,10 @@ async function scanWalletHistory() {
                     } else if (s.test_status === 'error') {
                         testBadgeHtml = `
                             <div style="margin-bottom: 10px; padding: 6px 10px; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 6px; display: flex; flex-direction: column; gap: 2px; font-size: 0.78rem; color: #fbbf24; font-weight: 500;">
-                                <div style="font-weight: 700;">⚠️ TEST RUN ERROR</div>
+                                <div style="font-weight: 700; display: flex; align-items: center; gap: 6px;">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                    <span>TEST RUN ERROR</span>
+                                </div>
                                 <div style="font-size: 0.72rem; margin-top: 2px;">${s.test_reason}</div>
                             </div>
                         `;
@@ -2321,7 +2351,8 @@ async function scanWalletHistory() {
                         ${s.last_bought_token ? `
                         <div style="margin-top: 8px; margin-bottom: 8px; padding: 8px; background: rgba(6, 182, 212, 0.08); border: 1px solid rgba(6, 182, 212, 0.2); border-radius: 6px;">
                             <div style="font-size: 0.72rem; color: #22d3ee; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
-                                🪙 Last Token Bought Before Payment:
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg>
+                                <span>Last Token Bought Before Payment:</span>
                             </div>
                             <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
                                 <div style="display: flex; flex-direction: column; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: calc(100% - 100px);">
@@ -2334,8 +2365,9 @@ async function scanWalletHistory() {
                             </div>
                         </div>
                         ` : `
-                        <div style="margin-top: 8px; margin-bottom: 8px; padding: 6px 8px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 6px; font-size: 0.72rem; color: var(--text-muted);">
-                            🪙 Last Token Bought: None detected in recent history
+                        <div style="margin-top: 8px; margin-bottom: 8px; padding: 6px 8px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 6px; font-size: 0.72rem; color: var(--text-muted); display: flex; align-items: center; gap: 4px;">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg>
+                            <span>Last Token Bought: None detected in recent history</span>
                         </div>
                         `}
 
@@ -2391,11 +2423,11 @@ async function openWalletTxModal(senderAddress) {
                 
                 let actionBadge = '';
                 if (tx.action === 'BUY') {
-                    actionBadge = `<span style="color:#34d399; background:rgba(16, 185, 129, 0.15); padding:2px 6px; border-radius:4px; font-weight:600; font-size:0.72rem;">🟢 BUY</span>`;
+                    actionBadge = `<span style="color:#34d399; background:rgba(16, 185, 129, 0.15); padding:2px 6px; border-radius:4px; font-weight:600; font-size:0.72rem; display:inline-flex; align-items:center; gap:4px;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> BUY</span>`;
                 } else if (tx.action === 'SELL') {
-                    actionBadge = `<span style="color:#f87171; background:rgba(239, 68, 68, 0.15); padding:2px 6px; border-radius:4px; font-weight:600; font-size:0.72rem;">🔴 SELL</span>`;
+                    actionBadge = `<span style="color:#f87171; background:rgba(239, 68, 68, 0.15); padding:2px 6px; border-radius:4px; font-weight:600; font-size:0.72rem; display:inline-flex; align-items:center; gap:4px;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> SELL</span>`;
                 } else {
-                    actionBadge = `<span style="color:#9ca3af; background:rgba(156,163,175,0.15); padding:2px 6px; border-radius:4px; font-weight:600; font-size:0.72rem;">⚪ ${tx.action.slice(0, 10)}</span>`;
+                    actionBadge = `<span style="color:#9ca3af; background:rgba(156,163,175,0.15); padding:2px 6px; border-radius:4px; font-weight:600; font-size:0.72rem; display:inline-flex; align-items:center; gap:4px;"><svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg> ${tx.action.slice(0, 10)}</span>`;
                 }
                 
                 let tokenHtml = '-';
@@ -2408,7 +2440,7 @@ async function openWalletTxModal(senderAddress) {
                             <span style="font-weight:600; color:white; font-size:0.88rem;" title="${tx.token_bought}">${displayName}</span>
                             <div style="display:flex; align-items:center; gap:6px; font-size:0.75rem;">
                                 <span style="font-family:monospace; color:#60a5fa; user-select:all;" title="${tx.token_bought}">${tx.token_bought.slice(0,6)}...${tx.token_bought.slice(-4)}</span>
-                                <button onclick="navigator.clipboard.writeText('${tx.token_bought}'); alert('Token Address copied!');" class="btn-icon" style="padding:2px; font-size:0.75rem;" title="Copy Address">📋</button>
+                                <button onclick="navigator.clipboard.writeText('${tx.token_bought}'); alert('Token Address copied!');" class="btn-icon" style="padding:2px; font-size:0.75rem;" title="Copy Address"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg></button>
                             </div>
                         </div>
                     `;
@@ -2485,7 +2517,7 @@ async function loadRealtimePayments() {
                 return `
                     <div class="result-success" style="padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.1); border-left: 3px solid #06b6d4; margin-bottom: 0.5rem;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                            <span style="font-weight:600; color:#22d3ee; font-size:0.82rem;">💳 Incoming Transfer</span>
+                            <span style="font-weight:600; color:#22d3ee; font-size:0.82rem; display:inline-flex; align-items:center; gap:5px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg> Incoming Transfer</span>
                             <span style="font-size:0.72rem; color:var(--text-muted);">${dateStr}</span>
                         </div>
                         <div style="font-size:0.95rem; font-weight:bold; color:white; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
@@ -2903,7 +2935,7 @@ function renderTokenDataFromCache() {
 
         const badge = document.getElementById('td-sync-badge');
         if (badge) {
-            badge.innerText = '⚡ Cached (Syncing fresh...)';
+            badge.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> <span>Cached (Syncing fresh...)</span>';
             badge.style.color = '#22d3ee';
             badge.style.borderColor = 'rgba(6, 182, 212, 0.3)';
             badge.style.background = 'rgba(6, 182, 212, 0.15)';
@@ -2927,7 +2959,7 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
             <tr>
                 <td colspan="16" style="text-align: center; padding: 3rem; color: var(--text-muted);">
                     <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
-                        <span style="font-size: 1.5rem;">🔄</span>
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite;"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                         <span>Loading token wallet data...</span>
                     </div>
                 </td>
@@ -2937,7 +2969,7 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
 
     const badge = document.getElementById('td-sync-badge');
     if (badge) {
-        badge.innerText = '🔄 Syncing...';
+        badge.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite;"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> <span>Syncing...</span>';
         badge.style.color = '#fbbf24';
         badge.style.borderColor = 'rgba(245, 158, 11, 0.3)';
         badge.style.background = 'rgba(245, 158, 11, 0.15)';
@@ -3023,7 +3055,7 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
                 tbody.innerHTML = `<tr><td colspan="16" style="text-align: center; color: #ef4444; padding: 2rem;">Error: ${data.error || 'Failed to fetch data'}</td></tr>`;
             }
             if (badge) {
-                badge.innerText = '❌ Sync Failed';
+                badge.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg> <span>Sync Failed</span>';
                 badge.style.color = '#ef4444';
             }
             return;
@@ -3054,7 +3086,9 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="16" style="text-align: center; padding: 3.5rem; color: var(--text-muted);">
-                            <div style="font-size: 2rem; margin-bottom: 8px;">🔍</div>
+                            <div style="display:flex; justify-content:center; margin-bottom: 10px;">
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            </div>
                             <div style="font-weight: 500; font-size: 0.95rem; color: white;">No token records found</div>
                             <div style="font-size: 0.8rem; margin-top: 4px;">Try adjusting or resetting your filter criteria.</div>
                         </td>
@@ -3063,7 +3097,7 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
             }
             renderTokenDataPagination(0, 0, page, 1);
             if (badge) {
-                badge.innerText = '🟢 Live & Synced';
+                badge.innerHTML = '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#34d399;box-shadow:0 0 6px #10b981;"></span> <span>Live & Synced</span>';
                 badge.style.color = '#34d399';
                 badge.style.borderColor = 'rgba(16, 185, 129, 0.3)';
                 badge.style.background = 'rgba(16, 185, 129, 0.15)';
@@ -3094,7 +3128,7 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
         }
 
         if (badge) {
-            badge.innerText = '🟢 Live & Synced';
+            badge.innerHTML = '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#34d399;box-shadow:0 0 6px #10b981;"></span> <span>Live & Synced</span>';
             badge.style.color = '#34d399';
             badge.style.borderColor = 'rgba(16, 185, 129, 0.3)';
             badge.style.background = 'rgba(16, 185, 129, 0.15)';
@@ -3105,7 +3139,7 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
             tbody.innerHTML = `<tr><td colspan="16" style="text-align: center; color: #ef4444; padding: 2rem;">Error loading data: ${err.message}</td></tr>`;
         }
         if (badge) {
-            badge.innerText = '❌ Connection Error';
+            badge.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> <span>Connection Error</span>';
             badge.style.color = '#ef4444';
         }
     }
@@ -3189,8 +3223,8 @@ function renderTokenRow(p) {
                 ${ca ? `
                     <div style="display: flex; align-items: center; gap: 6px;">
                         <span class="code-address" onclick="copyTextToClipboard('${ca}', this)" title="Click to copy full CA">${caShort}</span>
-                        <a href="${dexUrl}" target="_blank" title="View Chart on DexScreener" style="color: #60a5fa; text-decoration: none; font-size: 0.8rem;">📈</a>
-                        <a href="${solscanUrl}" target="_blank" title="View on Solscan" style="color: var(--text-muted); text-decoration: none; font-size: 0.8rem;">🔗</a>
+                        <a href="${dexUrl}" target="_blank" title="View Chart on DexScreener" style="color: #60a5fa; text-decoration: none; display: inline-flex; align-items: center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></a>
+                        <a href="${solscanUrl}" target="_blank" title="View on Solscan" style="color: var(--text-muted); text-decoration: none; display: inline-flex; align-items: center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>
                     </div>
                 ` : '<span style="color: var(--text-muted);">-</span>'}
             </td>
@@ -3490,14 +3524,14 @@ async function exportTokenDataCSV() {
 
 async function syncSupabaseData() {
     const btn = document.getElementById('btn-sync-supabase');
-    const origText = btn ? btn.innerHTML : '⚡ Sync Supabase';
+    const origText = btn ? btn.innerHTML : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> <span>Sync Supabase</span>';
     if (btn) {
         btn.disabled = true;
-        btn.innerHTML = '🔄 Syncing...';
+        btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite;"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> <span>Syncing...</span>';
     }
     const badge = document.getElementById('td-sync-badge');
     if (badge) {
-        badge.innerText = '🔄 Syncing Supabase...';
+        badge.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite;"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> <span>Syncing Supabase...</span>';
         badge.style.color = '#fbbf24';
         badge.style.borderColor = 'rgba(245, 158, 11, 0.3)';
         badge.style.background = 'rgba(245, 158, 11, 0.15)';
@@ -3507,18 +3541,18 @@ async function syncSupabaseData() {
         const res = await fetch('/api/wallet/sync_supabase', { method: 'POST' });
         const data = await res.json();
         if (data.success) {
-            if (btn) btn.innerHTML = `✅ ${data.message || 'Synced!'}`;
+            if (btn) btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> <span>${escapeHtml(data.message || 'Synced!')}</span>`;
             // Invalidate cache so fresh data renders immediately
             try { localStorage.removeItem(TOKEN_DATA_CACHE_KEY); } catch (e) {}
             await loadTokenWalletData(1, false);
         } else {
             alert(`Sync error: ${data.error || 'Failed to sync with Supabase'}`);
-            if (btn) btn.innerHTML = '❌ Failed';
+            if (btn) btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg> <span>Failed</span>';
         }
     } catch (err) {
         console.error('Error syncing Supabase:', err);
         alert(`Error connecting to server for sync: ${err.message}`);
-        if (btn) btn.innerHTML = '❌ Error';
+        if (btn) btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> <span>Error</span>';
     } finally {
         setTimeout(() => {
             if (btn) {

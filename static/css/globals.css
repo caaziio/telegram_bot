@@ -377,12 +377,15 @@ body {
   background: transparent;
   border: none;
   color: #9ca3af;
-  font-size: 1.05rem;
-  line-height: 1;
   cursor: pointer;
-  padding: 2px 5px;
+  padding: 0;
+  width: 20px;
+  height: 20px;
   border-radius: 4px;
   transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .akoue-add-folder-btn:hover {
@@ -809,6 +812,9 @@ body {
   cursor: pointer;
   transition: color 0.2s;
   padding: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .btn-icon:hover {
@@ -1153,6 +1159,9 @@ body {
   padding: 7px 9px;
   font: inherit;
   font-size: 0.78rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .flow-group-action:hover {
@@ -1191,8 +1200,11 @@ body {
 
 .workflow-card-chevron {
   color: #22d3ee;
-  font-size: 0.85rem;
-  width: 12px;
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 auto;
 }
 
@@ -1411,6 +1423,9 @@ body {
   font-size: 0.72rem;
   line-height: 1;
   border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .flow-group-reorder-btn:hover {
@@ -1497,6 +1512,9 @@ body {
   transition: all 0.15s;
   flex-shrink: 0;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .flow-group-btn-delete:hover {
@@ -1631,10 +1649,12 @@ body {
   border: 0;
   color: #9ca3af;
   cursor: pointer;
-  font-size: 0.8rem;
   padding: 3px 6px;
   border-radius: 4px;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .flow-group-flow-btn-remove:hover {
@@ -1738,19 +1758,24 @@ body {
 .app-toast--info {
   border-left: 4px solid #06b6d4;
 }
-.app-toast--info .app-toast-icon {
-  color: #22d3ee;
+.app-toast-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .app-toast-close {
   background: transparent;
   border: 0;
   color: var(--text-muted);
-  font-size: 1rem;
   cursor: pointer;
   margin-left: auto;
   padding: 0 4px;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .app-toast-close:hover {
