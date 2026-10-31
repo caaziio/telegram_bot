@@ -5164,8 +5164,17 @@ function openDashboardCategory(tabId, category) {
 let currentWfPerfSystem = 'validated';
 let currentWfPerfTimeframe = 'day';
 let currentWfPerfSort = 'win_rate_2x';
+let lastWorkflowPerfFetchTime = 0;
+const openWorkflowDrawers = new Set();
 
-async function loadWorkflowPerformance() {
+async function loadWorkflowPerformance(force = false) {
+    const now = Date.now();
+    // Throttle automatic background refreshes to at most once per 30 seconds
+    if (!force && (now - lastWorkflowPerfFetchTime < 30000)) {
+        return;
+    }
+    lastWorkflowPerfFetchTime = now;
+
     try {
         const params = new URLSearchParams({
             system: currentWfPerfSystem,
@@ -5184,6 +5193,7 @@ async function loadWorkflowPerformance() {
 
 function setWorkflowPerfSystem(sys) {
     currentWfPerfSystem = sys;
+    openWorkflowDrawers.clear();
     ['validated', 'paid', 'all'].forEach(s => {
         const btn = document.getElementById(`wf-sys-btn-${s}`);
         if (btn) {
@@ -5198,7 +5208,7 @@ function setWorkflowPerfSystem(sys) {
             }
         }
     });
-    loadWorkflowPerformance();
+    loadWorkflowPerformance(true);
 }
 
 function setWorkflowPerfTimeframe(tf) {
@@ -5217,12 +5227,12 @@ function setWorkflowPerfTimeframe(tf) {
             }
         }
     });
-    loadWorkflowPerformance();
+    loadWorkflowPerformance(true);
 }
 
 function setWorkflowPerfSort(sort) {
     currentWfPerfSort = sort;
-    loadWorkflowPerformance();
+    loadWorkflowPerformance(true);
 }
 
 function openWorkflowInTable(workflowId, system) {
@@ -5383,9 +5393,11 @@ function toggleWorkflowDrawer(workflowId) {
     if (!drawer) return;
     if (drawer.style.display === 'none' || !drawer.style.display) {
         drawer.style.display = 'table-row';
+        openWorkflowDrawers.add(workflowId);
         if (btn) btn.innerHTML = '▲ Close';
     } else {
         drawer.style.display = 'none';
+        openWorkflowDrawers.delete(workflowId);
         if (btn) btn.innerHTML = '▼ Details';
     }
 }
@@ -5497,6 +5509,7 @@ function renderWorkflowPerformance(data) {
         const miniBarHtml = generateWorkflowMiniBar(item.tier_stats);
         const traj = item.trajectories || {};
         const tokens = item.top_tokens || [];
+        const isOpen = openWorkflowDrawers.has(item.workflow_id);
 
         // Build main row
         rowsHtml += `
@@ -5535,7 +5548,7 @@ function renderWorkflowPerformance(data) {
                 </td>
                 <td style="padding: 10px 14px; text-align: right; white-space: nowrap;">
                     <button type="button" id="wf-drawer-btn-${item.workflow_id}" class="btn-secondary" onclick="toggleWorkflowDrawer(${item.workflow_id})" style="font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; margin-right: 4px; background: rgba(255,255,255,0.06); color: #cbd5e1; border: 1px solid rgba(255,255,255,0.1);" title="Toggle Donut & Detailed Analytics">
-                        ▼ Details
+                        ${isOpen ? '▲ Close' : '▼ Details'}
                     </button>
                     <button type="button" class="btn-secondary" onclick="openWorkflowInTable(${item.workflow_id}, '${data.system}')" style="font-size: 0.72rem; padding: 4px 8px; border-radius: 6px;" title="Filter signals table by this workflow">
                         View →
@@ -5544,7 +5557,7 @@ function renderWorkflowPerformance(data) {
             </tr>
 
             <!-- Expandable Drawer Row for Circular Breakdown & Top Tokens -->
-            <tr id="wf-drawer-${item.workflow_id}" style="display: none; background: rgba(15, 23, 42, 0.45); border-bottom: 1px solid rgba(255,255,255,0.08);">
+            <tr id="wf-drawer-${item.workflow_id}" style="display: ${isOpen ? 'table-row' : 'none'}; background: rgba(15, 23, 42, 0.45); border-bottom: 1px solid rgba(255,255,255,0.08);">
                 <td colspan="11" style="padding: 0;">
                     <div style="padding: 1.25rem 1.5rem; display: grid; grid-template-columns: minmax(310px, 360px) minmax(220px, 260px) 1fr; gap: 1.25rem; align-items: start;">
                         <!-- Panel A: Donut Circle & Tier Stats -->
