@@ -5267,7 +5267,7 @@ function generateWorkflowDonutSvg(tierStats, size = 110, centerTitle = '', cente
     const circumference = 2 * Math.PI * radius;
 
     const tiers = [
-        { key: 'lt_1x', label: '< 1.0x', color: '#ef4444', pct: tierStats.lt_1x_pct || 0 },
+        { key: 'lt_1x', label: '< 1.0x', color: '#64748b', pct: tierStats.lt_1x_pct || 0 },
         { key: '1x_1_5x', label: '1.0x–1.5x', color: '#f59e0b', pct: tierStats['1x_1_5x_pct'] || 0 },
         { key: '1_5x_2x', label: '1.5x–2.0x', color: '#06b6d4', pct: tierStats['1_5x_2x_pct'] || 0 },
         { key: '2x_3x', label: '2.0x–3.0x', color: '#10b981', pct: tierStats['2x_3x_pct'] || 0 },
@@ -5315,7 +5315,7 @@ function generateWorkflowDonutSvg(tierStats, size = 110, centerTitle = '', cente
 function generateWorkflowDonutLegend(tierStats, compact = false) {
     if (!tierStats) return '';
     const tiers = [
-        { label: '< 1.0x', color: '#ef4444', pct: tierStats.lt_1x_pct || 0, count: tierStats.lt_1x || 0 },
+        { label: '< 1.0x', color: '#64748b', pct: tierStats.lt_1x_pct || 0, count: tierStats.lt_1x || 0 },
         { label: '1.0–1.5x', color: '#f59e0b', pct: tierStats['1x_1_5x_pct'] || 0, count: tierStats['1x_1_5x'] || 0 },
         { label: '1.5–2.0x', color: '#06b6d4', pct: tierStats['1_5x_2x_pct'] || 0, count: tierStats['1_5x_2x'] || 0 },
         { label: '2.0–3.0x', color: '#10b981', pct: tierStats['2x_3x_pct'] || 0, count: tierStats['2x_3x'] || 0 },
@@ -5357,7 +5357,7 @@ function generateWorkflowDonutLegend(tierStats, compact = false) {
 function generateWorkflowMiniBar(tierStats) {
     if (!tierStats) return '<span style="color: var(--text-muted); font-size: 0.75rem;">No data</span>';
     const tiers = [
-        { label: '< 1.0x', color: '#ef4444', pct: tierStats.lt_1x_pct || 0, count: tierStats.lt_1x || 0 },
+        { label: '< 1.0x', color: '#64748b', pct: tierStats.lt_1x_pct || 0, count: tierStats.lt_1x || 0 },
         { label: '1.0–1.5x', color: '#f59e0b', pct: tierStats['1x_1_5x_pct'] || 0, count: tierStats['1x_1_5x'] || 0 },
         { label: '1.5–2.0x', color: '#06b6d4', pct: tierStats['1_5x_2x_pct'] || 0, count: tierStats['1_5x_2x'] || 0 },
         { label: '2.0–3.0x', color: '#10b981', pct: tierStats['2x_3x_pct'] || 0, count: tierStats['2x_3x'] || 0 },
@@ -5380,7 +5380,7 @@ function generateWorkflowMiniBar(tierStats) {
                 ${segmentsHtml}
             </div>
             <div style="display: flex; justify-content: space-between; font-size: 0.68rem; color: var(--text-muted); font-weight: 500;">
-                <span style="color: #ef4444;"><1x: ${tierStats.lt_1x_pct || 0}%</span>
+                <span style="color: #94a3b8;"><1x: ${tierStats.lt_1x_pct || 0}%</span>
                 <span style="color: #34d399; font-weight: 600;">≥2x: ${winPct}%</span>
             </div>
         </div>
