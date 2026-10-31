@@ -5164,6 +5164,8 @@ function openDashboardCategory(tabId, category) {
 let currentWfPerfSystem = 'validated';
 let currentWfPerfTimeframe = 'day';
 let currentWfPerfSort = 'win_rate_2x';
+let currentWfPerfLimit = 10;
+let lastWfPerfData = null;
 let lastWorkflowPerfFetchTime = 0;
 const openWorkflowDrawers = new Set();
 
@@ -5188,6 +5190,27 @@ async function loadWorkflowPerformance(force = false) {
         }
     } catch (err) {
         console.error('Error loading workflow performance intelligence:', err);
+    }
+}
+
+function setWorkflowPerfLimit(limit) {
+    currentWfPerfLimit = parseInt(limit, 10) || 10;
+    [5, 10, 20].forEach(l => {
+        const btn = document.getElementById(`wf-limit-btn-${l}`);
+        if (btn) {
+            if (l === currentWfPerfLimit) {
+                btn.style.background = '#67e8f9';
+                btn.style.color = '#083344';
+                btn.style.fontWeight = '700';
+            } else {
+                btn.style.background = 'transparent';
+                btn.style.color = 'var(--text-muted)';
+                btn.style.fontWeight = '500';
+            }
+        }
+    });
+    if (lastWfPerfData) {
+        renderWorkflowPerformance(lastWfPerfData);
     }
 }
 
@@ -5478,12 +5501,23 @@ function renderWorkflowPerformance(data) {
         }
     }
 
+    lastWfPerfData = data;
+
+    const fullList = data.leaderboard || [];
+    const countLabel = document.getElementById('wf-perf-count-label');
+    if (countLabel) {
+        if (fullList.length > 0) {
+            countLabel.innerHTML = `Showing <strong style="color: #67e8f9;">Top ${Math.min(fullList.length, currentWfPerfLimit)}</strong> of <strong style="color: white;">${fullList.length}</strong> ranked workflows`;
+        } else {
+            countLabel.innerHTML = `No ranked workflows in this timeframe`;
+        }
+    }
+
     // 2. Render Leaderboard Table with Inline Segments and Expandable Drawers
     const tbody = document.getElementById('wf-perf-tbody');
     if (!tbody) return;
 
-    const list = data.leaderboard || [];
-    if (list.length === 0) {
+    if (fullList.length === 0) {
         tbody.innerHTML = `
             <tr>
                 <td colspan="11" style="text-align: center; padding: 2.5rem; color: var(--text-muted);">
@@ -5493,6 +5527,8 @@ function renderWorkflowPerformance(data) {
         `;
         return;
     }
+
+    const list = fullList.slice(0, currentWfPerfLimit);
 
     let rowsHtml = '';
     list.forEach((item, index) => {

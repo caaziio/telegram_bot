@@ -656,6 +656,19 @@
                                 </button>
                             </div>
 
+                            <!-- Limit Selector (Top 5, Top 10, Top 20) -->
+                            <div class="pill-group" style="display: flex; background: rgba(255,255,255,0.05); padding: 3px; border-radius: 8px; border: 1px solid var(--border-color);" title="Limit displayed workflows">
+                                <button type="button" id="wf-limit-btn-5" class="perf-limit-btn" onclick="setWorkflowPerfLimit(5)" style="padding: 4px 9px; font-size: 0.78rem; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 500; cursor: pointer;">
+                                    Top 5
+                                </button>
+                                <button type="button" id="wf-limit-btn-10" class="perf-limit-btn" onclick="setWorkflowPerfLimit(10)" style="padding: 4px 9px; font-size: 0.78rem; border-radius: 6px; border: none; background: #67e8f9; color: #083344; font-weight: 700; cursor: pointer;">
+                                    Top 10
+                                </button>
+                                <button type="button" id="wf-limit-btn-20" class="perf-limit-btn" onclick="setWorkflowPerfLimit(20)" style="padding: 4px 9px; font-size: 0.78rem; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 500; cursor: pointer;">
+                                    Top 20
+                                </button>
+                            </div>
+
                             <!-- Sort Metric Dropdown -->
                             <select id="wf-perf-sort-select" onchange="setWorkflowPerfSort(this.value)" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.78rem; padding: 5px 8px; border-radius: 8px; outline: none; cursor: pointer;">
                                 <option value="win_rate_2x" selected>Rank: Win Rate (≥ 2x)</option>
@@ -673,6 +686,16 @@
                         <div style="padding: 1.5rem; text-align: center; color: var(--text-muted); font-size: 0.85rem;">
                             Loading best performing workflow...
                         </div>
+                    </div>
+
+                    <!-- Workflow Leaderboard Table Info Header -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding: 0 4px;">
+                        <span id="wf-perf-count-label" style="font-size: 0.76rem; color: var(--text-muted); font-weight: 500;">
+                            Showing ranked workflows
+                        </span>
+                        <span style="font-size: 0.72rem; color: var(--text-muted);">
+                            Click <strong>▼ Details</strong> to inspect outcome donut &amp; top tokens
+                        </span>
                     </div>
 
                     <!-- Workflow Leaderboard Table -->
