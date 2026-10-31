@@ -271,18 +271,18 @@ workflow_sync_lock = threading.RLock()
 global_conn = None
 
 def get_db():
+    """Return an in-memory query index hydrated directly from Supabase (no local SQLite file on disk)."""
     global global_conn
     with db_lock:
         if global_conn is not None:
             return global_conn
 
-        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        global_conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+        global_conn = sqlite3.connect(":memory:", timeout=30, check_same_thread=False)
         try:
-            global_conn.execute("PRAGMA journal_mode = WAL;")
-            global_conn.execute("PRAGMA busy_timeout = 30000;")
+            global_conn.execute("PRAGMA synchronous = OFF;")
+            global_conn.execute("PRAGMA temp_store = MEMORY;")
         except Exception as e:
-            print(f"[SQLITE] Warning setting pragmas: {e}", flush=True)
+            print(f"[MEMORY INDEX] Warning setting pragmas: {e}", flush=True)
 
         global_conn.row_factory = custom_row_factory
         return global_conn
@@ -363,8 +363,9 @@ def sync_from_supabase():
 
             conn.commit()
 
-        # Sync Wallet Payments from Supabase into SQLite
+        # Sync Wallet Payments and DEX Validated directly from Supabase
         sync_wallet_payments_from_supabase()
+        sync_dex_validated_from_supabase()
     except Exception as e:
         print(f"[SUPABASE] Sync error: {e}", flush=True)
 
@@ -375,10 +376,23 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
             "id", "tracked_address", "sender_address", "amount", "mint", "signature", "timestamp",
             "token_name", "ca", "platform", "market_cap", "age", "perf_5m", "perf_1h", "perf_6h", "perf_24h",
             "liquidity_usd", "volume_5m", "volume_1h", "volume_6h", "volume_24h",
-            "dex_url", "migration_status", "status", "reason", "formatted_message", "created_at", "migration_age"
+            "dex_url", "migration_status", "status", "reason", "formatted_message", "created_at", "migration_age",
+            "max_mc_1h", "peak_mult_1h", "min_mc_1h", "min_dd_1h_pct", "pre_peak_low_mc_1h", "pre_peak_dd_1h_pct", "path_1h",
+            "max_mc_4h", "peak_mult_4h", "min_mc_4h", "min_dd_4h_pct", "pre_peak_low_mc_4h", "pre_peak_dd_4h_pct", "path_4h",
+            "perf_checked_stage"
         ]
         col_str = ", ".join(cols)
         ph_str = ", ".join(["?" for _ in cols])
+        perf_cols = {
+            "max_mc_1h", "peak_mult_1h", "min_mc_1h", "min_dd_1h_pct", "pre_peak_low_mc_1h", "pre_peak_dd_1h_pct", "path_1h",
+            "max_mc_4h", "peak_mult_4h", "min_mc_4h", "min_dd_4h_pct", "pre_peak_low_mc_4h", "pre_peak_dd_4h_pct", "path_4h",
+            "perf_checked_stage"
+        }
+        update_assignments = ", ".join([
+            f"{c}=COALESCE(excluded.{c}, wallet_payments.{c})" if c in perf_cols else f"{c}=excluded.{c}"
+            for c in cols if c != "id"
+        ])
+        upsert_sql = f"INSERT INTO wallet_payments ({col_str}) VALUES ({ph_str}) ON CONFLICT(id) DO UPDATE SET {update_assignments}"
 
         def is_fully_enriched(item):
             token_name = str(item.get('token_name') or '').strip()
@@ -433,7 +447,10 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                             SELECT id, tracked_address, sender_address, amount, mint, signature, timestamp,
                                    token_name, ca, platform, market_cap, age, perf_5m, perf_1h, perf_6h, perf_24h,
                                    liquidity_usd, volume_5m, volume_1h, volume_6h, volume_24h,
-                                   dex_url, migration_status, status, reason, formatted_message, created_at, migration_age
+                                   dex_url, migration_status, status, reason, formatted_message, created_at, migration_age,
+                                   max_mc_1h, peak_mult_1h, min_mc_1h, min_dd_1h_pct, pre_peak_low_mc_1h, pre_peak_dd_1h_pct, path_1h,
+                                   max_mc_4h, peak_mult_4h, min_mc_4h, min_dd_4h_pct, pre_peak_low_mc_4h, pre_peak_dd_4h_pct, path_4h,
+                                   perf_checked_stage
                             FROM wallet_payments
                             WHERE id >= %s
                               AND token_name IS NOT NULL
@@ -472,7 +489,7 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                                 with db_lock:
                                     sq_conn = get_db()
                                     sq_cur = sq_conn.cursor()
-                                    sq_cur.executemany(f"INSERT OR REPLACE INTO wallet_payments ({col_str}) VALUES ({ph_str})", clean_rows)
+                                    sq_cur.executemany(upsert_sql, clean_rows)
                                     sq_conn.commit()
                                 total_synced += len(clean_rows)
                             last_synced_id = rows[-1][0]
@@ -524,7 +541,7 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                         with db_lock:
                             sq_conn = get_db()
                             sq_cur = sq_conn.cursor()
-                            sq_cur.executemany(f"INSERT OR REPLACE INTO wallet_payments ({col_str}) VALUES ({ph_str})", clean_rows)
+                            sq_cur.executemany(upsert_sql, clean_rows)
                             sq_conn.commit()
 
                     total_synced += len(clean_rows)
@@ -555,7 +572,7 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                         with db_lock:
                             sq_conn = get_db()
                             sq_cur = sq_conn.cursor()
-                            sq_cur.executemany(f"INSERT OR REPLACE INTO wallet_payments ({col_str}) VALUES ({ph_str})", clean_rows)
+                            sq_cur.executemany(upsert_sql, clean_rows)
                             sq_conn.commit()
                     total_synced += len(clean_rows)
                     if len(res.data) < 1000 or batch_max_id <= current_cursor_id:
@@ -567,6 +584,80 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
         print(f"[SUPABASE] wallet_payments sync error: {e}", flush=True)
         return 0
 
+
+def sync_dex_validated_from_supabase(full_sync=False):
+    """Pull dex_validated rows directly from Supabase into the in-memory query index."""
+    if not supabase_client:
+        return 0
+    try:
+        cols = [
+            "id", "ca", "name", "platform", "market_cap", "age",
+            "perf_5m", "perf_1h", "perf_6h", "perf_24h",
+            "liquidity_usd", "volume_5m", "volume_1h", "volume_6h", "volume_24h",
+            "status", "dex_url", "migration_status", "signal_type",
+            "payment_timestamp", "order_status", "published_at", "fetched_at",
+            "detection_seconds", "reason", "formatted_message", "created_at",
+            "max_mc_1h", "peak_mult_1h", "min_mc_1h", "min_dd_1h_pct", "pre_peak_low_mc_1h", "pre_peak_dd_1h_pct", "path_1h",
+            "max_mc_4h", "peak_mult_4h", "min_mc_4h", "min_dd_4h_pct", "pre_peak_low_mc_4h", "pre_peak_dd_4h_pct", "path_4h",
+            "perf_checked_stage"
+        ]
+        perf_cols = {
+            "max_mc_1h", "peak_mult_1h", "min_mc_1h", "min_dd_1h_pct", "pre_peak_low_mc_1h", "pre_peak_dd_1h_pct", "path_1h",
+            "max_mc_4h", "peak_mult_4h", "min_mc_4h", "min_dd_4h_pct", "pre_peak_low_mc_4h", "pre_peak_dd_4h_pct", "path_4h"
+        }
+        placeholders = ", ".join(["?"] * len(cols))
+        col_names = ", ".join(cols)
+        update_assignments = []
+        for c in cols:
+            if c == "id":
+                continue
+            elif c == "perf_checked_stage":
+                update_assignments.append("perf_checked_stage=MAX(COALESCE(dex_validated.perf_checked_stage, 0), COALESCE(excluded.perf_checked_stage, 0))")
+            elif c in perf_cols:
+                update_assignments.append(f"{c}=COALESCE(excluded.{c}, dex_validated.{c})")
+            else:
+                update_assignments.append(f"{c}=excluded.{c}")
+        upsert_sql = (
+            f"INSERT INTO dex_validated ({col_names}) VALUES ({placeholders}) "
+            f"ON CONFLICT(ca, signal_type, payment_timestamp, order_status) DO UPDATE SET {', '.join(update_assignments)}"
+        )
+
+        total_synced = 0
+        current_cursor_id = 0
+        while True:
+            res = (
+                supabase_client.table('dex_validated')
+                .select('*')
+                .gte('id', current_cursor_id)
+                .order('id', desc=False)
+                .limit(1000)
+                .execute()
+            )
+            if not res.data:
+                break
+            clean_rows = []
+            batch_max_id = current_cursor_id
+            for item in res.data:
+                item_id = item.get('id') or 0
+                if item_id > batch_max_id:
+                    batch_max_id = item_id
+                clean_rows.append(tuple(item.get(c) for c in cols))
+            if clean_rows:
+                with db_lock:
+                    sq_conn = get_db()
+                    sq_cur = sq_conn.cursor()
+                    sq_cur.executemany(upsert_sql, clean_rows)
+                    sq_conn.commit()
+            total_synced += len(clean_rows)
+            if len(res.data) < 1000 or batch_max_id <= current_cursor_id:
+                break
+            current_cursor_id = batch_max_id + 1
+        return total_synced
+    except Exception as e:
+        print(f"[SUPABASE] dex_validated sync error: {e}", flush=True)
+        return 0
+
+
 def push_to_supabase_table(table_name, record, on_conflict=None):
     """Helper to push a single record or upsert into Supabase"""
     if not supabase_client:
@@ -577,6 +668,8 @@ def push_to_supabase_table(table_name, record, on_conflict=None):
                 supabase_client.table(table_name).upsert(record, on_conflict=on_conflict).execute()
             elif table_name == 'wallet_payments' and 'signature' in record and record.get('signature'):
                 supabase_client.table(table_name).upsert(record, on_conflict='signature').execute()
+            elif table_name == 'dex_validated':
+                supabase_client.table(table_name).upsert(record, on_conflict='ca,signal_type,payment_timestamp,order_status').execute()
             else:
                 supabase_client.table(table_name).upsert(record).execute()
         except Exception as e:
@@ -926,10 +1019,27 @@ def init_db():
             'token_name TEXT', 'ca TEXT', 'platform TEXT', 'market_cap TEXT', 'age TEXT', 'migration_age TEXT',
             'perf_5m REAL', 'perf_1h REAL', 'perf_6h REAL', 'perf_24h REAL',
             'liquidity_usd REAL', 'volume_5m REAL', 'volume_1h REAL', 'volume_6h REAL', 'volume_24h REAL',
-            'dex_url TEXT', 'migration_status TEXT', 'status TEXT', 'reason TEXT', 'formatted_message TEXT'
+            'dex_url TEXT', 'migration_status TEXT', 'status TEXT', 'reason TEXT', 'formatted_message TEXT',
+            'max_mc_1h REAL', 'peak_mult_1h REAL', 'min_mc_1h REAL', 'min_dd_1h_pct REAL',
+            'pre_peak_low_mc_1h REAL', 'pre_peak_dd_1h_pct REAL', 'path_1h TEXT',
+            'max_mc_4h REAL', 'peak_mult_4h REAL', 'min_mc_4h REAL', 'min_dd_4h_pct REAL',
+            'pre_peak_low_mc_4h REAL', 'pre_peak_dd_4h_pct REAL', 'path_4h TEXT',
+            'perf_checked_stage INTEGER DEFAULT 0'
         ]:
             try:
                 cursor.execute(f'ALTER TABLE wallet_payments ADD COLUMN {col_def}')
+            except Exception:
+                pass
+
+        for col_def in [
+            'max_mc_1h REAL', 'peak_mult_1h REAL', 'min_mc_1h REAL', 'min_dd_1h_pct REAL',
+            'pre_peak_low_mc_1h REAL', 'pre_peak_dd_1h_pct REAL', 'path_1h TEXT',
+            'max_mc_4h REAL', 'peak_mult_4h REAL', 'min_mc_4h REAL', 'min_dd_4h_pct REAL',
+            'pre_peak_low_mc_4h REAL', 'pre_peak_dd_4h_pct REAL', 'path_4h TEXT',
+            'perf_checked_stage INTEGER DEFAULT 0'
+        ]:
+            try:
+                cursor.execute(f'ALTER TABLE dex_validated ADD COLUMN {col_def}')
             except Exception:
                 pass
 
@@ -969,6 +1079,82 @@ def init_db():
             pass
 
         conn.commit()
+
+    # Immediately hydrate the in-memory query index from Supabase on startup (zero local disk DB)
+    if supabase_client:
+        try:
+            sync_from_supabase()
+            print("[SUPABASE] Hydrated in-memory index directly from Supabase.", flush=True)
+        except Exception as e:
+            print(f"[SUPABASE] Startup hydration notice: {e}", flush=True)
+
+
+def append_post_signal_outcome_filters(req_args, where_clauses, params):
+    """Apply 1h/4h Peak Multiplier, Trajectory Path, and Pre-Peak Drawdown outcome filters."""
+    outcome_filter = (req_args.get('outcome_filter') or 'all').strip().lower()
+    path_filter = (req_args.get('path_filter') or 'all').strip().upper()
+    min_peak_1h = (req_args.get('min_peak_1h') or '').strip()
+    min_peak_4h = (req_args.get('min_peak_4h') or '').strip()
+    max_pre_dd = (req_args.get('max_pre_dd') or '').strip()
+
+    if outcome_filter and outcome_filter != 'all':
+        if outcome_filter == 'winner_any_2x':
+            where_clauses.append("(COALESCE(peak_mult_1h, 0) >= 2.0 OR COALESCE(peak_mult_4h, 0) >= 2.0)")
+        elif outcome_filter == 'win_1h_1_5x':
+            where_clauses.append("COALESCE(peak_mult_1h, 0) >= 1.5")
+        elif outcome_filter == 'win_1h_2x':
+            where_clauses.append("COALESCE(peak_mult_1h, 0) >= 2.0")
+        elif outcome_filter == 'win_1h_3x':
+            where_clauses.append("COALESCE(peak_mult_1h, 0) >= 3.0")
+        elif outcome_filter == 'win_1h_5x':
+            where_clauses.append("COALESCE(peak_mult_1h, 0) >= 5.0")
+        elif outcome_filter == 'win_1h_10x':
+            where_clauses.append("COALESCE(peak_mult_1h, 0) >= 10.0")
+        elif outcome_filter == 'win_4h_1_5x':
+            where_clauses.append("COALESCE(peak_mult_4h, 0) >= 1.5")
+        elif outcome_filter == 'win_4h_2x':
+            where_clauses.append("COALESCE(peak_mult_4h, 0) >= 2.0")
+        elif outcome_filter == 'win_4h_3x':
+            where_clauses.append("COALESCE(peak_mult_4h, 0) >= 3.0")
+        elif outcome_filter == 'win_4h_5x':
+            where_clauses.append("COALESCE(peak_mult_4h, 0) >= 5.0")
+        elif outcome_filter == 'win_4h_10x':
+            where_clauses.append("COALESCE(peak_mult_4h, 0) >= 10.0")
+        elif outcome_filter == 'clean_pump_2x':
+            where_clauses.append("((COALESCE(peak_mult_1h, 0) >= 2.0 AND COALESCE(pre_peak_dd_1h_pct, 0) >= -15.0) OR (COALESCE(peak_mult_4h, 0) >= 2.0 AND COALESCE(pre_peak_dd_4h_pct, 0) >= -15.0))")
+        elif outcome_filter == 'dumped':
+            where_clauses.append("(peak_mult_1h IS NOT NULL AND COALESCE(peak_mult_1h, 0) < 1.15 AND COALESCE(peak_mult_4h, peak_mult_1h, 0) < 1.15)")
+        elif outcome_filter == 'scanned_only':
+            where_clauses.append("(peak_mult_1h IS NOT NULL OR peak_mult_4h IS NOT NULL)")
+
+    if path_filter and path_filter != 'ALL':
+        where_clauses.append("(UPPER(COALESCE(path_1h, '')) = ? OR UPPER(COALESCE(path_4h, '')) = ?)")
+        params.extend([path_filter, path_filter])
+
+    if min_peak_1h:
+        try:
+            where_clauses.append("COALESCE(peak_mult_1h, 0) >= ?")
+            params.append(float(min_peak_1h))
+        except ValueError:
+            pass
+
+    if min_peak_4h:
+        try:
+            where_clauses.append("COALESCE(peak_mult_4h, 0) >= ?")
+            params.append(float(min_peak_4h))
+        except ValueError:
+            pass
+
+    if max_pre_dd:
+        try:
+            dd_val = float(max_pre_dd)
+            if dd_val > 0:
+                dd_val = -dd_val
+            where_clauses.append("((peak_mult_1h IS NOT NULL AND COALESCE(pre_peak_dd_1h_pct, 0) >= ?) OR (peak_mult_4h IS NOT NULL AND COALESCE(pre_peak_dd_4h_pct, 0) >= ?))")
+            params.extend([dd_val, dd_val])
+        except ValueError:
+            pass
+
 
 def get_settings():
     with db_lock:
@@ -4249,12 +4435,15 @@ def get_token_wallet_data():
             'id': 'id',
             'timestamp': 'timestamp',
             'amount': usd_calc_sql,
-            'token_name': 'token_name',
+            'token_name': 'LOWER(COALESCE(token_name, ""))',
+            'ca': 'LOWER(COALESCE(ca, ""))',
+            'sender_address': 'LOWER(COALESCE(sender_address, ""))',
             'perf_5m': 'perf_5m',
             'perf_1h': 'perf_1h',
             'perf_6h': 'perf_6h',
             'perf_24h': 'perf_24h',
-            'status': 'status',
+            'status': 'LOWER(COALESCE(status, ""))',
+            'reason': 'LOWER(COALESCE(reason, ""))',
             'market_cap': 'parse_mc_usd(market_cap)',
             'liquidity_usd': 'liquidity_usd',
             'volume_5m': 'volume_5m',
@@ -4263,7 +4452,15 @@ def get_token_wallet_data():
             'volume_24h': 'volume_24h',
             'age': 'parse_creation_age_minutes(age, formatted_message)',
             'creation_age': 'parse_creation_age_minutes(age, formatted_message)',
-            'migration_age': 'parse_migration_age_minutes(migration_age, formatted_message)'
+            'migration_age': 'parse_migration_age_minutes(migration_age, formatted_message)',
+            'peak_mult_1h': 'peak_mult_1h',
+            'peak_mult_4h': 'peak_mult_4h',
+            'max_mc_1h': 'max_mc_1h',
+            'max_mc_4h': 'max_mc_4h',
+            'pre_peak_dd_1h_pct': 'pre_peak_dd_1h_pct',
+            'pre_peak_dd_4h_pct': 'pre_peak_dd_4h_pct',
+            'min_dd_1h_pct': 'min_dd_1h_pct',
+            'min_dd_4h_pct': 'min_dd_4h_pct',
         }
         order_col = valid_sorts.get(sort_by, 'id')
 
@@ -4432,6 +4629,8 @@ def get_token_wallet_data():
             where_clauses.append("NOT ((COALESCE(token_name, '') || '\n' || COALESCE(reason, '') || '\n' || COALESCE(formatted_message, '')) REGEXP ?)")
             params.append(word_filter)
 
+        append_post_signal_outcome_filters(request.args, where_clauses, params)
+
         where_str = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
         with db_lock:
@@ -4472,7 +4671,10 @@ def get_token_wallet_data():
                 SELECT id, tracked_address, sender_address, amount, mint, signature, timestamp,
                        token_name, ca, platform, market_cap, age, perf_5m, perf_1h, perf_6h, perf_24h,
                        liquidity_usd, volume_5m, volume_1h, volume_6h, volume_24h,
-                       dex_url, migration_status, status, reason, formatted_message, created_at, migration_age
+                       dex_url, migration_status, status, reason, formatted_message, created_at, migration_age,
+                       max_mc_1h, peak_mult_1h, min_mc_1h, min_dd_1h_pct, pre_peak_low_mc_1h, pre_peak_dd_1h_pct, path_1h,
+                       max_mc_4h, peak_mult_4h, min_mc_4h, min_dd_4h_pct, pre_peak_low_mc_4h, pre_peak_dd_4h_pct, path_4h,
+                       perf_checked_stage
                 FROM wallet_payments
                 {where_str}
                 ORDER BY {order_col} {sort_order} NULLS LAST
@@ -4509,7 +4711,22 @@ def get_token_wallet_data():
                 "reason": r[24],
                 "formatted_message": r[25],
                 "created_at": r[26],
-                "migration_age": r[27] if len(r) > 27 else None
+                "migration_age": r[27] if len(r) > 27 else None,
+                "max_mc_1h": r[28] if len(r) > 28 else None,
+                "peak_mult_1h": r[29] if len(r) > 29 else None,
+                "min_mc_1h": r[30] if len(r) > 30 else None,
+                "min_dd_1h_pct": r[31] if len(r) > 31 else None,
+                "pre_peak_low_mc_1h": r[32] if len(r) > 32 else None,
+                "pre_peak_dd_1h_pct": r[33] if len(r) > 33 else None,
+                "path_1h": r[34] if len(r) > 34 else None,
+                "max_mc_4h": r[35] if len(r) > 35 else None,
+                "peak_mult_4h": r[36] if len(r) > 36 else None,
+                "min_mc_4h": r[37] if len(r) > 37 else None,
+                "min_dd_4h_pct": r[38] if len(r) > 38 else None,
+                "pre_peak_low_mc_4h": r[39] if len(r) > 39 else None,
+                "pre_peak_dd_4h_pct": r[40] if len(r) > 40 else None,
+                "path_4h": r[41] if len(r) > 41 else None,
+                "perf_checked_stage": r[42] if len(r) > 42 else 0,
             } for r in rows]
 
         USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
@@ -4607,15 +4824,19 @@ def get_token_wallet_data():
 def trigger_supabase_wallet_sync():
     try:
         full_sync = request.args.get('full') == 'true' or (request.is_json and request.json.get('full', False))
-        synced_count = sync_wallet_payments_from_supabase(limit_records=1000, full_sync=full_sync)
+        synced_wp = sync_wallet_payments_from_supabase(limit_records=1000, full_sync=full_sync)
+        synced_dv = sync_dex_validated_from_supabase(full_sync=full_sync)
+        synced_count = synced_wp + synced_dv
         with db_lock:
             conn = get_db()
             cnt = conn.cursor().execute("SELECT COUNT(*) FROM wallet_payments").fetchone()[0]
+            dv_cnt = conn.cursor().execute("SELECT COUNT(*) FROM dex_validated").fetchone()[0]
         return jsonify({
             "success": True,
             "message": f"Synced {synced_count} records from Supabase",
             "synced_count": synced_count,
-            "count": cnt
+            "count": cnt,
+            "dex_validated_count": dv_cnt
         })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
@@ -5484,13 +5705,17 @@ def get_dex_validated_records():
         valid_sorts = {
             'id': 'id',
             'timestamp': ts_expr,
-            'token_name': 'name',
-            'name': 'name',
+            'token_name': 'LOWER(COALESCE(name, ""))',
+            'name': 'LOWER(COALESCE(name, ""))',
+            'ca': 'LOWER(COALESCE(ca, ""))',
+            'category': 'LOWER(COALESCE(signal_type, migration_status, ""))',
+            'signal_type': 'LOWER(COALESCE(signal_type, ""))',
             'perf_5m': 'perf_5m',
             'perf_1h': 'perf_1h',
             'perf_6h': 'perf_6h',
             'perf_24h': 'perf_24h',
-            'status': 'status',
+            'status': 'LOWER(COALESCE(status, ""))',
+            'reason': 'LOWER(COALESCE(reason, ""))',
             'market_cap': 'parse_mc_usd(market_cap)',
             'liquidity_usd': 'liquidity_usd',
             'volume_5m': 'volume_5m',
@@ -5500,6 +5725,14 @@ def get_dex_validated_records():
             'age': 'parse_creation_age_minutes(age, formatted_message)',
             'creation_age': 'parse_creation_age_minutes(age, formatted_message)',
             'migration_age': 'parse_migration_age_minutes(NULL, formatted_message)',
+            'peak_mult_1h': 'peak_mult_1h',
+            'peak_mult_4h': 'peak_mult_4h',
+            'max_mc_1h': 'max_mc_1h',
+            'max_mc_4h': 'max_mc_4h',
+            'pre_peak_dd_1h_pct': 'pre_peak_dd_1h_pct',
+            'pre_peak_dd_4h_pct': 'pre_peak_dd_4h_pct',
+            'min_dd_1h_pct': 'min_dd_1h_pct',
+            'min_dd_4h_pct': 'min_dd_4h_pct',
         }
         order_col = valid_sorts.get(sort_by, 'id')
 
@@ -5653,6 +5886,8 @@ def get_dex_validated_records():
             where_clauses.append("NOT ((COALESCE(name, '') || '\n' || COALESCE(reason, '') || '\n' || COALESCE(formatted_message, '')) REGEXP ?)")
             params.append(word_filter)
 
+        append_post_signal_outcome_filters(request.args, where_clauses, params)
+
         where_str = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
         with db_lock:
@@ -5696,7 +5931,10 @@ def get_dex_validated_records():
                        status, dex_url, migration_status, signal_type,
                        payment_timestamp, order_status, published_at, fetched_at,
                        detection_seconds, reason, formatted_message, created_at,
-                       {ts_expr} AS event_ts
+                       {ts_expr} AS event_ts,
+                       max_mc_1h, peak_mult_1h, min_mc_1h, min_dd_1h_pct, pre_peak_low_mc_1h, pre_peak_dd_1h_pct, path_1h,
+                       max_mc_4h, peak_mult_4h, min_mc_4h, min_dd_4h_pct, pre_peak_low_mc_4h, pre_peak_dd_4h_pct, path_4h,
+                       perf_checked_stage
                 FROM dex_validated
                 {where_str}
                 ORDER BY {order_col} {sort_order} NULLS LAST
@@ -5735,6 +5973,21 @@ def get_dex_validated_records():
                 "formatted_message": r[25],
                 "created_at": r[26],
                 "timestamp": r[27],
+                "max_mc_1h": r[28] if len(r) > 28 else None,
+                "peak_mult_1h": r[29] if len(r) > 29 else None,
+                "min_mc_1h": r[30] if len(r) > 30 else None,
+                "min_dd_1h_pct": r[31] if len(r) > 31 else None,
+                "pre_peak_low_mc_1h": r[32] if len(r) > 32 else None,
+                "pre_peak_dd_1h_pct": r[33] if len(r) > 33 else None,
+                "path_1h": r[34] if len(r) > 34 else None,
+                "max_mc_4h": r[35] if len(r) > 35 else None,
+                "peak_mult_4h": r[36] if len(r) > 36 else None,
+                "min_mc_4h": r[37] if len(r) > 37 else None,
+                "min_dd_4h_pct": r[38] if len(r) > 38 else None,
+                "pre_peak_low_mc_4h": r[39] if len(r) > 39 else None,
+                "pre_peak_dd_4h_pct": r[40] if len(r) > 40 else None,
+                "path_4h": r[41] if len(r) > 41 else None,
+                "perf_checked_stage": r[42] if len(r) > 42 else 0,
             }
             raw_msg = row_dict.get("formatted_message") or ""
             mig_status = str(row_dict.get("migration_status") or "")
@@ -5964,6 +6217,539 @@ async def cto_auto_scanner_loop():
         for category, order_type, ws_url, _ in DEX_VALIDATED_FEED_SPECS
     ))
 
+
+# ==========================================
+# Post-Signal 1h & 4h OHLCV Peak & Trajectory Engine
+# ==========================================
+perf_scanner_lock = threading.RLock()
+perf_scanner_runtime = {
+    'running': False,
+    'last_run_at': None,
+    'next_run_at': None,
+    'last_batch_updated': 0,
+    'total_updated': 0,
+    'last_error': None,
+}
+_ohlcv_pool_cache = OrderedDict()
+
+
+def _cache_ohlcv_get(key):
+    val = _ohlcv_pool_cache.get(key)
+    if val is not None:
+        _ohlcv_pool_cache.move_to_end(key)
+    return val
+
+
+def _cache_ohlcv_set(key, val):
+    _ohlcv_pool_cache[key] = val
+    _ohlcv_pool_cache.move_to_end(key)
+    while len(_ohlcv_pool_cache) > 600:
+        _ohlcv_pool_cache.popitem(last=False)
+
+
+def _fetch_dexscreener_pools_batch_sync(ca_list):
+    """Fetch primary Solana pool addresses and live MC/price for up to 30 CAs in one HTTP request."""
+    result_map = {}
+    if not ca_list:
+        return result_map
+    for idx in range(0, len(ca_list), 30):
+        chunk = [c for c in ca_list[idx:idx + 30] if c]
+        if not chunk:
+            continue
+        url = f"https://api.dexscreener.com/latest/dex/tokens/{','.join(chunk)}"
+        try:
+            res = requests.get(url, timeout=12)
+            if res.status_code != 200:
+                continue
+            payload = res.json()
+            pairs = payload.get('pairs') if isinstance(payload, dict) else []
+            if not isinstance(pairs, list):
+                continue
+            by_ca = {}
+            for p in pairs:
+                if not isinstance(p, dict):
+                    continue
+                if str(p.get('chainId') or '').lower() != 'solana':
+                    continue
+                base_addr = (p.get('baseToken') or {}).get('address')
+                if not base_addr:
+                    continue
+                by_ca.setdefault(base_addr, []).append(p)
+
+            for ca, ca_pairs in by_ca.items():
+                ca_pairs.sort(
+                    key=lambda x: (
+                        float((x.get('liquidity') or {}).get('usd') or 0.0),
+                        float((x.get('volume') or {}).get('h24') or 0.0),
+                    ),
+                    reverse=True,
+                )
+                top = ca_pairs[0]
+                mc_now = float(top.get('marketCap') or top.get('fdv') or 0.0)
+                price_now = float(top.get('priceUsd') or 0.0)
+                supply = (mc_now / price_now) if (mc_now > 0 and price_now > 0) else 1_000_000_000.0
+                pools = []
+                for p in ca_pairs[:3]:
+                    pa = p.get('pairAddress')
+                    if pa and pa not in pools:
+                        pools.append(pa)
+                result_map[ca] = {
+                    'pools': pools,
+                    'mc_now': mc_now,
+                    'price_now': price_now,
+                    'supply': supply,
+                }
+        except Exception as e:
+            debug_log(f"[PERF SCANNER] DexScreener batch lookup error: {e}")
+    return result_map
+
+
+async def _fetch_geckoterminal_ohlcv(pool_address, t0, now_ts):
+    """Fetch chronological 1m OHLCV candles from GeckoTerminal free v2 API covering [t0, t0 + 4h] (with 5m/15m/1h fallback for older tokens)."""
+    if not pool_address:
+        return []
+    before_ts = min(int(now_ts) + 120, int(t0) + 14400 + 300)
+    # limit=300 covers 5 hours of 1m candles, so signals on the same pool within a 1-hour bucket share the response
+    bucket_key = ('1m_v2', pool_address, before_ts // 3600)
+    cached = _cache_ohlcv_get(bucket_key)
+    if cached is not None:
+        return cached
+
+    headers = {'Accept': 'application/json;version=20230302'}
+    age_days = (now_ts - t0) / 86400.0
+    endpoints = []
+    # Primary: 1-minute candles (limit=300 covers 300 minutes = 5 hours in a single call, capturing the exact signal minute)
+    if age_days <= 5.0:
+        endpoints.append(f"https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool_address}/ohlcv/minute?aggregate=1&before_timestamp={before_ts}&limit=300")
+    elif age_days <= 12.0:
+        endpoints.append(f"https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool_address}/ohlcv/minute?aggregate=5&before_timestamp={before_ts + 600}&limit=100")
+    elif age_days <= 25.0:
+        endpoints.append(f"https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool_address}/ohlcv/minute?aggregate=15&before_timestamp={before_ts + 900}&limit=100")
+    else:
+        endpoints.append(f"https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool_address}/ohlcv/hour?aggregate=1&before_timestamp={before_ts + 3600}&limit=100")
+
+    t0_min = (int(t0) // 60) * 60
+    for url in endpoints:
+        await asyncio.sleep(2.05)  # Respect GeckoTerminal 30 req/min free rate limit
+        try:
+            res = await asyncio.to_thread(requests.get, url, headers=headers, timeout=12)
+            if res.status_code == 404:
+                break
+            if res.status_code == 429:
+                await asyncio.sleep(8.0)
+                res = await asyncio.to_thread(requests.get, url, headers=headers, timeout=12)
+            if res.status_code != 200:
+                continue
+            payload = res.json()
+            raw_list = ((payload.get('data') or {}).get('attributes') or {}).get('ohlcv_list') or []
+            if not raw_list:
+                continue
+            # Sort ascending by timestamp: [ts, open, high, low, close, volume]
+            candles = sorted(
+                [c for c in raw_list if isinstance(c, list) and len(c) >= 5],
+                key=lambda c: int(c[0] or 0)
+            )
+            in_range = [c for c in candles if (t0_min - 3600) <= int(c[0]) <= (t0 + 14400 + 3600)]
+            if in_range:
+                _cache_ohlcv_set(bucket_key, candles)
+                return candles
+        except Exception as e:
+            debug_log(f"[PERF SCANNER] GeckoTerminal OHLCV error for pool {pool_address}: {e}")
+
+    _cache_ohlcv_set(bucket_key, [])
+    return []
+
+
+def compute_window_peak_and_trajectory(entry_mc, t0, window_sec, candles, supply, mc_now=0.0, age_sec=0):
+    """Compute Max MC, Peak Multiplier, Min MC, Pre-Peak Drawdown, and Path (Pump->Dump vs Dip->Pump) for [t0, t0+window_sec]."""
+    if not entry_mc or entry_mc <= 0:
+        return None
+
+    t0_int = int(t0)
+    t0_min = (t0_int // 60) * 60  # Exact 1-minute bucket when the signal was sent (e.g. 02:32:00 for 02:32:25)
+    t0_5m = (t0_int // 300) * 300  # Fallback 5-minute bucket if 1m candles were unavailable
+    win_end = t0_int + window_sec
+
+    # Primary: start at the exact 1-minute candle of the signal [t0_min, win_end]
+    win_candles = [c for c in (candles or []) if t0_min <= int(c[0]) <= win_end]
+    # If the first returned candle starts > 60s after t0_min (meaning 5m/15m fallback candles were returned),
+    # include the enclosing 5-minute bucket (e.g. 02:30 for a 02:32 signal) so the first minutes are never skipped
+    if candles and (not win_candles or int(win_candles[0][0]) > t0_min + 60):
+        fallback_5m = [c for c in candles if t0_5m <= int(c[0]) <= win_end]
+        if fallback_5m:
+            win_candles = fallback_5m
+    if not win_candles:
+        win_candles = [c for c in (candles or []) if (t0_int - 900) <= int(c[0]) <= (win_end + 300)]
+    if not win_candles and candles:
+        win_candles = [c for c in candles if (t0_int - 3600) <= int(c[0]) <= (win_end + 3600)]
+
+    scaled = []
+    if win_candles:
+        first_open = float(win_candles[0][1] or 0.0)
+        eff_supply = float(supply or 0.0)
+        if first_open > 0:
+            implied_entry = first_open * eff_supply
+            # If effective supply doesn't align with entry_mc (e.g. burned supply or dead pool), calibrate to entry_mc
+            if eff_supply <= 0 or implied_entry <= 0 or (implied_entry / entry_mc > 4.5) or (implied_entry / entry_mc < 0.22):
+                eff_supply = entry_mc / first_open
+
+        for idx, c in enumerate(win_candles):
+            c_ts = int(c[0])
+            o_mc = float(c[1] or 0.0) * eff_supply
+            h_mc = float(c[2] or 0.0) * eff_supply
+            l_mc = float(c[3] or 0.0) * eff_supply
+            cl_mc = float(c[4] or 0.0) * eff_supply
+            # If the first candle started before t0 (e.g. 02:32:00 vs 02:32:45 or 5m fallback 02:30 vs 02:32),
+            # prevent a pre-signal dump from registering as a fake post-signal high
+            if idx == 0 and c_ts < t0_int and o_mc > entry_mc * 1.20 and cl_mc <= entry_mc * 1.15:
+                h_mc = max(entry_mc, cl_mc)
+            if h_mc > 0 and l_mc > 0:
+                scaled.append({
+                    'ts': c_ts,
+                    'open_mc': o_mc,
+                    'high_mc': h_mc,
+                    'low_mc': l_mc,
+                    'close_mc': cl_mc,
+                })
+
+    if not scaled:
+        # Fallback when pool has no OHLCV candles (e.g. rugged/dead pool or unindexed curve)
+        fallback_mc = float(mc_now or 0.0)
+        max_mc = round(max(entry_mc, fallback_mc), 2) if fallback_mc > entry_mc else round(fallback_mc if fallback_mc > 0 else entry_mc, 2)
+        peak_mult = round(max_mc / entry_mc, 2)
+        min_mc = round(min(entry_mc, fallback_mc), 2)
+        min_dd_pct = round(min(0.0, ((min_mc - entry_mc) / entry_mc) * 100.0), 2)
+        pre_low = round(entry_mc if fallback_mc >= entry_mc else fallback_mc, 2)
+        pre_dd_pct = round(min(0.0, ((pre_low - entry_mc) / entry_mc) * 100.0), 2)
+        path = 'DIRECT_PUMP' if peak_mult >= 1.15 else ('STRAIGHT_DUMP' if min_dd_pct <= -15.0 else 'FLAT')
+        return {
+            'max_mc': max_mc,
+            'peak_mult': peak_mult,
+            'min_mc': min_mc,
+            'min_dd_pct': min_dd_pct,
+            'pre_peak_low_mc': pre_low,
+            'pre_peak_dd_pct': pre_dd_pct,
+            'path': path,
+        }
+
+    k_peak = max(range(len(scaled)), key=lambda i: scaled[i]['high_mc'])
+    max_mc = round(scaled[k_peak]['high_mc'], 2)
+    peak_mult = round(max_mc / entry_mc, 2)
+
+    min_mc = round(min(c['low_mc'] for c in scaled), 2)
+    min_dd_pct = round(min(0.0, ((min_mc - entry_mc) / entry_mc) * 100.0), 2)
+
+    # Lowest MC strictly before (or on the dip of) the peak candle
+    pre_candidates = [entry_mc] + [c['low_mc'] for c in scaled[:k_peak]]
+    peak_candle = scaled[k_peak]
+    if peak_candle['close_mc'] >= peak_candle['open_mc']:
+        pre_candidates.append(peak_candle['low_mc'])
+    else:
+        pre_candidates.append(peak_candle['open_mc'])
+
+    pre_peak_low_mc = round(min(pre_candidates), 2)
+    pre_peak_dd_pct = round(min(0.0, ((pre_peak_low_mc - entry_mc) / entry_mc) * 100.0), 2)
+
+    post_peak_low_mc = min(c['low_mc'] for c in scaled[k_peak:])
+
+    if peak_mult < 1.12:
+        path = 'STRAIGHT_DUMP' if min_dd_pct <= -15.0 else 'FLAT'
+    else:
+        if pre_peak_dd_pct <= -15.0:
+            path = 'DIP_THEN_PUMP'
+        elif post_peak_low_mc <= max_mc * 0.55 or post_peak_low_mc <= entry_mc * 0.85:
+            path = 'PUMP_THEN_DUMP'
+        else:
+            path = 'DIRECT_PUMP'
+
+    return {
+        'max_mc': max_mc,
+        'peak_mult': peak_mult,
+        'min_mc': min_mc,
+        'min_dd_pct': min_dd_pct,
+        'pre_peak_low_mc': pre_peak_low_mc,
+        'pre_peak_dd_pct': pre_peak_dd_pct,
+        'path': path,
+    }
+
+
+def _persist_row_perf_metrics(table_name, row_info, metrics_payload):
+    """Write computed 1h/4h peak & drawdown metrics directly to Supabase first, then mirror to in-memory index."""
+    row_id = row_info['id']
+    if supabase_client:
+        try:
+            if table_name == 'wallet_payments':
+                res = supabase_client.table('wallet_payments').update(metrics_payload).eq('id', row_id).execute()
+                if (not res.data) and row_info.get('signature'):
+                    supabase_client.table('wallet_payments').update(metrics_payload).eq('signature', row_info['signature']).execute()
+            elif table_name == 'dex_validated':
+                res = supabase_client.table('dex_validated').update(metrics_payload).eq('id', row_id).execute()
+                if not res.data:
+                    q = (
+                        supabase_client.table('dex_validated')
+                        .update(metrics_payload)
+                        .eq('ca', row_info['ca'])
+                        .eq('signal_type', row_info.get('signal_type') or '')
+                        .eq('order_status', row_info.get('order_status') or 'approved')
+                    )
+                    if row_info.get('payment_timestamp') is not None:
+                        q = q.eq('payment_timestamp', row_info.get('payment_timestamp'))
+                    q.execute()
+        except Exception as e:
+            debug_log(f"[PERF SCANNER] Supabase direct update notice on {table_name}#{row_id}: {e}")
+
+    set_cols = ", ".join(f"{k}=?" for k in metrics_payload.keys())
+    vals = list(metrics_payload.values()) + [row_id]
+    with db_lock:
+        conn = get_db()
+        conn.cursor().execute(f"UPDATE {table_name} SET {set_cols} WHERE id=?", vals)
+        conn.commit()
+
+
+async def scan_post_signal_performance_batch(max_rows_per_table=60):
+    """Scan due rows in dex_validated and wallet_payments using DexScreener + GeckoTerminal OHLCV candles."""
+    with perf_scanner_lock:
+        if perf_scanner_runtime['running']:
+            return {'updated': 0, 'status': 'already_running'}
+        perf_scanner_runtime['running'] = True
+        perf_scanner_runtime['last_error'] = None
+
+    updated_count = 0
+    try:
+        now_ts = int(time.time())
+        due_items = []
+
+        dv_ts_expr = (
+            "(CASE "
+            "WHEN COALESCE(fetched_at, 0) > 1000000000000 THEN fetched_at / 1000 "
+            "WHEN COALESCE(published_at, 0) > 1000000000000 THEN published_at / 1000 "
+            "WHEN COALESCE(payment_timestamp, 0) > 1000000000000 THEN payment_timestamp / 1000 "
+            "ELSE CAST(COALESCE(strftime('%s', created_at), 0) AS INTEGER) END)"
+        )
+        wp_ts_expr = (
+            "(CASE "
+            "WHEN COALESCE(timestamp, 0) > 1000000000000 THEN timestamp / 1000 "
+            "WHEN COALESCE(timestamp, 0) > 0 THEN timestamp "
+            "ELSE CAST(COALESCE(strftime('%s', created_at), 0) AS INTEGER) END)"
+        )
+
+        with db_lock:
+            conn = get_db()
+            cursor = conn.cursor()
+
+            dv_rows = cursor.execute(f"""
+                SELECT id, ca, market_cap, signal_type, payment_timestamp, order_status,
+                       {dv_ts_expr} AS event_ts,
+                       COALESCE(perf_checked_stage, 0) AS stage,
+                       max_mc_1h, peak_mult_1h, min_mc_1h, min_dd_1h_pct, pre_peak_low_mc_1h, pre_peak_dd_1h_pct, path_1h
+                FROM dex_validated
+                WHERE ca IS NOT NULL AND TRIM(ca) != ''
+                  AND market_cap IS NOT NULL AND TRIM(market_cap) != '' AND UPPER(TRIM(market_cap)) != 'UNKNOWN'
+                  AND (
+                      (COALESCE(perf_checked_stage, 0) = 0 AND ({now_ts} - {dv_ts_expr}) >= 3600)
+                      OR (COALESCE(perf_checked_stage, 0) = 1 AND ({now_ts} - {dv_ts_expr}) >= 14400)
+                  )
+                ORDER BY id DESC
+                LIMIT ?
+            """, (max_rows_per_table,)).fetchall()
+
+            dv_list = []
+            for r in dv_rows:
+                rd = dict(r) if isinstance(r, dict) else {
+                    'id': r[0], 'ca': r[1], 'market_cap': r[2], 'signal_type': r[3],
+                    'payment_timestamp': r[4], 'order_status': r[5], 'event_ts': r[6], 'stage': r[7],
+                    'max_mc_1h': r[8], 'peak_mult_1h': r[9], 'min_mc_1h': r[10], 'min_dd_1h_pct': r[11],
+                    'pre_peak_low_mc_1h': r[12], 'pre_peak_dd_1h_pct': r[13], 'path_1h': r[14],
+                }
+                rd['table'] = 'dex_validated'
+                dv_list.append(rd)
+
+            wp_rows = cursor.execute(f"""
+                SELECT id, ca, market_cap, signature,
+                       {wp_ts_expr} AS event_ts,
+                       COALESCE(perf_checked_stage, 0) AS stage,
+                       max_mc_1h, peak_mult_1h, min_mc_1h, min_dd_1h_pct, pre_peak_low_mc_1h, pre_peak_dd_1h_pct, path_1h
+                FROM wallet_payments
+                WHERE ca IS NOT NULL AND TRIM(ca) != ''
+                  AND token_name IS NOT NULL AND TRIM(token_name) != ''
+                  AND UPPER(TRIM(token_name)) NOT IN ('SOL', 'USDT', 'USDC', 'WSOL', 'WRAPPED SOL', 'UNKNOWN')
+                  AND market_cap IS NOT NULL AND TRIM(market_cap) != '' AND UPPER(TRIM(market_cap)) != 'UNKNOWN'
+                  AND (
+                      (COALESCE(perf_checked_stage, 0) = 0 AND ({now_ts} - {wp_ts_expr}) >= 3600)
+                      OR (COALESCE(perf_checked_stage, 0) = 1 AND ({now_ts} - {wp_ts_expr}) >= 14400)
+                  )
+                ORDER BY id DESC
+                LIMIT ?
+            """, (max_rows_per_table,)).fetchall()
+
+            wp_list = []
+            for r in wp_rows:
+                rd = dict(r) if isinstance(r, dict) else {
+                    'id': r[0], 'ca': r[1], 'market_cap': r[2], 'signature': r[3],
+                    'event_ts': r[4], 'stage': r[5],
+                    'max_mc_1h': r[6], 'peak_mult_1h': r[7], 'min_mc_1h': r[8], 'min_dd_1h_pct': r[9],
+                    'pre_peak_low_mc_1h': r[10], 'pre_peak_dd_1h_pct': r[11], 'path_1h': r[12],
+                }
+                rd['table'] = 'wallet_payments'
+                wp_list.append(rd)
+
+            # Prioritize completing all due dex_validated rows first, then wallet_payments
+            if dv_list:
+                due_items.extend(dv_list)
+            else:
+                due_items.extend(wp_list)
+
+        if not due_items:
+            with perf_scanner_lock:
+                perf_scanner_runtime['last_run_at'] = datetime.now(timezone.utc).isoformat()
+                perf_scanner_runtime['last_batch_updated'] = 0
+            return {'updated': 0, 'status': 'up_to_date'}
+
+        unique_cas = list(dict.fromkeys(item['ca'] for item in due_items if item.get('ca')))
+        pool_map = await asyncio.to_thread(_fetch_dexscreener_pools_batch_sync, unique_cas)
+
+        for item in due_items:
+            ca = item['ca']
+            entry_mc = parse_mc_usd(item.get('market_cap'))
+            t0 = int(item.get('event_ts') or 0)
+            if entry_mc <= 0 or t0 <= 0:
+                _persist_row_perf_metrics(item['table'], item, {'perf_checked_stage': 2})
+                continue
+
+            age_sec = now_ts - t0
+            token_meta = pool_map.get(ca) or {'pools': [], 'mc_now': 0.0, 'price_now': 0.0, 'supply': 1_000_000_000.0}
+            pools = token_meta.get('pools') or []
+            supply = token_meta.get('supply') or 1_000_000_000.0
+            mc_now = token_meta.get('mc_now') or 0.0
+
+            candles = []
+            for pool_addr in pools[:1]:
+                candles = await _fetch_geckoterminal_ohlcv(pool_addr, t0, now_ts)
+                if candles:
+                    break
+
+            payload = {}
+            # Compute 1h metrics if not computed yet
+            if item.get('stage', 0) == 0 or item.get('max_mc_1h') is None:
+                m1 = compute_window_peak_and_trajectory(entry_mc, t0, 3600, candles, supply, mc_now=mc_now, age_sec=age_sec)
+                if m1:
+                    payload.update({
+                        'max_mc_1h': m1['max_mc'],
+                        'peak_mult_1h': m1['peak_mult'],
+                        'min_mc_1h': m1['min_mc'],
+                        'min_dd_1h_pct': m1['min_dd_pct'],
+                        'pre_peak_low_mc_1h': m1['pre_peak_low_mc'],
+                        'pre_peak_dd_1h_pct': m1['pre_peak_dd_pct'],
+                        'path_1h': m1['path'],
+                    })
+            else:
+                m1 = {
+                    'max_mc': float(item.get('max_mc_1h') or entry_mc),
+                    'peak_mult': float(item.get('peak_mult_1h') or 1.0),
+                    'min_mc': float(item.get('min_mc_1h') or entry_mc),
+                    'min_dd_pct': float(item.get('min_dd_1h_pct') or 0.0),
+                    'pre_peak_low_mc': float(item.get('pre_peak_low_mc_1h') or entry_mc),
+                    'pre_peak_dd_pct': float(item.get('pre_peak_dd_1h_pct') or 0.0),
+                    'path': item.get('path_1h') or 'FLAT',
+                }
+
+            # Compute 4h metrics if at least 4 hours old
+            if age_sec >= 14400:
+                m4 = compute_window_peak_and_trajectory(entry_mc, t0, 14400, candles, supply, mc_now=mc_now, age_sec=age_sec)
+                if m4 and m1:
+                    # Guarantee mathematical consistency: 4h window includes 1h window
+                    if m1['max_mc'] >= m4['max_mc']:
+                        m4['max_mc'] = m1['max_mc']
+                        m4['peak_mult'] = m1['peak_mult']
+                        m4['pre_peak_low_mc'] = m1['pre_peak_low_mc']
+                        m4['pre_peak_dd_pct'] = m1['pre_peak_dd_pct']
+                    if m1['min_mc'] < m4['min_mc']:
+                        m4['min_mc'] = m1['min_mc']
+                        m4['min_dd_pct'] = m1['min_dd_pct']
+                if m4:
+                    payload.update({
+                        'max_mc_4h': m4['max_mc'],
+                        'peak_mult_4h': m4['peak_mult'],
+                        'min_mc_4h': m4['min_mc'],
+                        'min_dd_4h_pct': m4['min_dd_pct'],
+                        'pre_peak_low_mc_4h': m4['pre_peak_low_mc'],
+                        'pre_peak_dd_4h_pct': m4['pre_peak_dd_pct'],
+                        'path_4h': m4['path'],
+                        'perf_checked_stage': 2,
+                    })
+            else:
+                payload['perf_checked_stage'] = 1
+
+            if payload:
+                _persist_row_perf_metrics(item['table'], item, payload)
+                updated_count += 1
+
+        with perf_scanner_lock:
+            perf_scanner_runtime['last_run_at'] = datetime.now(timezone.utc).isoformat()
+            perf_scanner_runtime['last_batch_updated'] = updated_count
+            perf_scanner_runtime['total_updated'] += updated_count
+
+        debug_log(f"[PERF SCANNER] Completed OHLCV peak scan pass: updated {updated_count} rows.")
+        return {'updated': updated_count, 'status': 'completed'}
+    except Exception as e:
+        import traceback
+        print(f"[PERF SCANNER] Error in scan_post_signal_performance_batch: {traceback.format_exc()}", flush=True)
+        with perf_scanner_lock:
+            perf_scanner_runtime['last_error'] = str(e)
+        return {'updated': updated_count, 'status': 'error', 'error': str(e)}
+    finally:
+        with perf_scanner_lock:
+            perf_scanner_runtime['running'] = False
+
+
+async def post_signal_perf_loop():
+    """Hourly background scanner (with continuous historical backfill) for 1h & 4h OHLCV Peak & Trajectory metrics."""
+    print("[PERF SCANNER] Started 1h/4h OHLCV Peak & Trajectory background scanner.", flush=True)
+    await asyncio.sleep(5)
+    while True:
+        try:
+            res = await scan_post_signal_performance_batch(max_rows_per_table=100)
+            updated = int(res.get('updated') or 0)
+            # Continue backfilling with a 5s pause whenever any due rows were updated; once caught up, run every 15 minutes
+            wait_seconds = 5 if updated > 0 else 900
+            with perf_scanner_lock:
+                perf_scanner_runtime['next_run_at'] = datetime.fromtimestamp(time.time() + wait_seconds, tz=timezone.utc).isoformat()
+            await asyncio.sleep(wait_seconds)
+        except Exception as e:
+            print(f"[PERF SCANNER] Loop error: {e}", flush=True)
+            await asyncio.sleep(120)
+
+
+@app.route('/api/performance/status', methods=['GET'])
+def get_performance_scanner_status():
+    with perf_scanner_lock:
+        rt = dict(perf_scanner_runtime)
+    try:
+        with db_lock:
+            conn = get_db()
+            cur = conn.cursor()
+            dv_done = cur.execute("SELECT COUNT(*) FROM dex_validated WHERE COALESCE(perf_checked_stage, 0) > 0").fetchone()[0]
+            wp_done = cur.execute("SELECT COUNT(*) FROM wallet_payments WHERE COALESCE(perf_checked_stage, 0) > 0").fetchone()[0]
+        rt['dex_validated_checked'] = dv_done
+        rt['wallet_payments_checked'] = wp_done
+    except Exception:
+        pass
+    return jsonify({'success': True, 'status': rt})
+
+
+@app.route('/api/performance/scan', methods=['POST'])
+def trigger_performance_scan_now():
+    batch_size = int((request.json or {}).get('batch_size', 40)) if request.is_json else 40
+    batch_size = min(max(10, batch_size), 120)
+    with perf_scanner_lock:
+        if perf_scanner_runtime['running']:
+            return jsonify({'success': True, 'message': '1h/4h OHLCV Peak scan is already running in the background.', 'status': dict(perf_scanner_runtime)})
+    if telethon_loop and telethon_loop.is_running():
+        asyncio.run_coroutine_threadsafe(scan_post_signal_performance_batch(max_rows_per_table=batch_size), telethon_loop)
+    else:
+        threading.Thread(target=lambda: asyncio.run(scan_post_signal_performance_batch(max_rows_per_table=batch_size)), daemon=True).start()
+    return jsonify({'success': True, 'message': f'Started 1h/4h OHLCV Peak & Trajectory scan (up to {batch_size} rows per table).'})
+
 def run_flask_app():
     port = int(os.environ.get("PORT", 5000))
     print(f"Starting Web Dashboard on http://localhost:{port}")
@@ -6084,6 +6870,7 @@ async def main():
     asyncio.create_task(helius_polling_loop())
     asyncio.create_task(wallet_tracker_polling_loop())
     asyncio.create_task(supabase_sync_loop())
+    asyncio.create_task(post_signal_perf_loop())
 
     try:
         while True:

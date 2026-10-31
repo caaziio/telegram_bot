@@ -1945,6 +1945,8 @@ body {
   border-radius: 14px;
   padding: 1.25rem 1.5rem;
   margin-bottom: 1.5rem;
+  position: relative;
+  z-index: 50;
 }
 
 .filter-grid {
@@ -1962,6 +1964,8 @@ body {
   border-radius: 14px;
   overflow: hidden;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+  position: relative;
+  z-index: 1;
 }
 
 .token-table-scroll {

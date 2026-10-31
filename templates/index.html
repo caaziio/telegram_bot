@@ -7,6 +7,13 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/globals.css') }}?v={{ app_version }}">
     <style>
         .hidden { display: none !important; }
+        .filter-panel { position: relative; z-index: 50; }
+        .token-table-wrapper { position: relative; z-index: 1; }
+        .sortable-th { cursor: pointer; transition: color 0.15s ease, background 0.15s ease; }
+        .sortable-th:hover { color: #67e8f9 !important; background: rgba(6, 182, 212, 0.08) !important; }
+        .sortable-th .sort-arrow { display: inline-block; margin-left: 4px; font-size: 0.72rem; opacity: 0.45; }
+        .sortable-th.sort-active { color: #34d399 !important; }
+        .sortable-th.sort-active .sort-arrow { opacity: 1; color: #34d399; font-weight: 700; }
         
         /* Modal Styles adapted from NextJS */
         .modal-overlay {
@@ -1154,23 +1161,37 @@
                         </div>
                         <div class="form-group" style="margin-bottom: 0; min-width: 165px; flex: 1.2;">
                             <label>Sort By</label>
-                            <select class="form-input" id="td-sort-by" onchange="loadTokenWalletData(1)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white;">
-                                <option value="id_desc">Newest First</option>
-                                <option value="id_asc">Oldest First</option>
-                                <option value="amount_desc">Highest Payment</option>
-                                <option value="perf_5m_desc">Top 5m Gainers</option>
-                                <option value="perf_1h_desc">Top 1h Gainers</option>
-                                <option value="perf_6h_desc">Top 6h Gainers</option>
-                                <option value="perf_24h_desc">Top 24h Gainers</option>
-                                <option value="market_cap_desc">Highest Market Cap</option>
-                                <option value="liquidity_usd_desc">Highest Liquidity</option>
+                            <select class="form-input" id="td-sort-by" onchange="onSortDropdownChange('td')" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white;">
+                                <option value="id_desc">Newest First (Time ↓)</option>
+                                <option value="id_asc">Oldest First (Time ↑)</option>
+                                <option value="peak_mult_1h_desc">Highest 1h Peak (x ↓)</option>
+                                <option value="peak_mult_1h_asc">Lowest 1h Peak (x ↑)</option>
+                                <option value="peak_mult_4h_desc">Highest 4h Peak (x ↓)</option>
+                                <option value="peak_mult_4h_asc">Lowest 4h Peak (x ↑)</option>
+                                <option value="max_mc_1h_desc">Highest 1h Peak MC ($ ↓)</option>
+                                <option value="max_mc_4h_desc">Highest 4h Peak MC ($ ↓)</option>
+                                <option value="pre_peak_dd_1h_pct_desc">Smallest 1h Pre-Peak DD (%)</option>
+                                <option value="pre_peak_dd_4h_pct_desc">Smallest 4h Pre-Peak DD (%)</option>
+                                <option value="amount_desc">Highest Payment ($ ↓)</option>
+                                <option value="amount_asc">Lowest Payment ($ ↑)</option>
+                                <option value="market_cap_desc">Highest Market Cap ($ ↓)</option>
+                                <option value="market_cap_asc">Lowest Market Cap ($ ↑)</option>
+                                <option value="liquidity_usd_desc">Highest Liquidity ($ ↓)</option>
+                                <option value="liquidity_usd_asc">Lowest Liquidity ($ ↑)</option>
                                 <option value="volume_5m_desc">Highest 5m Volume</option>
                                 <option value="volume_1h_desc">Highest 1h Volume</option>
                                 <option value="volume_6h_desc">Highest 6h Volume</option>
                                 <option value="volume_24h_desc">Highest 24h Volume</option>
-                                <option value="age_asc">Youngest Creation Age</option>
-                                <option value="migration_age_asc">Youngest Migration Age</option>
+                                <option value="perf_5m_desc">Top 5m Gainers (% ↓)</option>
+                                <option value="perf_1h_desc">Top 1h Gainers (% ↓)</option>
+                                <option value="perf_6h_desc">Top 6h Gainers (% ↓)</option>
+                                <option value="perf_24h_desc">Top 24h Gainers (% ↓)</option>
+                                <option value="age_asc">Youngest Creation Age (↑)</option>
+                                <option value="age_desc">Oldest Creation Age (↓)</option>
+                                <option value="migration_age_asc">Youngest Migration Age (↑)</option>
                                 <option value="token_name_asc">Token Name (A-Z)</option>
+                                <option value="token_name_desc">Token Name (Z-A)</option>
+                                <option value="status_asc">Status (A-Z)</option>
                             </select>
                         </div>
                     </div>
@@ -1322,6 +1343,58 @@
                         </div>
                     </div>
 
+                    <!-- Row 4: Post-Signal Outcome & Trajectory Filters (1h / 4h Peaks) -->
+                    <div style="background: rgba(16, 185, 129, 0.04); border: 1px solid rgba(16, 185, 129, 0.22); border-radius: 10px; padding: 0.85rem 1rem; margin-bottom: 1rem;">
+                        <div style="font-size: 0.76rem; font-weight: 600; text-transform: uppercase; color: #34d399; letter-spacing: 0.5px; margin-bottom: 0.6rem; display: flex; align-items: center; gap: 6px;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+                            <span>Post-Signal Outcome &amp; Trajectory Filters (1h / 4h OHLCV Performance)</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 1rem; align-items: flex-end;">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Outcome Preset (1h / 4h)</label>
+                                <select class="form-input" id="td-outcome-filter" onchange="loadTokenWalletData(1)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white; padding: 6px 10px; font-size: 0.8rem;">
+                                    <option value="all">All Outcomes</option>
+                                    <option value="winner_any_2x">🔥 Any Winner (1h or 4h ≥ 2x)</option>
+                                    <option value="win_1h_1_5x">🚀 1h Winner (≥ 1.5x)</option>
+                                    <option value="win_1h_2x">🚀 1h Strong (≥ 2x)</option>
+                                    <option value="win_1h_3x">💎 1h 3x+ (≥ 3x)</option>
+                                    <option value="win_1h_5x">🌕 1h Moon (≥ 5x)</option>
+                                    <option value="win_1h_10x">🔥 1h 10x+ (≥ 10x)</option>
+                                    <option value="win_4h_1_5x">🚀 4h Winner (≥ 1.5x)</option>
+                                    <option value="win_4h_2x">🚀 4h Strong (≥ 2x)</option>
+                                    <option value="win_4h_3x">💎 4h 3x+ (≥ 3x)</option>
+                                    <option value="win_4h_5x">🌕 4h Moon (≥ 5x)</option>
+                                    <option value="win_4h_10x">🔥 4h 10x+ (≥ 10x)</option>
+                                    <option value="clean_pump_2x">🛡️ Clean Pump (≥ 2x &amp; Pre-DD &gt; -15%)</option>
+                                    <option value="dumped">📉 Dumped / Failed (&lt; 1.15x)</option>
+                                    <option value="scanned_only">✅ Scanned Only (Has 1h/4h Data)</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Trajectory Path</label>
+                                <select class="form-input" id="td-path-filter" onchange="loadTokenWalletData(1)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white; padding: 6px 10px; font-size: 0.8rem;">
+                                    <option value="all">All Trajectories</option>
+                                    <option value="DIP_THEN_PUMP">Dip → Pump</option>
+                                    <option value="PUMP_THEN_DUMP">Pump → Dump</option>
+                                    <option value="DIRECT_PUMP">Pump &amp; Hold</option>
+                                    <option value="STRAIGHT_DUMP">Dumped</option>
+                                    <option value="FLAT">Flat</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Custom Min Peak Multiplier (x)</label>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <input type="number" step="0.1" class="form-input" id="td-min-peak-1h" placeholder="1h ≥ x (e.g. 2)" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                    <input type="number" step="0.1" class="form-input" id="td-min-peak-4h" placeholder="4h ≥ x (e.g. 3)" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                </div>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Max Pre-Peak Drawdown (%)</label>
+                                <input type="number" step="1" class="form-input" id="td-max-pre-dd" placeholder="e.g. -25 (no worse than -25%)" onchange="loadTokenWalletData(1)" style="padding: 6px 10px; font-size: 0.8rem;" />
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Bottom Action Toolbar -->
                     <div style="display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap; padding-top: 0.5rem;">
                         <div style="display: flex; gap: 1.25rem; align-items: center; flex-wrap: wrap;">
@@ -1332,7 +1405,28 @@
                             <span id="td-active-filters-count" style="font-size: 0.78rem; background: rgba(6, 182, 212, 0.15); color: #22d3ee; padding: 2px 8px; border-radius: 12px; display: none;">0 filters active</span>
                         </div>
 
-                        <div style="display: flex; gap: 10px; align-items: center;">
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                            <div style="position: relative; display: inline-block;">
+                                <button type="button" onclick="toggleTableColumnsMenu('td')" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 4px 11px; color: #e2e8f0; font-size: 0.8rem; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+                                    <span>Table Columns ▾</span>
+                                </button>
+                                <div id="td-columns-menu" class="hidden" style="position: absolute; right: 0; top: 34px; z-index: 1000; width: 255px; background: #111827; border: 1px solid rgba(255,255,255,0.18); border-radius: 10px; padding: 10px 12px; box-shadow: 0 12px 28px rgba(0,0,0,0.65);">
+                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid rgba(255,255,255,0.08);">
+                                        <strong style="font-size:0.76rem; color:#67e8f9;">Select Visible Columns</strong>
+                                        <div style="display:flex; gap:6px;">
+                                            <button type="button" onclick="applyTableColumnPreset('td', 'all')" style="background:none; border:none; color:#34d399; font-size:0.72rem; cursor:pointer; padding:0;">All</button>
+                                            <span style="color:var(--text-muted);">·</span>
+                                            <button type="button" onclick="applyTableColumnPreset('td', 'outcome')" style="background:none; border:none; color:#fbbf24; font-size:0.72rem; cursor:pointer; padding:0;">Outcome Focus</button>
+                                        </div>
+                                    </div>
+                                    <div id="td-columns-checkboxes" style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:0.76rem; color:#e2e8f0;"></div>
+                                </div>
+                            </div>
+                            <button onclick="triggerPostSignalPeakScan(this)" title="Scan 1h & 4h OHLCV Peak Market Caps & Drawdowns for database tokens" style="background: rgba(16, 185, 129, 0.14); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 6px; padding: 4px 11px; color: #6ee7b7; font-size: 0.8rem; font-weight: 500; cursor: pointer; transition: all 0.2s ease; display: inline-flex; align-items: center; gap: 5px;">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+                                <span>Scan 1h/4h Peaks</span>
+                            </button>
                             <button onclick="syncSupabaseData()" id="btn-sync-supabase" title="Pull latest updates from Supabase database" style="background: rgba(6, 182, 212, 0.15); border: 1px solid rgba(6, 182, 212, 0.4); border-radius: 6px; padding: 4px 11px; color: #67e8f9; font-size: 0.8rem; font-weight: 500; cursor: pointer; transition: all 0.2s ease; display: inline-flex; align-items: center; gap: 5px;">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                                 <span>Sync Supabase</span>
@@ -1357,30 +1451,32 @@
                 <!-- Token Data Table -->
                 <div class="token-table-wrapper">
                     <div class="token-table-scroll">
-                        <table class="token-data-table">
+                        <table class="token-data-table" id="token-data-table">
                             <thead>
                                 <tr>
-                                    <th>Time</th>
-                                    <th>Token</th>
-                                    <th>Contract Address</th>
-                                    <th>Payment ($)</th>
-                                    <th>Sender</th>
-                                    <th>Market Cap</th>
-                                    <th>Liquidity</th>
-                                    <th>Volume (5m / 1h / 6h / 24h)</th>
-                                    <th>Age (Create / Mig)</th>
-                                    <th>5m</th>
-                                    <th>1h</th>
-                                    <th>6h</th>
-                                    <th>24h</th>
-                                    <th>Status</th>
-                                    <th>Forwarded Flow</th>
+                                    <th class="sortable-th sort-active" data-sort="id" data-default-dir="desc" onclick="sortTableByColumn('td', 'id', 'desc')">Time<span class="sort-arrow">↓</span></th>
+                                    <th class="sortable-th" data-sort="token_name" data-default-dir="asc" onclick="sortTableByColumn('td', 'token_name', 'asc')">Token<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="ca" data-default-dir="asc" onclick="sortTableByColumn('td', 'ca', 'asc')">Contract Address<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="amount" data-default-dir="desc" onclick="sortTableByColumn('td', 'amount', 'desc')">Payment ($)<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="sender_address" data-default-dir="asc" onclick="sortTableByColumn('td', 'sender_address', 'asc')">Sender<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="market_cap" data-default-dir="desc" onclick="sortTableByColumn('td', 'market_cap', 'desc')">Market Cap<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="liquidity_usd" data-default-dir="desc" onclick="sortTableByColumn('td', 'liquidity_usd', 'desc')">Liquidity<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="volume_24h" data-default-dir="desc" onclick="sortTableByColumn('td', 'volume_24h', 'desc')">Volume (5m / 1h / 6h / 24h)<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="age" data-default-dir="asc" onclick="sortTableByColumn('td', 'age', 'asc')">Age (Create / Mig)<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="perf_5m" data-default-dir="desc" onclick="sortTableByColumn('td', 'perf_5m', 'desc')">5m<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="perf_1h" data-default-dir="desc" onclick="sortTableByColumn('td', 'perf_1h', 'desc')">1h<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="perf_6h" data-default-dir="desc" onclick="sortTableByColumn('td', 'perf_6h', 'desc')">6h<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="perf_24h" data-default-dir="desc" onclick="sortTableByColumn('td', 'perf_24h', 'desc')">24h<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="peak_mult_1h" data-default-dir="desc" onclick="sortTableByColumn('td', 'peak_mult_1h', 'desc')">1h Peak<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="peak_mult_4h" data-default-dir="desc" onclick="sortTableByColumn('td', 'peak_mult_4h', 'desc')">4h Peak<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="status" data-default-dir="asc" onclick="sortTableByColumn('td', 'status', 'asc')">Status<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="reason" data-default-dir="asc" onclick="sortTableByColumn('td', 'reason', 'asc')">Forwarded Flow<span class="sort-arrow">⇅</span></th>
                                     <th style="text-align: right; padding-right: 1.5rem;">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="token-data-tbody">
                                 <tr>
-                                    <td colspan="16" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                                    <td colspan="18" style="text-align: center; padding: 3rem; color: var(--text-muted);">
                                         Loading token wallet data...
                                     </td>
                                 </tr>
@@ -1530,22 +1626,36 @@
                         </div>
                         <div class="form-group" style="margin-bottom: 0; min-width: 165px; flex: 1.2;">
                             <label>Sort By</label>
-                            <select class="form-input" id="dvd-sort-by" onchange="loadDexValidatedTableData(1)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white;">
-                                <option value="id_desc">Newest First</option>
-                                <option value="id_asc">Oldest First</option>
-                                <option value="perf_5m_desc">Top 5m Gainers</option>
-                                <option value="perf_1h_desc">Top 1h Gainers</option>
-                                <option value="perf_6h_desc">Top 6h Gainers</option>
-                                <option value="perf_24h_desc">Top 24h Gainers</option>
-                                <option value="market_cap_desc">Highest Market Cap</option>
-                                <option value="liquidity_usd_desc">Highest Liquidity</option>
+                            <select class="form-input" id="dvd-sort-by" onchange="onSortDropdownChange('dvd')" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white;">
+                                <option value="id_desc">Newest First (Time ↓)</option>
+                                <option value="id_asc">Oldest First (Time ↑)</option>
+                                <option value="peak_mult_1h_desc">Highest 1h Peak (x ↓)</option>
+                                <option value="peak_mult_1h_asc">Lowest 1h Peak (x ↑)</option>
+                                <option value="peak_mult_4h_desc">Highest 4h Peak (x ↓)</option>
+                                <option value="peak_mult_4h_asc">Lowest 4h Peak (x ↑)</option>
+                                <option value="max_mc_1h_desc">Highest 1h Peak MC ($ ↓)</option>
+                                <option value="max_mc_4h_desc">Highest 4h Peak MC ($ ↓)</option>
+                                <option value="pre_peak_dd_1h_pct_desc">Smallest 1h Pre-Peak DD (%)</option>
+                                <option value="pre_peak_dd_4h_pct_desc">Smallest 4h Pre-Peak DD (%)</option>
+                                <option value="market_cap_desc">Highest Market Cap ($ ↓)</option>
+                                <option value="market_cap_asc">Lowest Market Cap ($ ↑)</option>
+                                <option value="liquidity_usd_desc">Highest Liquidity ($ ↓)</option>
+                                <option value="liquidity_usd_asc">Lowest Liquidity ($ ↑)</option>
                                 <option value="volume_5m_desc">Highest 5m Volume</option>
                                 <option value="volume_1h_desc">Highest 1h Volume</option>
                                 <option value="volume_6h_desc">Highest 6h Volume</option>
                                 <option value="volume_24h_desc">Highest 24h Volume</option>
-                                <option value="age_asc">Youngest Creation Age</option>
-                                <option value="migration_age_asc">Youngest Migration Age</option>
+                                <option value="perf_5m_desc">Top 5m Gainers (% ↓)</option>
+                                <option value="perf_1h_desc">Top 1h Gainers (% ↓)</option>
+                                <option value="perf_6h_desc">Top 6h Gainers (% ↓)</option>
+                                <option value="perf_24h_desc">Top 24h Gainers (% ↓)</option>
+                                <option value="age_asc">Youngest Creation Age (↑)</option>
+                                <option value="age_desc">Oldest Creation Age (↓)</option>
+                                <option value="migration_age_asc">Youngest Migration Age (↑)</option>
                                 <option value="token_name_asc">Token Name (A-Z)</option>
+                                <option value="token_name_desc">Token Name (Z-A)</option>
+                                <option value="category_asc">Category (A-Z)</option>
+                                <option value="status_asc">Status (A-Z)</option>
                             </select>
                         </div>
                     </div>
@@ -1677,6 +1787,58 @@
                         </div>
                     </div>
 
+                    <!-- Row 4: Post-Signal Outcome & Trajectory Filters (1h / 4h Peaks) -->
+                    <div style="background: rgba(16, 185, 129, 0.04); border: 1px solid rgba(16, 185, 129, 0.22); border-radius: 10px; padding: 0.85rem 1rem; margin-bottom: 1rem;">
+                        <div style="font-size: 0.76rem; font-weight: 600; text-transform: uppercase; color: #34d399; letter-spacing: 0.5px; margin-bottom: 0.6rem; display: flex; align-items: center; gap: 6px;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+                            <span>Post-Signal Outcome &amp; Trajectory Filters (1h / 4h OHLCV Performance)</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 1rem; align-items: flex-end;">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Outcome Preset (1h / 4h)</label>
+                                <select class="form-input" id="dvd-outcome-filter" onchange="loadDexValidatedTableData(1)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white; padding: 6px 10px; font-size: 0.8rem;">
+                                    <option value="all">All Outcomes</option>
+                                    <option value="winner_any_2x">🔥 Any Winner (1h or 4h ≥ 2x)</option>
+                                    <option value="win_1h_1_5x">🚀 1h Winner (≥ 1.5x)</option>
+                                    <option value="win_1h_2x">🚀 1h Strong (≥ 2x)</option>
+                                    <option value="win_1h_3x">💎 1h 3x+ (≥ 3x)</option>
+                                    <option value="win_1h_5x">🌕 1h Moon (≥ 5x)</option>
+                                    <option value="win_1h_10x">🔥 1h 10x+ (≥ 10x)</option>
+                                    <option value="win_4h_1_5x">🚀 4h Winner (≥ 1.5x)</option>
+                                    <option value="win_4h_2x">🚀 4h Strong (≥ 2x)</option>
+                                    <option value="win_4h_3x">💎 4h 3x+ (≥ 3x)</option>
+                                    <option value="win_4h_5x">🌕 4h Moon (≥ 5x)</option>
+                                    <option value="win_4h_10x">🔥 4h 10x+ (≥ 10x)</option>
+                                    <option value="clean_pump_2x">🛡️ Clean Pump (≥ 2x &amp; Pre-DD &gt; -15%)</option>
+                                    <option value="dumped">📉 Dumped / Failed (&lt; 1.15x)</option>
+                                    <option value="scanned_only">✅ Scanned Only (Has 1h/4h Data)</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Trajectory Path</label>
+                                <select class="form-input" id="dvd-path-filter" onchange="loadDexValidatedTableData(1)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white; padding: 6px 10px; font-size: 0.8rem;">
+                                    <option value="all">All Trajectories</option>
+                                    <option value="DIP_THEN_PUMP">Dip → Pump</option>
+                                    <option value="PUMP_THEN_DUMP">Pump → Dump</option>
+                                    <option value="DIRECT_PUMP">Pump &amp; Hold</option>
+                                    <option value="STRAIGHT_DUMP">Dumped</option>
+                                    <option value="FLAT">Flat</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Custom Min Peak Multiplier (x)</label>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <input type="number" step="0.1" class="form-input" id="dvd-min-peak-1h" placeholder="1h ≥ x (e.g. 2)" onchange="loadDexValidatedTableData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                    <input type="number" step="0.1" class="form-input" id="dvd-min-peak-4h" placeholder="4h ≥ x (e.g. 3)" onchange="loadDexValidatedTableData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                </div>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Max Pre-Peak Drawdown (%)</label>
+                                <input type="number" step="1" class="form-input" id="dvd-max-pre-dd" placeholder="e.g. -25 (no worse than -25%)" onchange="loadDexValidatedTableData(1)" style="padding: 6px 10px; font-size: 0.8rem;" />
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Bottom Action Toolbar -->
                     <div style="display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap; padding-top: 0.5rem;">
                         <div style="display: flex; gap: 1.25rem; align-items: center; flex-wrap: wrap;">
@@ -1684,7 +1846,28 @@
                             <span id="dvd-active-filters-count" style="font-size: 0.78rem; background: rgba(6, 182, 212, 0.15); color: #22d3ee; padding: 2px 8px; border-radius: 12px; display: none;">0 filters active</span>
                         </div>
 
-                        <div style="display: flex; gap: 10px; align-items: center;">
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                            <div style="position: relative; display: inline-block;">
+                                <button type="button" onclick="toggleTableColumnsMenu('dvd')" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 4px 11px; color: #e2e8f0; font-size: 0.8rem; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+                                    <span>Table Columns ▾</span>
+                                </button>
+                                <div id="dvd-columns-menu" class="hidden" style="position: absolute; right: 0; top: 34px; z-index: 1000; width: 255px; background: #111827; border: 1px solid rgba(255,255,255,0.18); border-radius: 10px; padding: 10px 12px; box-shadow: 0 12px 28px rgba(0,0,0,0.65);">
+                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid rgba(255,255,255,0.08);">
+                                        <strong style="font-size:0.76rem; color:#67e8f9;">Select Visible Columns</strong>
+                                        <div style="display:flex; gap:6px;">
+                                            <button type="button" onclick="applyTableColumnPreset('dvd', 'all')" style="background:none; border:none; color:#34d399; font-size:0.72rem; cursor:pointer; padding:0;">All</button>
+                                            <span style="color:var(--text-muted);">·</span>
+                                            <button type="button" onclick="applyTableColumnPreset('dvd', 'outcome')" style="background:none; border:none; color:#fbbf24; font-size:0.72rem; cursor:pointer; padding:0;">Outcome Focus</button>
+                                        </div>
+                                    </div>
+                                    <div id="dvd-columns-checkboxes" style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:0.76rem; color:#e2e8f0;"></div>
+                                </div>
+                            </div>
+                            <button onclick="triggerPostSignalPeakScan(this)" title="Scan 1h & 4h OHLCV Peak Market Caps & Drawdowns for database tokens" style="background: rgba(16, 185, 129, 0.14); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 6px; padding: 4px 11px; color: #6ee7b7; font-size: 0.8rem; font-weight: 500; cursor: pointer; transition: all 0.2s ease; display: inline-flex; align-items: center; gap: 5px;">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+                                <span>Scan 1h/4h Peaks</span>
+                            </button>
                             <button onclick="resetDexValidatedDataFilters()" style="background: none; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 4px 10px; color: var(--text-muted); font-size: 0.8rem; cursor: pointer; transition: all 0.2s ease; display: inline-flex; align-items: center; gap: 5px;">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                                 <span>Reset All Filters</span>
@@ -1705,29 +1888,31 @@
                 <!-- DEX Validated Data Table -->
                 <div class="token-table-wrapper">
                     <div class="token-table-scroll">
-                        <table class="token-data-table">
+                        <table class="token-data-table" id="dex-validated-data-table">
                             <thead>
                                 <tr>
-                                    <th>Time</th>
-                                    <th>Token</th>
-                                    <th>Contract Address</th>
-                                    <th>Category / Order</th>
-                                    <th>Market Cap</th>
-                                    <th>Liquidity</th>
-                                    <th>Volume (5m / 1h / 6h / 24h)</th>
-                                    <th>Age (Create / Mig)</th>
-                                    <th>5m</th>
-                                    <th>1h</th>
-                                    <th>6h</th>
-                                    <th>24h</th>
-                                    <th>Status</th>
-                                    <th>Forwarded Flow</th>
+                                    <th class="sortable-th sort-active" data-sort="id" data-default-dir="desc" onclick="sortTableByColumn('dvd', 'id', 'desc')">Time<span class="sort-arrow">↓</span></th>
+                                    <th class="sortable-th" data-sort="token_name" data-default-dir="asc" onclick="sortTableByColumn('dvd', 'token_name', 'asc')">Token<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="ca" data-default-dir="asc" onclick="sortTableByColumn('dvd', 'ca', 'asc')">Contract Address<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="category" data-default-dir="asc" onclick="sortTableByColumn('dvd', 'category', 'asc')">Category / Order<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="market_cap" data-default-dir="desc" onclick="sortTableByColumn('dvd', 'market_cap', 'desc')">Market Cap<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="liquidity_usd" data-default-dir="desc" onclick="sortTableByColumn('dvd', 'liquidity_usd', 'desc')">Liquidity<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="volume_24h" data-default-dir="desc" onclick="sortTableByColumn('dvd', 'volume_24h', 'desc')">Volume (5m / 1h / 6h / 24h)<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="age" data-default-dir="asc" onclick="sortTableByColumn('dvd', 'age', 'asc')">Age (Create / Mig)<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="perf_5m" data-default-dir="desc" onclick="sortTableByColumn('dvd', 'perf_5m', 'desc')">5m<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="perf_1h" data-default-dir="desc" onclick="sortTableByColumn('dvd', 'perf_1h', 'desc')">1h<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="perf_6h" data-default-dir="desc" onclick="sortTableByColumn('dvd', 'perf_6h', 'desc')">6h<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="perf_24h" data-default-dir="desc" onclick="sortTableByColumn('dvd', 'perf_24h', 'desc')">24h<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="peak_mult_1h" data-default-dir="desc" onclick="sortTableByColumn('dvd', 'peak_mult_1h', 'desc')">1h Peak<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="peak_mult_4h" data-default-dir="desc" onclick="sortTableByColumn('dvd', 'peak_mult_4h', 'desc')">4h Peak<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="status" data-default-dir="asc" onclick="sortTableByColumn('dvd', 'status', 'asc')">Status<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="reason" data-default-dir="asc" onclick="sortTableByColumn('dvd', 'reason', 'asc')">Forwarded Flow<span class="sort-arrow">⇅</span></th>
                                     <th style="text-align: right; padding-right: 1.5rem;">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="dex-validated-data-tbody">
                                 <tr>
-                                    <td colspan="15" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                                    <td colspan="17" style="text-align: center; padding: 3rem; color: var(--text-muted);">
                                         Connecting to DEX Screener WebSocket streams...
                                     </td>
                                 </tr>

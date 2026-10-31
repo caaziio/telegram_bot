@@ -3189,7 +3189,12 @@ function resetTokenFilters() {
         'td-migrated': 'all',
         'td-token-name-mode': 'include',
         'td-token-name-pattern': '',
-        'td-word-filter': ''
+        'td-word-filter': '',
+        'td-outcome-filter': 'all',
+        'td-path-filter': 'all',
+        'td-min-peak-1h': '',
+        'td-min-peak-4h': '',
+        'td-max-pre-dd': ''
     };
     for (const [id, val] of Object.entries(els)) {
         const el = document.getElementById(id);
@@ -3331,12 +3336,19 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
         const tokenNamePattern = String(document.getElementById('td-token-name-pattern')?.value || '').trim();
         const tokenNameMode = document.getElementById('td-token-name-mode')?.value || 'include';
         const wordFilter = String(document.getElementById('td-word-filter')?.value || '').trim();
+        const outcomeFilter = document.getElementById('td-outcome-filter')?.value || 'all';
+        const pathFilter = document.getElementById('td-path-filter')?.value || 'all';
+        const minPeak1h = String(document.getElementById('td-min-peak-1h')?.value || '').trim();
+        const minPeak4h = String(document.getElementById('td-min-peak-4h')?.value || '').trim();
+        const maxPreDd = String(document.getElementById('td-max-pre-dd')?.value || '').trim();
         const workflowId = document.getElementById('td-workflow-preset')?.value || '';
         const limit = document.getElementById('td-limit')?.value || '100';
 
         const lastIdx = sortVal.lastIndexOf('_');
         const sortBy = lastIdx !== -1 ? sortVal.slice(0, lastIdx) : sortVal;
         const sortOrder = lastIdx !== -1 ? sortVal.slice(lastIdx + 1) : 'desc';
+        TABLE_SORT_STATE.td = { sortBy: sortBy || 'id', sortOrder: sortOrder || 'desc' };
+        syncTableHeaderSortIndicators('td', sortBy || 'id', sortOrder || 'desc');
 
         const params = new URLSearchParams({
             page: page,
@@ -3371,6 +3383,11 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
         if (tokenNamePattern) params.append('token_name_pattern', tokenNamePattern);
         if (tokenNameMode) params.append('token_name_mode', tokenNameMode);
         if (wordFilter) params.append('word_filter', wordFilter);
+        if (outcomeFilter && outcomeFilter !== 'all') params.append('outcome_filter', outcomeFilter);
+        if (pathFilter && pathFilter !== 'all') params.append('path_filter', pathFilter);
+        if (minPeak1h) params.append('min_peak_1h', minPeak1h);
+        if (minPeak4h) params.append('min_peak_4h', minPeak4h);
+        if (maxPreDd) params.append('max_pre_dd', maxPreDd);
         if (workflowId) params.append('workflow_id', workflowId);
 
         updateActiveFiltersCount();
@@ -3435,6 +3452,7 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
 
         if (tbody) {
             tbody.innerHTML = payments.map(p => renderTokenRow(p)).join('');
+            applyTableColumnVisibility('td');
         }
 
         renderTokenDataPagination(data.total, payments.length, data.page, data.total_pages);
@@ -3506,6 +3524,316 @@ function formatForwardedFlowsCell(status, rawReason) {
     const fullText = flows.join(', ');
     const badgesHtml = flows.map(name => `<span style="display:inline-block; background:rgba(16,185,129,0.12); color:#6ee7b7; border:1px solid rgba(16,185,129,0.3); padding:1px 7px; border-radius:5px; font-size:0.74rem; font-weight:600; white-space:nowrap;">${escapeHtml(name)}</span>`).join(' ');
     return `<td title="${escapeHtml(fullText)}"><div style="display:flex; flex-wrap:wrap; gap:4px; align-items:center;">${badgesHtml}</div></td>`;
+}
+
+function getRowEventEpochSeconds(row) {
+    const ts = row.timestamp;
+    if (typeof ts === 'number' && ts > 0) {
+        return ts > 1e12 ? Math.floor(ts / 1000) : Math.floor(ts);
+    }
+    if (row.created_at) {
+        const raw = String(row.created_at).trim();
+        const iso = (!raw.endsWith('Z') && !/[+-]\d{2}:?\d{2}$/.test(raw))
+            ? raw.replace(' ', 'T') + 'Z'
+            : raw;
+        const parsed = Date.parse(iso);
+        if (!isNaN(parsed)) return Math.floor(parsed / 1000);
+    }
+    return 0;
+}
+
+function formatCompactMc(val) {
+    if (val === null || val === undefined || val === '') return '-';
+    const num = Number(val);
+    if (!Number.isFinite(num) || num <= 0) return '$0';
+    if (num >= 1e9) return `$${(num / 1e9).toFixed(2)}B`;
+    if (num >= 1e6) return `$${(num / 1e6).toFixed(2)}M`;
+    if (num >= 1e3) return `$${(num / 1e3).toFixed(num >= 1e5 ? 0 : 1)}K`;
+    return `$${num.toFixed(0)}`;
+}
+
+function formatPeakPerformanceCell(row, horizon = '1h') {
+    const is4h = horizon === '4h';
+    const maxMc = is4h ? row.max_mc_4h : row.max_mc_1h;
+    const peakMult = is4h ? row.peak_mult_4h : row.peak_mult_1h;
+    const minMc = is4h ? row.min_mc_4h : row.min_mc_1h;
+    const minDd = is4h ? row.min_dd_4h_pct : row.min_dd_1h_pct;
+    const preLowMc = is4h ? row.pre_peak_low_mc_4h : row.pre_peak_low_mc_1h;
+    const preDd = is4h ? row.pre_peak_dd_4h_pct : row.pre_peak_dd_1h_pct;
+    const pathCode = String((is4h ? row.path_4h : row.path_1h) || '').toUpperCase();
+
+    if (peakMult === null || peakMult === undefined || maxMc === null || maxMc === undefined) {
+        const eventSec = getRowEventEpochSeconds(row);
+        const nowSec = Math.floor(Date.now() / 1000);
+        const reqSec = is4h ? 14400 : 3600;
+        if (eventSec > 0 && (nowSec - eventSec) < reqSec) {
+            const remMin = Math.max(1, Math.ceil((reqSec - (nowSec - eventSec)) / 60));
+            const remStr = remMin >= 60 ? `${Math.floor(remMin / 60)}h ${remMin % 60}m` : `${remMin}m`;
+            return `<td title="Waiting for ${horizon} window to complete (${remStr} left)"><span style="color: var(--text-muted); font-size: 0.75rem; white-space: nowrap;">⏳ ${remStr} left</span></td>`;
+        }
+        return `<td title="Queued for 1h/4h OHLCV Peak scan"><span style="color: var(--text-muted); font-size: 0.75rem; white-space: nowrap;">Pending scan</span></td>`;
+    }
+
+    const multNum = Number(peakMult);
+    const maxMcFormatted = formatCompactMc(maxMc);
+    const minMcFormatted = formatCompactMc(minMc);
+    const preLowFormatted = formatCompactMc(preLowMc);
+    const preDdNum = Number(preDd || 0);
+    const minDdNum = Number(minDd || 0);
+
+    let multColor = '#94a3b8';
+    let multBg = 'rgba(148, 163, 184, 0.12)';
+    let multBorder = 'rgba(148, 163, 184, 0.25)';
+    if (multNum >= 2.0) {
+        multColor = '#34d399';
+        multBg = 'rgba(16, 185, 129, 0.16)';
+        multBorder = 'rgba(16, 185, 129, 0.4)';
+    } else if (multNum >= 1.2) {
+        multColor = '#22d3ee';
+        multBg = 'rgba(6, 182, 212, 0.14)';
+        multBorder = 'rgba(6, 182, 212, 0.35)';
+    } else if (multNum < 0.95) {
+        multColor = '#f87171';
+        multBg = 'rgba(239, 68, 68, 0.14)';
+        multBorder = 'rgba(239, 68, 68, 0.35)';
+    }
+
+    let pathLabel = 'Flat';
+    let pathColor = '#94a3b8';
+    if (pathCode === 'DIP_THEN_PUMP') {
+        pathLabel = 'Dip→Pump';
+        pathColor = '#fbbf24';
+    } else if (pathCode === 'PUMP_THEN_DUMP') {
+        pathLabel = 'Pump→Dump';
+        pathColor = '#fb923c';
+    } else if (pathCode === 'DIRECT_PUMP') {
+        pathLabel = 'Pump & Hold';
+        pathColor = '#34d399';
+    } else if (pathCode === 'STRAIGHT_DUMP') {
+        pathLabel = 'Dumped';
+        pathColor = '#f87171';
+    }
+
+    const preDdDisplay = preDdNum < -0.5 ? `${preDdNum.toFixed(0)}% (${preLowFormatted})` : `0% (${preLowFormatted})`;
+    const sublineText = pathCode === 'STRAIGHT_DUMP'
+        ? `<span style="color:${pathColor}; font-weight:600;">${pathLabel}</span> · Low: ${minMcFormatted} (${minDdNum.toFixed(0)}%)`
+        : `<span style="color:${pathColor}; font-weight:600;">${pathLabel}</span> · Pre: ${preDdDisplay}`;
+
+    const tooltip = [
+        `${horizon.toUpperCase()} Peak: ${multNum.toFixed(2)}x (${maxMcFormatted})`,
+        `Trajectory: ${pathLabel} (${pathCode || 'N/A'})`,
+        `Pre-Peak Low: ${preLowFormatted} (${preDdNum.toFixed(1)}% before peak)`,
+        `${horizon.toUpperCase()} Window Low: ${minMcFormatted} (${minDdNum.toFixed(1)}% max drawdown)`
+    ].join('\n');
+
+    return `
+        <td title="${escapeHtml(tooltip)}" style="white-space: nowrap;">
+            <div style="display:inline-block; background:${multBg}; color:${multColor}; border:1px solid ${multBorder}; padding:1px 7px; border-radius:5px; font-size:0.78rem; font-weight:700;">
+                ${multNum.toFixed(1)}x (${maxMcFormatted})
+            </div>
+            <div style="font-size:0.69rem; color:var(--text-muted); margin-top:2px;">
+                ${sublineText}
+            </div>
+        </td>
+    `;
+}
+
+async function triggerPostSignalPeakScan(btnEl) {
+    const origHtml = btnEl ? btnEl.innerHTML : '';
+    if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.innerHTML = '<span>Scanning OHLCV...</span>';
+    }
+    try {
+        const res = await fetch('/api/performance/scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ batch_size: 50 })
+        });
+        const data = await res.json();
+        if (btnEl) {
+            btnEl.innerHTML = '<span>Scan Running...</span>';
+        }
+        setTimeout(() => {
+            const dvdTab = document.getElementById('tab-dex-validated-data');
+            if (dvdTab && !dvdTab.classList.contains('hidden')) {
+                loadDexValidatedTableData(currentDexValidatedDataPage || 1, false);
+            } else {
+                loadTokenWalletData(currentTokenDataPage || 1, false);
+            }
+            if (btnEl) {
+                btnEl.disabled = false;
+                btnEl.innerHTML = origHtml;
+            }
+        }, 4500);
+    } catch (e) {
+        if (btnEl) {
+            btnEl.disabled = false;
+            btnEl.innerHTML = origHtml;
+        }
+    }
+}
+
+const TABLE_COLUMNS_STATE = {
+    td: null,
+    dvd: null
+};
+
+function getTableElementForPrefix(prefix) {
+    return document.getElementById(prefix === 'dvd' ? 'dex-validated-data-table' : 'token-data-table');
+}
+
+function initTableColumnsMenu(prefix) {
+    const table = getTableElementForPrefix(prefix);
+    const container = document.getElementById(`${prefix}-columns-checkboxes`);
+    if (!table || !container) return;
+    const ths = Array.from(table.querySelectorAll('thead th'));
+    if (!ths.length) return;
+
+    if (!TABLE_COLUMNS_STATE[prefix] || TABLE_COLUMNS_STATE[prefix].length !== ths.length) {
+        TABLE_COLUMNS_STATE[prefix] = ths.map(() => true);
+    }
+
+    container.innerHTML = ths.map((th, idx) => {
+        const label = (th.innerText || th.textContent || `Col ${idx + 1}`).replace(/[⇅↑↓]/g, '').trim();
+        const checked = TABLE_COLUMNS_STATE[prefix][idx] !== false ? 'checked' : '';
+        return `
+            <label style="display:flex; align-items:center; gap:5px; cursor:pointer; user-select:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(label)}">
+                <input type="checkbox" ${checked} onchange="onTableColumnCheckboxChange('${prefix}', ${idx}, this.checked)" style="accent-color:#10b981; cursor:pointer;">
+                <span style="overflow:hidden; text-overflow:ellipsis;">${escapeHtml(label)}</span>
+            </label>
+        `;
+    }).join('');
+}
+
+const TABLE_SORT_STATE = {
+    td: { sortBy: 'id', sortOrder: 'desc' },
+    dvd: { sortBy: 'id', sortOrder: 'desc' }
+};
+
+function syncTableHeaderSortIndicators(prefix, sortBy, sortOrder) {
+    const table = getTableElementForPrefix(prefix);
+    if (!table) return;
+    const normOrder = String(sortOrder || 'desc').toLowerCase() === 'asc' ? 'asc' : 'desc';
+    table.querySelectorAll('thead th.sortable-th').forEach(th => {
+        const colKey = th.getAttribute('data-sort');
+        const arrow = th.querySelector('.sort-arrow');
+        if (colKey === sortBy) {
+            th.classList.add('sort-active');
+            if (arrow) arrow.textContent = normOrder === 'asc' ? '↑' : '↓';
+        } else {
+            th.classList.remove('sort-active');
+            if (arrow) arrow.textContent = '⇅';
+        }
+    });
+}
+
+function onSortDropdownChange(prefix) {
+    const select = document.getElementById(`${prefix}-sort-by`);
+    const sortVal = select ? select.value : 'id_desc';
+    const lastIdx = sortVal.lastIndexOf('_');
+    const sortBy = lastIdx !== -1 ? sortVal.slice(0, lastIdx) : sortVal;
+    const sortOrder = lastIdx !== -1 ? sortVal.slice(lastIdx + 1) : 'desc';
+    TABLE_SORT_STATE[prefix] = { sortBy, sortOrder };
+    syncTableHeaderSortIndicators(prefix, sortBy, sortOrder);
+    if (prefix === 'dvd') {
+        loadDexValidatedTableData(1);
+    } else {
+        loadTokenWalletData(1);
+    }
+}
+
+function sortTableByColumn(prefix, sortKey, defaultDir = 'desc') {
+    const current = TABLE_SORT_STATE[prefix] || { sortBy: 'id', sortOrder: 'desc' };
+    let nextOrder = defaultDir;
+    if (current.sortBy === sortKey) {
+        nextOrder = current.sortOrder === 'desc' ? 'asc' : 'desc';
+    }
+    TABLE_SORT_STATE[prefix] = { sortBy: sortKey, sortOrder: nextOrder };
+
+    const select = document.getElementById(`${prefix}-sort-by`);
+    if (select) {
+        const targetVal = `${sortKey}_${nextOrder}`;
+        let opt = Array.from(select.options).find(o => o.value === targetVal);
+        if (!opt) {
+            opt = document.createElement('option');
+            opt.value = targetVal;
+            opt.textContent = `Sort: ${sortKey.replace(/_/g, ' ')} (${nextOrder === 'asc' ? '↑' : '↓'})`;
+            select.appendChild(opt);
+        }
+        select.value = targetVal;
+    }
+
+    syncTableHeaderSortIndicators(prefix, sortKey, nextOrder);
+    if (prefix === 'dvd') {
+        loadDexValidatedTableData(1);
+    } else {
+        loadTokenWalletData(1);
+    }
+}
+
+function toggleTableColumnsMenu(prefix) {
+    const menu = document.getElementById(`${prefix}-columns-menu`);
+    if (!menu) return;
+    const wasHidden = menu.classList.contains('hidden');
+    document.querySelectorAll('#td-columns-menu, #dvd-columns-menu').forEach(el => el.classList.add('hidden'));
+    if (wasHidden) {
+        initTableColumnsMenu(prefix);
+        menu.classList.remove('hidden');
+    }
+}
+
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('#td-columns-menu') && !e.target.closest('#dvd-columns-menu') && !e.target.closest('[onclick*="toggleTableColumnsMenu"]')) {
+        document.querySelectorAll('#td-columns-menu, #dvd-columns-menu').forEach(el => el.classList.add('hidden'));
+    }
+});
+
+function onTableColumnCheckboxChange(prefix, colIdx, isChecked) {
+    if (!TABLE_COLUMNS_STATE[prefix]) initTableColumnsMenu(prefix);
+    if (TABLE_COLUMNS_STATE[prefix]) {
+        TABLE_COLUMNS_STATE[prefix][colIdx] = Boolean(isChecked);
+    }
+    applyTableColumnVisibility(prefix);
+}
+
+function applyTableColumnPreset(prefix, preset) {
+    const table = getTableElementForPrefix(prefix);
+    if (!table) return;
+    const ths = Array.from(table.querySelectorAll('thead th'));
+    if (preset === 'outcome') {
+        const keepKeywords = ['time', 'token', 'contract', 'category', 'payment', 'market cap', 'age', '1h peak', '4h peak', 'status', 'actions'];
+        TABLE_COLUMNS_STATE[prefix] = ths.map(th => {
+            const txt = (th.innerText || th.textContent || '').trim().toLowerCase();
+            return keepKeywords.some(k => txt === k || txt.startsWith(k));
+        });
+    } else {
+        TABLE_COLUMNS_STATE[prefix] = ths.map(() => true);
+    }
+    initTableColumnsMenu(prefix);
+    applyTableColumnVisibility(prefix);
+}
+
+function applyTableColumnVisibility(prefix) {
+    const table = getTableElementForPrefix(prefix);
+    if (!table) return;
+    const state = TABLE_COLUMNS_STATE[prefix];
+    if (!state || !state.length) return;
+
+    const ths = table.querySelectorAll('thead th');
+    ths.forEach((th, idx) => {
+        th.style.display = state[idx] === false ? 'none' : '';
+    });
+
+    const rows = table.querySelectorAll('tbody tr');
+    rows.forEach(tr => {
+        if (tr.children.length === 1 && tr.children[0].hasAttribute('colspan')) return;
+        Array.from(tr.children).forEach((td, idx) => {
+            if (idx < state.length) {
+                td.style.display = state[idx] === false ? 'none' : '';
+            }
+        });
+    });
 }
 
 function renderTokenRow(p) {
@@ -3614,6 +3942,8 @@ function renderTokenRow(p) {
             <td>${perf1hBadge}</td>
             <td>${perf6hBadge}</td>
             <td>${perf24hBadge}</td>
+            ${formatPeakPerformanceCell(p, '1h')}
+            ${formatPeakPerformanceCell(p, '4h')}
             <td>${statusPill}</td>
             ${formatForwardedFlowsCell(p.status, p.reason)}
             <td style="text-align: right; padding-right: 1.5rem;">
@@ -3847,7 +4177,7 @@ async function exportTokenDataCSV() {
             return;
         }
 
-        const headers = ["ID", "Timestamp", "Token Name", "CA", "Platform", "Amount (SOL)", "Amount (USD)", "Sender", "Tracked Address", "Market Cap", "Liquidity USD", "Volume 5m", "Volume 1h", "Volume 6h", "Volume 24h", "Creation Age", "Migration Age", "5m %", "1h %", "6h %", "24h %", "Status", "Reason", "Dex URL"];
+        const headers = ["ID", "Timestamp", "Token Name", "CA", "Platform", "Amount (SOL)", "Amount (USD)", "Sender", "Tracked Address", "Market Cap", "Liquidity USD", "Volume 5m", "Volume 1h", "Volume 6h", "Volume 24h", "Creation Age", "Migration Age", "5m %", "1h %", "6h %", "24h %", "1h Peak Mult", "1h Max MC", "1h Min MC", "1h Pre-Peak Low MC", "1h Pre-Peak DD %", "1h Path", "4h Peak Mult", "4h Max MC", "4h Min MC", "4h Pre-Peak Low MC", "4h Pre-Peak DD %", "4h Path", "Status", "Reason", "Dex URL"];
         const csvRows = [headers.join(",")];
 
         data.payments.forEach(p => {
@@ -3873,6 +4203,18 @@ async function exportTokenDataCSV() {
                 p.perf_1h || 0,
                 p.perf_6h || 0,
                 p.perf_24h || 0,
+                p.peak_mult_1h ?? '',
+                p.max_mc_1h ?? '',
+                p.min_mc_1h ?? '',
+                p.pre_peak_low_mc_1h ?? '',
+                p.pre_peak_dd_1h_pct ?? '',
+                `"${p.path_1h || ''}"`,
+                p.peak_mult_4h ?? '',
+                p.max_mc_4h ?? '',
+                p.min_mc_4h ?? '',
+                p.pre_peak_low_mc_4h ?? '',
+                p.pre_peak_dd_4h_pct ?? '',
+                `"${p.path_4h || ''}"`,
                 `"${p.status || ''}"`,
                 `"${(p.reason || '').replace(/"/g, '""')}"`,
                 `"${p.dex_url || ''}"`
@@ -4209,7 +4551,12 @@ function resetDexValidatedDataFilters() {
         'dvd-migrated': 'all',
         'dvd-token-name-mode': 'include',
         'dvd-token-name-pattern': '',
-        'dvd-word-filter': ''
+        'dvd-word-filter': '',
+        'dvd-outcome-filter': 'all',
+        'dvd-path-filter': 'all',
+        'dvd-min-peak-1h': '',
+        'dvd-min-peak-4h': '',
+        'dvd-max-pre-dd': ''
     };
     for (const [id, val] of Object.entries(els)) {
         const el = document.getElementById(id);
@@ -4284,11 +4631,18 @@ async function loadDexValidatedTableData(page = 1, showLoading = false) {
         const tokenNamePattern = String(document.getElementById('dvd-token-name-pattern')?.value || '').trim();
         const tokenNameMode = document.getElementById('dvd-token-name-mode')?.value || 'include';
         const wordFilter = String(document.getElementById('dvd-word-filter')?.value || '').trim();
+        const outcomeFilter = document.getElementById('dvd-outcome-filter')?.value || 'all';
+        const pathFilter = document.getElementById('dvd-path-filter')?.value || 'all';
+        const minPeak1h = String(document.getElementById('dvd-min-peak-1h')?.value || '').trim();
+        const minPeak4h = String(document.getElementById('dvd-min-peak-4h')?.value || '').trim();
+        const maxPreDd = String(document.getElementById('dvd-max-pre-dd')?.value || '').trim();
         const limit = document.getElementById('dvd-limit')?.value || '100';
 
         const lastIdx = sortVal.lastIndexOf('_');
         const sortBy = lastIdx !== -1 ? sortVal.slice(0, lastIdx) : sortVal;
         const sortOrder = lastIdx !== -1 ? sortVal.slice(lastIdx + 1) : 'desc';
+        TABLE_SORT_STATE.dvd = { sortBy: sortBy || 'id', sortOrder: sortOrder || 'desc' };
+        syncTableHeaderSortIndicators('dvd', sortBy || 'id', sortOrder || 'desc');
 
         const params = new URLSearchParams({
             page: page,
@@ -4321,6 +4675,11 @@ async function loadDexValidatedTableData(page = 1, showLoading = false) {
         if (tokenNamePattern) params.append('token_name_pattern', tokenNamePattern);
         if (tokenNameMode) params.append('token_name_mode', tokenNameMode);
         if (wordFilter) params.append('word_filter', wordFilter);
+        if (outcomeFilter && outcomeFilter !== 'all') params.append('outcome_filter', outcomeFilter);
+        if (pathFilter && pathFilter !== 'all') params.append('path_filter', pathFilter);
+        if (minPeak1h) params.append('min_peak_1h', minPeak1h);
+        if (minPeak4h) params.append('min_peak_4h', minPeak4h);
+        if (maxPreDd) params.append('max_pre_dd', maxPreDd);
 
         updateDexValidatedDataActiveFiltersCount();
 
@@ -4379,6 +4738,7 @@ async function loadDexValidatedTableData(page = 1, showLoading = false) {
 
         if (tbody) {
             tbody.innerHTML = records.map(r => renderDexValidatedDataRow(r)).join('');
+            applyTableColumnVisibility('dvd');
         }
         renderDexValidatedDataPagination(data.total, records.length, data.page, data.total_pages);
     } catch (err) {
@@ -4481,6 +4841,8 @@ function renderDexValidatedDataRow(r) {
             <td>${perf1hBadge}</td>
             <td>${perf6hBadge}</td>
             <td>${perf24hBadge}</td>
+            ${formatPeakPerformanceCell(r, '1h')}
+            ${formatPeakPerformanceCell(r, '4h')}
             <td>${statusPill}</td>
             ${formatForwardedFlowsCell(r.status, r.reason)}
             <td style="text-align: right; padding-right: 1.5rem; white-space: nowrap;">
@@ -4546,7 +4908,7 @@ async function exportDexValidatedDataCSV() {
             alert('No DEX Validated records available to export.');
             return;
         }
-        const headers = ['ID', 'Time', 'Token Name', 'CA', 'Category', 'Platform', 'Market Cap', 'Liquidity USD', 'Vol 5m', 'Vol 1h', 'Vol 6h', 'Vol 24h', 'Creation Age', 'Migration Age', 'Perf 5m %', 'Perf 1h %', 'Perf 6h %', 'Perf 24h %', 'Status', 'Reason', 'DEX URL'];
+        const headers = ['ID', 'Time', 'Token Name', 'CA', 'Category', 'Platform', 'Market Cap', 'Liquidity USD', 'Vol 5m', 'Vol 1h', 'Vol 6h', 'Vol 24h', 'Creation Age', 'Migration Age', 'Perf 5m %', 'Perf 1h %', 'Perf 6h %', 'Perf 24h %', '1h Peak Mult', '1h Max MC', '1h Min MC', '1h Pre-Peak Low MC', '1h Pre-Peak DD %', '1h Path', '4h Peak Mult', '4h Max MC', '4h Min MC', '4h Pre-Peak Low MC', '4h Pre-Peak DD %', '4h Path', 'Status', 'Reason', 'DEX URL'];
         const csvRows = [headers.join(',')];
         data.records.forEach(r => {
             const vals = [
@@ -4568,6 +4930,18 @@ async function exportDexValidatedDataCSV() {
                 r.perf_1h || 0,
                 r.perf_6h || 0,
                 r.perf_24h || 0,
+                r.peak_mult_1h ?? '',
+                r.max_mc_1h ?? '',
+                r.min_mc_1h ?? '',
+                r.pre_peak_low_mc_1h ?? '',
+                r.pre_peak_dd_1h_pct ?? '',
+                r.path_1h || '',
+                r.peak_mult_4h ?? '',
+                r.max_mc_4h ?? '',
+                r.min_mc_4h ?? '',
+                r.pre_peak_low_mc_4h ?? '',
+                r.pre_peak_dd_4h_pct ?? '',
+                r.path_4h || '',
                 r.status || '',
                 `"${String(r.reason || '').replace(/"/g, '""')}"`,
                 r.dex_url || ''
