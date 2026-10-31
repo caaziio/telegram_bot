@@ -5245,21 +5245,167 @@ function openWorkflowInTable(workflowId, system) {
     }, 150);
 }
 
+// ==========================================
+// Workflow Donut & Breakdown Visualization Helpers
+// ==========================================
+function generateWorkflowDonutSvg(tierStats, size = 110, centerTitle = '', centerSub = '') {
+    if (!tierStats) return '';
+    const strokeWidth = Math.round(size * 0.13);
+    const radius = (size - strokeWidth) / 2;
+    const cx = size / 2;
+    const cy = size / 2;
+    const circumference = 2 * Math.PI * radius;
+
+    const tiers = [
+        { key: 'lt_1x', label: '< 1.0x', color: '#ef4444', pct: tierStats.lt_1x_pct || 0 },
+        { key: '1x_1_5x', label: '1.0x–1.5x', color: '#f59e0b', pct: tierStats['1x_1_5x_pct'] || 0 },
+        { key: '1_5x_2x', label: '1.5x–2.0x', color: '#06b6d4', pct: tierStats['1_5x_2x_pct'] || 0 },
+        { key: '2x_3x', label: '2.0x–3.0x', color: '#10b981', pct: tierStats['2x_3x_pct'] || 0 },
+        { key: '3x_5x', label: '3.0x–5.0x', color: '#8b5cf6', pct: tierStats['3x_5x_pct'] || 0 },
+        { key: '5x_plus', label: '≥ 5.0x', color: '#fbbf24', pct: tierStats['5x_plus_pct'] || 0 }
+    ];
+
+    let accumulatedOffset = 0;
+    let pathsHtml = '';
+
+    // Background track ring
+    pathsHtml += `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="${strokeWidth}" />`;
+
+    tiers.forEach(t => {
+        if (t.pct > 0) {
+            const arcLength = (t.pct / 100.0) * circumference;
+            const gap = circumference > 10 ? 1.5 : 0;
+            const dashArray = `${Math.max(0.1, arcLength - gap)} ${circumference - Math.max(0.1, arcLength - gap)}`;
+            pathsHtml += `
+                <circle cx="${cx}" cy="${cy}" r="${radius}" fill="none"
+                    stroke="${t.color}" stroke-width="${strokeWidth}"
+                    stroke-dasharray="${dashArray}"
+                    stroke-dashoffset="${-accumulatedOffset}"
+                    transform="rotate(-90 ${cx} ${cy})"
+                    stroke-linecap="butt">
+                    <title>${t.label}: ${t.pct}%</title>
+                </circle>
+            `;
+            accumulatedOffset += arcLength;
+        }
+    });
+
+    const titleText = centerTitle ? `<text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="${Math.round(size * 0.17)}" font-weight="800" fill="#ffffff">${escapeHtml(centerTitle)}</text>` : '';
+    const subText = centerSub ? `<text x="${cx}" y="${cy + Math.round(size * 0.13)}" text-anchor="middle" font-size="${Math.round(size * 0.08)}" font-weight="600" fill="#94a3b8" letter-spacing="0.05em">${escapeHtml(centerSub)}</text>` : '';
+
+    return `
+        <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="overflow: visible; display: inline-block; flex-shrink: 0;">
+            ${pathsHtml}
+            ${titleText}
+            ${subText}
+        </svg>
+    `;
+}
+
+function generateWorkflowDonutLegend(tierStats, compact = false) {
+    if (!tierStats) return '';
+    const tiers = [
+        { label: '< 1.0x', color: '#ef4444', pct: tierStats.lt_1x_pct || 0, count: tierStats.lt_1x || 0 },
+        { label: '1.0–1.5x', color: '#f59e0b', pct: tierStats['1x_1_5x_pct'] || 0, count: tierStats['1x_1_5x'] || 0 },
+        { label: '1.5–2.0x', color: '#06b6d4', pct: tierStats['1_5x_2x_pct'] || 0, count: tierStats['1_5x_2x'] || 0 },
+        { label: '2.0–3.0x', color: '#10b981', pct: tierStats['2x_3x_pct'] || 0, count: tierStats['2x_3x'] || 0 },
+        { label: '3.0–5.0x', color: '#8b5cf6', pct: tierStats['3x_5x_pct'] || 0, count: tierStats['3x_5x'] || 0 },
+        { label: '≥ 5.0x', color: '#fbbf24', pct: tierStats['5x_plus_pct'] || 0, count: tierStats['5x_plus'] || 0 },
+    ];
+
+    if (compact) {
+        return `
+            <div style="display: flex; flex-wrap: wrap; gap: 6px 10px; font-size: 0.72rem;">
+                ${tiers.map(t => `
+                    <div style="display: inline-flex; align-items: center; gap: 4px; color: ${t.count > 0 ? '#e2e8f0' : 'var(--text-muted)'}; opacity: ${t.count > 0 ? 1 : 0.6};">
+                        <span style="width: 8px; height: 8px; border-radius: 50%; background: ${t.color}; display: inline-block;"></span>
+                        <span><strong>${t.label}</strong>: ${t.pct}%</span>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    return `
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(115px, 1fr)); gap: 8px; width: 100%;">
+            ${tiers.map(t => `
+                <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; padding: 6px 8px; display: flex; align-items: center; justify-content: space-between; gap: 6px;">
+                    <div style="display: flex; align-items: center; gap: 5px;">
+                        <span style="width: 8px; height: 8px; border-radius: 50%; background: ${t.color}; flex-shrink: 0;"></span>
+                        <span style="font-size: 0.72rem; color: var(--text-muted); font-weight: 500;">${t.label}</span>
+                    </div>
+                    <div style="text-align: right; white-space: nowrap;">
+                        <span style="font-size: 0.78rem; font-weight: 700; color: ${t.color};">${t.pct}%</span>
+                        <span style="font-size: 0.65rem; color: var(--text-muted); margin-left: 2px;">(${t.count})</span>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function generateWorkflowMiniBar(tierStats) {
+    if (!tierStats) return '<span style="color: var(--text-muted); font-size: 0.75rem;">No data</span>';
+    const tiers = [
+        { label: '< 1.0x', color: '#ef4444', pct: tierStats.lt_1x_pct || 0, count: tierStats.lt_1x || 0 },
+        { label: '1.0–1.5x', color: '#f59e0b', pct: tierStats['1x_1_5x_pct'] || 0, count: tierStats['1x_1_5x'] || 0 },
+        { label: '1.5–2.0x', color: '#06b6d4', pct: tierStats['1_5x_2x_pct'] || 0, count: tierStats['1_5x_2x'] || 0 },
+        { label: '2.0–3.0x', color: '#10b981', pct: tierStats['2x_3x_pct'] || 0, count: tierStats['2x_3x'] || 0 },
+        { label: '3.0–5.0x', color: '#8b5cf6', pct: tierStats['3x_5x_pct'] || 0, count: tierStats['3x_5x'] || 0 },
+        { label: '≥ 5.0x', color: '#fbbf24', pct: tierStats['5x_plus_pct'] || 0, count: tierStats['5x_plus'] || 0 },
+    ];
+
+    const winPct = Math.round(((tierStats['2x_3x_pct'] || 0) + (tierStats['3x_5x_pct'] || 0) + (tierStats['5x_plus_pct'] || 0)) * 10) / 10;
+    const activeSegments = tiers.filter(t => t.pct > 0);
+
+    const segmentsHtml = activeSegments.length > 0
+        ? activeSegments.map(t => `
+            <div style="width: ${t.pct}%; background: ${t.color}; height: 100%; transition: width 0.3s ease;" title="${t.label}: ${t.pct}% (${t.count} tokens)"></div>
+          `).join('')
+        : '<div style="width: 100%; background: rgba(255,255,255,0.06); height: 100%;"></div>';
+
+    return `
+        <div style="min-width: 160px; max-width: 210px;">
+            <div style="height: 8px; width: 100%; border-radius: 4px; overflow: hidden; display: flex; background: rgba(255,255,255,0.06); margin-bottom: 4px; box-shadow: inset 0 1px 2px rgba(0,0,0,0.4);">
+                ${segmentsHtml}
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 0.68rem; color: var(--text-muted); font-weight: 500;">
+                <span style="color: #ef4444;"><1x: ${tierStats.lt_1x_pct || 0}%</span>
+                <span style="color: #34d399; font-weight: 600;">≥2x: ${winPct}%</span>
+            </div>
+        </div>
+    `;
+}
+
+function toggleWorkflowDrawer(workflowId) {
+    const drawer = document.getElementById(`wf-drawer-${workflowId}`);
+    const btn = document.getElementById(`wf-drawer-btn-${workflowId}`);
+    if (!drawer) return;
+    if (drawer.style.display === 'none' || !drawer.style.display) {
+        drawer.style.display = 'table-row';
+        if (btn) btn.innerHTML = '▲ Close';
+    } else {
+        drawer.style.display = 'none';
+        if (btn) btn.innerHTML = '▼ Details';
+    }
+}
+
 function renderWorkflowPerformance(data) {
     const timeBadge = document.getElementById('wf-perf-time-badge');
     if (timeBadge) {
         timeBadge.innerText = data.timeframe_label || 'Selected Period';
     }
 
-    // 1. Render Hero Winner Card
+    // 1. Render Hero Winner Card with Circular Donut Chart
     const heroContainer = document.getElementById('wf-best-hero-container');
     const bw = data.best_workflow;
     if (heroContainer) {
         if (bw && bw.matched_count > 0) {
             const sysBadge = data.system === 'validated' ? '⚡ DEX Validated' : (data.system === 'paid' ? '💎 DEX Paid' : '🌐 Combined');
             heroContainer.innerHTML = `
-                <div style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(16, 185, 129, 0.08), rgba(0,0,0,0.3)); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 12px; padding: 1.25rem 1.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
-                    <div style="flex: 1; min-width: 260px;">
+                <div style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(16, 185, 129, 0.08), rgba(0,0,0,0.3)); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 12px; padding: 1.25rem 1.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px;">
+                    <!-- Left: Metadata & Winner Title -->
+                    <div style="flex: 1; min-width: 250px;">
                         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
                             <span style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: #fbbf24; font-weight: 700; background: rgba(245, 158, 11, 0.2); padding: 2px 8px; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px;">
                                 🏆 #1 Best Workflow • ${escapeHtml(data.timeframe_label)}
@@ -5271,7 +5417,7 @@ function renderWorkflowPerformance(data) {
                         <h2 style="font-size: 1.45rem; font-weight: 800; color: white; margin: 0 0 6px 0;">
                             ${escapeHtml(bw.name)}
                         </h2>
-                        <div style="display: flex; gap: 12px; font-size: 0.8rem; color: var(--text-muted); align-items: center; flex-wrap: wrap;">
+                        <div style="display: flex; gap: 10px; font-size: 0.8rem; color: var(--text-muted); align-items: center; flex-wrap: wrap;">
                             <span>${bw.rules_count} active rules</span>
                             <span>•</span>
                             <span><strong>${bw.matched_count}</strong> signals matched</span>
@@ -5280,20 +5426,30 @@ function renderWorkflowPerformance(data) {
                         </div>
                     </div>
 
-                    <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
-                        <div style="text-align: center; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.06); padding: 8px 16px; border-radius: 10px; min-width: 100px;">
-                            <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase;">Win Rate (≥ 2x)</div>
-                            <div style="font-size: 1.45rem; font-weight: 800; color: #34d399; margin-top: 2px;">${bw.win_rate_2x}%</div>
+                    <!-- Center: Outcome Circle Donut Chart + Legend -->
+                    <div style="display: flex; align-items: center; gap: 14px; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.06); padding: 10px 16px; border-radius: 12px;">
+                        ${generateWorkflowDonutSvg(bw.tier_stats, 96, bw.win_rate_2x + '%', '≥ 2x WIN')}
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 700;">Outcome Multipliers</div>
+                            ${generateWorkflowDonutLegend(bw.tier_stats, true)}
                         </div>
-                        <div style="text-align: center; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.06); padding: 8px 16px; border-radius: 10px; min-width: 95px;">
-                            <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase;">Avg 1h Peak</div>
-                            <div style="font-size: 1.45rem; font-weight: 800; color: #22d3ee; margin-top: 2px;">${bw.avg_peak_1h}x</div>
+                    </div>
+
+                    <!-- Right: Stats & Action Buttons -->
+                    <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                        <div style="text-align: center; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.06); padding: 8px 14px; border-radius: 10px; min-width: 90px;">
+                            <div style="font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase;">Win Rate (≥ 2x)</div>
+                            <div style="font-size: 1.35rem; font-weight: 800; color: #34d399; margin-top: 2px;">${bw.win_rate_2x}%</div>
                         </div>
-                        <div style="text-align: center; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.06); padding: 8px 16px; border-radius: 10px; min-width: 95px;">
-                            <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase;">Avg 4h Peak</div>
-                            <div style="font-size: 1.45rem; font-weight: 800; color: #a78bfa; margin-top: 2px;">${bw.avg_peak_4h}x</div>
+                        <div style="text-align: center; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.06); padding: 8px 14px; border-radius: 10px; min-width: 85px;">
+                            <div style="font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase;">Avg 1h Peak</div>
+                            <div style="font-size: 1.35rem; font-weight: 800; color: #22d3ee; margin-top: 2px;">${bw.avg_peak_1h}x</div>
                         </div>
-                        <button type="button" class="btn-primary" onclick="openWorkflowInTable(${bw.workflow_id}, '${data.system}')" style="background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24; font-weight: 600; padding: 10px 16px; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+                        <div style="text-align: center; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.06); padding: 8px 14px; border-radius: 10px; min-width: 85px;">
+                            <div style="font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase;">Avg 4h Peak</div>
+                            <div style="font-size: 1.35rem; font-weight: 800; color: #a78bfa; margin-top: 2px;">${bw.avg_peak_4h}x</div>
+                        </div>
+                        <button type="button" class="btn-primary" onclick="openWorkflowInTable(${bw.workflow_id}, '${data.system}')" style="background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24; font-weight: 600; padding: 10px 14px; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
                             <span>View Signals</span>
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
                         </button>
@@ -5310,7 +5466,7 @@ function renderWorkflowPerformance(data) {
         }
     }
 
-    // 2. Render Leaderboard Table
+    // 2. Render Leaderboard Table with Inline Segments and Expandable Drawers
     const tbody = document.getElementById('wf-perf-tbody');
     if (!tbody) return;
 
@@ -5318,7 +5474,7 @@ function renderWorkflowPerformance(data) {
     if (list.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="10" style="text-align: center; padding: 2.5rem; color: var(--text-muted);">
+                <td colspan="11" style="text-align: center; padding: 2.5rem; color: var(--text-muted);">
                     No workflow rules matched any tokens in ${escapeHtml(data.timeframe_label)}.
                 </td>
             </tr>
@@ -5338,15 +5494,26 @@ function renderWorkflowPerformance(data) {
                     : `<span style="color: var(--text-muted); font-weight: 600;">#${rank}</span>`));
 
         const winRateColor = item.win_rate_2x >= 25 ? '#34d399' : (item.win_rate_2x >= 15 ? '#67e8f9' : (item.win_rate_2x > 0 ? '#fbbf24' : 'var(--text-muted)'));
+        const miniBarHtml = generateWorkflowMiniBar(item.tier_stats);
+        const traj = item.trajectories || {};
+        const tokens = item.top_tokens || [];
 
+        // Build main row
         rowsHtml += `
             <tr style="border-bottom: 1px solid rgba(255,255,255,0.03); transition: background 0.15s ease;" onmouseover="this.style.background='rgba(255,255,255,0.02)'" onmouseout="this.style.background='transparent'">
                 <td style="padding: 10px 14px; text-align: left;">${rankBadge}</td>
                 <td style="padding: 10px 14px; text-align: left;">
-                    <strong style="color: white; font-size: 0.85rem;">${escapeHtml(item.name)}</strong>
-                    <span style="font-size: 0.72rem; color: var(--text-muted); margin-left: 6px;">(${item.rules_count} rules)</span>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <div>
+                            <strong style="color: white; font-size: 0.85rem;">${escapeHtml(item.name)}</strong>
+                            <span style="font-size: 0.72rem; color: var(--text-muted); margin-left: 6px;">(${item.rules_count} rules)</span>
+                        </div>
+                    </div>
                 </td>
                 <td style="padding: 10px 14px; text-align: center; font-weight: 600; color: #67e8f9;">${item.matched_count}</td>
+                <td style="padding: 10px 14px; text-align: left;">
+                    ${miniBarHtml}
+                </td>
                 <td style="padding: 10px 14px; text-align: center;">
                     <span style="color: ${winRateColor}; font-weight: 700; font-size: 0.85rem;">${item.win_rate_2x}%</span>
                 </td>
@@ -5366,10 +5533,114 @@ function renderWorkflowPerformance(data) {
                     <span style="color: white; font-weight: 600;">${escapeHtml(item.best_token_name)}</span>
                     <span style="color: #34d399; font-weight: 700; margin-left: 4px;">(${item.best_token_peak}x)</span>
                 </td>
-                <td style="padding: 10px 14px; text-align: right;">
-                    <button type="button" class="btn-secondary" onclick="openWorkflowInTable(${item.workflow_id}, '${data.system}')" style="font-size: 0.75rem; padding: 3px 8px; border-radius: 6px;" title="Filter table by this workflow">
+                <td style="padding: 10px 14px; text-align: right; white-space: nowrap;">
+                    <button type="button" id="wf-drawer-btn-${item.workflow_id}" class="btn-secondary" onclick="toggleWorkflowDrawer(${item.workflow_id})" style="font-size: 0.72rem; padding: 4px 8px; border-radius: 6px; margin-right: 4px; background: rgba(255,255,255,0.06); color: #cbd5e1; border: 1px solid rgba(255,255,255,0.1);" title="Toggle Donut & Detailed Analytics">
+                        ▼ Details
+                    </button>
+                    <button type="button" class="btn-secondary" onclick="openWorkflowInTable(${item.workflow_id}, '${data.system}')" style="font-size: 0.72rem; padding: 4px 8px; border-radius: 6px;" title="Filter signals table by this workflow">
                         View →
                     </button>
+                </td>
+            </tr>
+
+            <!-- Expandable Drawer Row for Circular Breakdown & Top Tokens -->
+            <tr id="wf-drawer-${item.workflow_id}" style="display: none; background: rgba(15, 23, 42, 0.45); border-bottom: 1px solid rgba(255,255,255,0.08);">
+                <td colspan="11" style="padding: 0;">
+                    <div style="padding: 1.25rem 1.5rem; display: grid; grid-template-columns: minmax(310px, 360px) minmax(220px, 260px) 1fr; gap: 1.25rem; align-items: start;">
+                        <!-- Panel A: Donut Circle & Tier Stats -->
+                        <div style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 1rem;">
+                            <div style="font-size: 0.72rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700; letter-spacing: 0.05em; margin-bottom: 0.75rem; display: flex; justify-content: space-between;">
+                                <span>Outcome Distribution</span>
+                                <span style="color: #67e8f9;">${item.matched_count} tokens</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 1rem;">
+                                ${generateWorkflowDonutSvg(item.tier_stats, 96, item.win_rate_2x + '%', '≥ 2x WIN')}
+                                <div style="font-size: 0.75rem; color: var(--text-muted); line-height: 1.6;">
+                                    <div>Win Rate (≥1.5x): <strong style="color: #34d399;">${item.win_rate_1_5x}%</strong></div>
+                                    <div>Win Rate (≥2.0x): <strong style="color: #67e8f9;">${item.win_rate_2x}%</strong></div>
+                                    <div>Avg Peak 1h: <strong style="color: #22d3ee;">${item.avg_peak_1h}x</strong></div>
+                                    <div>Avg Peak 4h: <strong style="color: #a78bfa;">${item.avg_peak_4h}x</strong></div>
+                                </div>
+                            </div>
+                            ${generateWorkflowDonutLegend(item.tier_stats, false)}
+                        </div>
+
+                        <!-- Panel B: Trajectory Breakdown -->
+                        <div style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 1rem;">
+                            <div style="font-size: 0.72rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700; letter-spacing: 0.05em; margin-bottom: 0.75rem;">
+                                Price Trajectory
+                            </div>
+                            <div style="display: flex; flex-direction: column; gap: 6px;">
+                                <div style="background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.2); padding: 7px 10px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
+                                    <span style="font-size: 0.76rem; color: #34d399; font-weight: 600;">🚀 Direct Pump</span>
+                                    <span style="font-size: 0.82rem; font-weight: 800; color: #34d399;">${traj.direct_pump_pct || 0}% <span style="font-size: 0.68rem; font-weight: 400; color: var(--text-muted);">(${traj.direct_pump || 0})</span></span>
+                                </div>
+                                <div style="background: rgba(6,182,212,0.08); border: 1px solid rgba(6,182,212,0.2); padding: 7px 10px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
+                                    <span style="font-size: 0.76rem; color: #22d3ee; font-weight: 600;">🌊 Dip then Pump</span>
+                                    <span style="font-size: 0.82rem; font-weight: 800; color: #22d3ee;">${traj.dip_then_pump_pct || 0}% <span style="font-size: 0.68rem; font-weight: 400; color: var(--text-muted);">(${traj.dip_then_pump || 0})</span></span>
+                                </div>
+                                <div style="background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.2); padding: 7px 10px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
+                                    <span style="font-size: 0.76rem; color: #f87171; font-weight: 600;">📉 Straight Dump</span>
+                                    <span style="font-size: 0.82rem; font-weight: 800; color: #f87171;">${traj.straight_dump_pct || 0}% <span style="font-size: 0.68rem; font-weight: 400; color: var(--text-muted);">(${traj.straight_dump || 0})</span></span>
+                                </div>
+                                <div style="background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.2); padding: 7px 10px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
+                                    <span style="font-size: 0.76rem; color: #fbbf24; font-weight: 600;">🎢 Pump then Dump</span>
+                                    <span style="font-size: 0.82rem; font-weight: 800; color: #fbbf24;">${traj.pump_then_dump_pct || 0}% <span style="font-size: 0.68rem; font-weight: 400; color: var(--text-muted);">(${traj.pump_then_dump || 0})</span></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Panel C: Top Tokens Table -->
+                        <div style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 1rem; overflow-x: auto;">
+                            <div style="font-size: 0.72rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700; letter-spacing: 0.05em; margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
+                                <span>Top Matched Tokens</span>
+                                <a href="javascript:void(0)" onclick="openWorkflowInTable(${item.workflow_id}, '${data.system}')" style="color: #67e8f9; text-decoration: none; font-size: 0.72rem;">
+                                    View All ${item.matched_count} in Table →
+                                </a>
+                            </div>
+                            ${tokens.length > 0 ? `
+                                <table style="width: 100%; border-collapse: collapse; font-size: 0.75rem;">
+                                    <thead>
+                                        <tr style="border-bottom: 1px solid rgba(255,255,255,0.06); color: var(--text-muted); font-size: 0.68rem; text-transform: uppercase;">
+                                            <th style="padding: 4px 6px; text-align: left;">Token</th>
+                                            <th style="padding: 4px 6px; text-align: center;">1h Peak</th>
+                                            <th style="padding: 4px 6px; text-align: center;">4h Peak</th>
+                                            <th style="padding: 4px 6px; text-align: center;">Drawdown</th>
+                                            <th style="padding: 4px 6px; text-align: center;">Path</th>
+                                            <th style="padding: 4px 6px; text-align: right;">Chart</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${tokens.map(tok => `
+                                            <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
+                                                <td style="padding: 6px; text-align: left;">
+                                                    <div style="font-weight: 600; color: white;">${escapeHtml(tok.name)}</div>
+                                                    <div style="font-size: 0.65rem; color: var(--text-muted); font-family: monospace;">${tok.ca ? tok.ca.slice(0, 6) + '...' + tok.ca.slice(-4) : ''}</div>
+                                                </td>
+                                                <td style="padding: 6px; text-align: center; font-weight: 700; color: ${tok.peak_1h >= 2.0 ? '#34d399' : (tok.peak_1h >= 1.5 ? '#22d3ee' : '#cbd5e1')};">
+                                                    ${tok.peak_1h}x
+                                                </td>
+                                                <td style="padding: 6px; text-align: center; font-weight: 700; color: ${tok.peak_4h >= 2.0 ? '#a78bfa' : '#cbd5e1'};">
+                                                    ${tok.peak_4h}x
+                                                </td>
+                                                <td style="padding: 6px; text-align: center; color: ${tok.pre_peak_dd <= -40 ? '#f87171' : '#fbbf24'};">
+                                                    ${tok.pre_peak_dd}%
+                                                </td>
+                                                <td style="padding: 6px; text-align: center;">
+                                                    <span style="font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.05); color: #cbd5e1;">${tok.path || 'UNKNOWN'}</span>
+                                                </td>
+                                                <td style="padding: 6px; text-align: right;">
+                                                    <a href="${tok.dex_url || `https://dexscreener.com/solana/${tok.ca}`}" target="_blank" rel="noopener noreferrer" style="color: #67e8f9; text-decoration: none; display: inline-flex; align-items: center; gap: 2px; font-weight: 500; font-size: 0.72rem;">
+                                                        Dex ↗
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            ` : '<div style="color: var(--text-muted); font-size: 0.75rem; padding: 1rem 0;">No token roster available.</div>'}
+                        </div>
+                    </div>
                 </td>
             </tr>
         `;

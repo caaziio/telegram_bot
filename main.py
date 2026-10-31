@@ -7148,7 +7148,60 @@ def get_workflows_performance():
         avg_4h = sum(peaks_4h) / len(peaks_4h) if peaks_4h else 1.0
         avg_dd = sum(drawdowns) / len(drawdowns) if drawdowns else 0.0
 
-        best_token = max(matched, key=lambda x: float(x.get('peak_mult_1h') or 1.0))
+        # Performance Tier Distribution (<1x, 1x-1.5x, 1.5x-2x, 2x-3x, 3x-5x, 5x+)
+        t_lt_1x = sum(1 for p in peaks_1h if p < 1.05)
+        t_1x_1_5x = sum(1 for p in peaks_1h if 1.05 <= p < 1.5)
+        t_1_5x_2x = sum(1 for p in peaks_1h if 1.5 <= p < 2.0)
+        t_2x_3x = sum(1 for p in peaks_1h if 2.0 <= p < 3.0)
+        t_3x_5x = sum(1 for p in peaks_1h if 3.0 <= p < 5.0)
+        t_5x_plus = sum(1 for p in peaks_1h if p >= 5.0)
+
+        tot_peaks = len(peaks_1h) or 1
+        tier_stats = {
+            'lt_1x': t_lt_1x,
+            'lt_1x_pct': round((t_lt_1x / tot_peaks) * 100.0, 1),
+            '1x_1_5x': t_1x_1_5x,
+            '1x_1_5x_pct': round((t_1x_1_5x / tot_peaks) * 100.0, 1),
+            '1_5x_2x': t_1_5x_2x,
+            '1_5x_2x_pct': round((t_1_5x_2x / tot_peaks) * 100.0, 1),
+            '2x_3x': t_2x_3x,
+            '2x_3x_pct': round((t_2x_3x / tot_peaks) * 100.0, 1),
+            '3x_5x': t_3x_5x,
+            '3x_5x_pct': round((t_3x_5x / tot_peaks) * 100.0, 1),
+            '5x_plus': t_5x_plus,
+            '5x_plus_pct': round((t_5x_plus / tot_peaks) * 100.0, 1),
+        }
+
+        # Trajectory Breakdown
+        paths = [str(x.get('path_1h') or 'UNKNOWN').upper() for x in matched]
+        tot_paths = len(paths) or 1
+        trajectories = {
+            'direct_pump': paths.count('DIRECT_PUMP'),
+            'direct_pump_pct': round((paths.count('DIRECT_PUMP') / tot_paths) * 100.0, 1),
+            'dip_then_pump': paths.count('DIP_THEN_PUMP'),
+            'dip_then_pump_pct': round((paths.count('DIP_THEN_PUMP') / tot_paths) * 100.0, 1),
+            'straight_dump': paths.count('STRAIGHT_DUMP'),
+            'straight_dump_pct': round((paths.count('STRAIGHT_DUMP') / tot_paths) * 100.0, 1),
+            'pump_then_dump': paths.count('PUMP_THEN_DUMP'),
+            'pump_then_dump_pct': round((paths.count('PUMP_THEN_DUMP') / tot_paths) * 100.0, 1),
+        }
+
+        # Top 5 Token Roster
+        sorted_matched = sorted(matched, key=lambda x: float(x.get('peak_mult_1h') or 1.0), reverse=True)
+        top_tokens = []
+        for t in sorted_matched[:5]:
+            top_tokens.append({
+                'name': t.get('name') or 'Unknown',
+                'ca': t.get('ca') or '',
+                'peak_1h': round(float(t.get('peak_mult_1h') or 1.0), 2),
+                'peak_4h': round(float(t.get('peak_mult_4h') or t.get('peak_mult_1h') or 1.0), 2),
+                'pre_peak_dd': round(float(t.get('pre_peak_dd_1h_pct') or 0.0), 1),
+                'path': t.get('path_1h') or '',
+                'dex_url': t.get('dex_url') or (f"https://dexscreener.com/solana/{t.get('ca')}" if t.get('ca') else ''),
+                'market_cap': t.get('market_cap') or ''
+            })
+
+        best_token = sorted_matched[0] if sorted_matched else {}
         best_peak = round(float(best_token.get('peak_mult_1h') or 1.0), 2)
 
         leaderboard.append({
@@ -7165,6 +7218,9 @@ def get_workflows_performance():
             'best_token_name': best_token.get('name') or 'Unknown',
             'best_token_ca': best_token.get('ca') or '',
             'best_token_peak': best_peak,
+            'tier_stats': tier_stats,
+            'trajectories': trajectories,
+            'top_tokens': top_tokens,
         })
 
     # Sort leaderboard
