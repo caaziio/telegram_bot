@@ -6229,6 +6229,7 @@ perf_scanner_runtime = {
     'last_batch_updated': 0,
     'total_updated': 0,
     'last_error': None,
+    'backfill_wallet_payments': False,
 }
 _ohlcv_pool_cache = OrderedDict()
 
@@ -6593,10 +6594,10 @@ async def scan_post_signal_performance_batch(max_rows_per_table=60):
                 rd['table'] = 'wallet_payments'
                 wp_list.append(rd)
 
-            # Prioritize completing all due dex_validated rows first, then wallet_payments
+            # Complete due dex_validated rows; wallet_payments backfill is paused until requested
             if dv_list:
                 due_items.extend(dv_list)
-            else:
+            elif perf_scanner_runtime.get('backfill_wallet_payments', False):
                 due_items.extend(wp_list)
 
         if not due_items:
