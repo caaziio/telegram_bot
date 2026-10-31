@@ -11,6 +11,10 @@ let dexValidatedRuntime = null;
 let dexValidatedStatusTimer = null;
 let dexValidatedCountdownTimer = null;
 let dexValidatedRenderedResults = [];
+let currentDexValidatedDataPage = 1;
+let dexValidatedDataSearchTimer = null;
+let dexValidatedDataAutoRefreshInterval = null;
+let lastSeenDexValidatedRecordId = 0;
 
 const FLOW_GROUP_COLORS = [
     { key: 'cyan', name: 'Cyan', hex: '#06b6d4', text: '#67e8f9', bg: 'rgba(6, 182, 212, 0.16)', border: 'rgba(6, 182, 212, 0.45)', glow: 'rgba(6, 182, 212, 0.35)' },
@@ -157,9 +161,29 @@ async function readJsonResponse(response, endpointName) {
     return response.json();
 }
 
-function switchTab(tabId) {
-    const tabs = ['workflows', 'dex-validated', 'settings', 'wallet-tracker', 'token-data'];
-    tabs.forEach(t => {
+const VALID_PAGE_TABS = ['dashboard', 'workflows', 'dex-validated', 'dex-validated-data', 'settings', 'wallet-tracker', 'token-data'];
+
+function getTabFromPathname(pathname) {
+    const clean = String(pathname || '').replace(/^\/+|\/+$/g, '').toLowerCase();
+    if (!clean || clean === 'dashboard') return 'dashboard';
+    return VALID_PAGE_TABS.includes(clean) ? clean : null;
+}
+
+function navigateSidebarTab(event, tabId) {
+    if (event && (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1)) {
+        return true;
+    }
+    if (event) event.preventDefault();
+    switchTab(tabId);
+    return false;
+}
+
+function switchTab(tabId, options = {}) {
+    if (!VALID_PAGE_TABS.includes(tabId)) {
+        tabId = 'dashboard';
+    }
+
+    VALID_PAGE_TABS.forEach(t => {
         const tabEl = document.getElementById('tab-' + t);
         const navEl = document.getElementById('nav-' + t);
         const railEl = document.getElementById('rail-nav-' + t);
@@ -175,6 +199,17 @@ function switchTab(tabId) {
     if (targetNav) targetNav.classList.add('active');
     if (targetRail) targetRail.classList.add('active');
 
+    const targetPath = '/' + tabId;
+    if (!options.skipPushState && window.location.pathname !== targetPath) {
+        try {
+            window.history.pushState({ tabId }, '', targetPath);
+        } catch (_) {}
+    }
+
+    if (tabId === 'dashboard') {
+        loadDashboardOverview(false);
+    }
+
     if (tabId === 'workflows') {
         renderGrokFoldersTree();
         renderWorkflows();
@@ -184,19 +219,20 @@ function switchTab(tabId) {
         const hasCache = renderTokenDataFromCache();
         loadTokenWalletData(1, !hasCache);
     }
+
+    if (tabId === 'dex-validated') {
+        loadDexValidatedLiveResults();
+    }
+
+    if (tabId === 'dex-validated-data') {
+        loadDexValidatedTableData(1, true);
+    }
 }
 
-function showSystemLanding() {
-    const landing = document.getElementById('system-landing');
-    if (landing) landing.classList.remove('hidden');
-}
-
-function selectSystem(system) {
-    const landing = document.getElementById('system-landing');
-    if (landing) landing.classList.add('hidden');
-    try { sessionStorage.setItem('teleflow_active_system', system); } catch (_) {}
-    switchTab(system === 'dex' ? 'dex-validated' : 'workflows');
-}
+window.addEventListener('popstate', () => {
+    const tabFromUrl = getTabFromPathname(window.location.pathname) || 'dashboard';
+    switchTab(tabFromUrl, { skipPushState: true });
+});
 
 function toggleAkoueSidebar(forceState) {
     const sidebar = document.getElementById('akoue-sidebar') || document.querySelector('.akoue-sidebar') || document.querySelector('.grok-sidebar');
@@ -226,6 +262,10 @@ function toggleGrokRailExpand(forceState) {
 }
 
 function handleWorkflowsNavClick(event) {
+    if (event && (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1)) {
+        return true;
+    }
+    if (event) event.preventDefault();
     const section = document.querySelector('.akoue-workflows-section');
     const sidebar = document.getElementById('akoue-sidebar');
     
@@ -237,7 +277,7 @@ function handleWorkflowsNavClick(event) {
         toggleAkoueSidebar(true);
         if (section) section.classList.add('open');
         try { localStorage.setItem('akoue_workflows_dropdown_open', 'true'); } catch (_) {}
-        return;
+        return false;
     }
     
     // Toggle dropdown open/closed
@@ -248,6 +288,7 @@ function handleWorkflowsNavClick(event) {
             localStorage.setItem('akoue_workflows_dropdown_open', isOpen ? 'true' : 'false');
         } catch (_) {}
     }
+    return false;
 }
 
 function handleGrokSearch(query) {
@@ -2096,6 +2137,11 @@ function updateDexValidatedCountdown() {
         el.textContent = 'Paused';
         return;
     }
+    if (dexValidatedRuntime.mode === 'websocket') {
+        const connectedCount = Number(dexValidatedRuntime.ws_connected || 0);
+        el.textContent = connectedCount > 0 ? `Live (${connectedCount} WS)` : 'Connecting…';
+        return;
+    }
     if (!dexValidatedRuntime.last_checked_at) {
         el.textContent = 'Starting…';
         return;
@@ -2130,10 +2176,58 @@ async function refreshDexValidatedStatus() {
         settings.dex_validated_auto_scan = dexValidatedRuntime.active ? 'true' : 'false';
         updateDexValidatedStatus();
         updateDexValidatedCountdown();
+
+        const latestId = Number(dexValidatedRuntime.latest_record_id || 0);
+        if (latestId > lastSeenDexValidatedRecordId) {
+            lastSeenDexValidatedRecordId = latestId;
+            const dvdTab = document.getElementById('tab-dex-validated-data');
+            if (dvdTab && !dvdTab.classList.contains('hidden')) {
+                loadDexValidatedTableData(currentDexValidatedDataPage, false);
+            }
+            const dvTab = document.getElementById('tab-dex-validated');
+            if (dvTab && !dvTab.classList.contains('hidden')) {
+                loadDexValidatedLiveResults();
+            }
+        }
     } catch (error) {
         const el = document.getElementById('dex-monitor-countdown');
         if (el) el.textContent = 'Offline';
     }
+}
+
+async function loadDexValidatedLiveResults() {
+    try {
+        const res = await fetch('/api/dex-validated/records?page=1&limit=40', { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.success || !Array.isArray(data.records)) return;
+        const mapped = data.records.map(r => ({
+            ca: r.ca,
+            name: r.token_name || r.name || 'Unknown token',
+            platform: r.platform || 'Solana (SOL)',
+            market_cap: r.market_cap || 'Unknown',
+            age: r.creation_age || r.age || 'Unknown',
+            perf_5m: r.perf_5m,
+            perf_1h: r.perf_1h,
+            perf_6h: r.perf_6h,
+            perf_24h: r.perf_24h,
+            liquidity_usd: r.liquidity_usd,
+            volume_5m: r.volume_5m,
+            volume_1h: r.volume_1h,
+            volume_6h: r.volume_6h,
+            volume_24h: r.volume_24h,
+            status: (r.status === 'forwarded' || r.status === 'detected') ? 'passed' : (r.status || 'dropped'),
+            reason: r.reason || '',
+            dex_url: r.dex_url || '',
+            signal_type: r.category_display || r.signal_type || 'DEX',
+            order_status: r.order_status || 'approved',
+            payment_timestamp: r.payment_timestamp || 0,
+            formatted_message: r.formatted_message || ''
+        }));
+        if (mapped.length > 0) {
+            renderDexValidatedResults(mapped);
+        }
+    } catch (_) {}
 }
 
 async function saveDexValidatedSettings(showConfirmation = true) {
@@ -2176,6 +2270,24 @@ async function saveDexValidatedSettings(showConfirmation = true) {
     }
 }
 
+function splitWorkflowReasons(rawReason) {
+    const text = String(rawReason || '').trim();
+    if (!text) return [];
+    const parts = text.split(/;\s*(?=\[)/).map(s => s.trim()).filter(Boolean);
+    return parts.length > 1 ? parts : text.split(/;\s+/).map(s => s.trim()).filter(Boolean);
+}
+
+function toggleDexReasonExpand(event, btn) {
+    if (event) event.stopPropagation();
+    const wrap = btn.closest('.dex-reason-wrap');
+    if (!wrap) return;
+    const moreSpan = wrap.querySelector('.dex-reason-more');
+    if (!moreSpan) return;
+    const isHidden = moreSpan.classList.contains('hidden');
+    moreSpan.classList.toggle('hidden', !isHidden);
+    btn.textContent = isHidden ? 'Show less' : btn.dataset.moreLabel;
+}
+
 function renderDexValidatedResults(results) {
     const container = document.getElementById('dex-validated-results');
     const count = document.getElementById('dex-validated-count');
@@ -2194,6 +2306,12 @@ function renderDexValidatedResults(results) {
         const ca = escapeHtml(item.ca || 'Unknown');
         const chart = item.dex_url ? `<a href="${escapeHtml(item.dex_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#60a5fa;text-decoration:none;">Chart ↗</a>` : '';
         const canPreview = !!item.ca;
+        const reasonParts = splitWorkflowReasons(item.reason);
+        const firstTwo = reasonParts.slice(0, 2).map(escapeHtml).join('<br>');
+        const extraParts = reasonParts.slice(2);
+        const extraHtml = extraParts.length > 0
+            ? `<span class="dex-reason-more hidden"><br>${extraParts.map(escapeHtml).join('<br>')}</span> <button type="button" data-more-label="+${extraParts.length} more" onclick="toggleDexReasonExpand(event, this)" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.16);color:#67e8f9;border-radius:5px;padding:1px 7px;font-size:.71rem;font-weight:600;cursor:pointer;margin-left:4px;">+${extraParts.length} more</button>`
+            : '';
         return `<div ${canPreview ? `role="button" tabindex="0" data-dex-preview-index="${index}"` : ''} style="padding:14px;border:1px solid var(--border-color);border-left:3px solid ${color};border-radius:9px;background:rgba(0,0,0,.16);${canPreview ? 'cursor:pointer;' : ''}">
             <div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:8px;"><strong>${escapeHtml(item.name || 'Unknown token')}</strong><span style="color:${color};font-size:.78rem;font-weight:700;">${label}</span></div>
             <div style="font-size:.76rem;color:var(--text-muted);word-break:break-all;margin-bottom:8px;">${ca}</div>
@@ -2201,14 +2319,14 @@ function renderDexValidatedResults(results) {
                 <span>Event: <strong>${escapeHtml(item.signal_type || 'DEX order')}</strong></span><span>Status: <strong>${escapeHtml(item.order_status || 'approved')}</strong></span>
                 <span>MC: <strong>${escapeHtml(item.market_cap || 'Unknown')}</strong></span><span>Age: <strong>${escapeHtml(item.age || 'Unknown')}</strong></span>
             </div>
-            <div style="display:flex;justify-content:space-between;gap:10px;color:var(--text-muted);font-size:.77rem;"><span>${escapeHtml(item.reason || '')}</span><span style="display:flex;gap:10px;align-items:center;">${canPreview ? '<button type="button" class="dex-preview-button" style="border:1px solid rgba(96,165,250,.45);background:rgba(96,165,250,.12);color:#93c5fd;border-radius:6px;padding:4px 8px;cursor:pointer;white-space:nowrap;">View details</button>' : ''}${chart}</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;color:var(--text-muted);font-size:.77rem;line-height:1.45;"><span class="dex-reason-wrap" style="flex:1;min-width:0;">${firstTwo}${extraHtml}</span><span style="display:flex;gap:10px;align-items:center;flex-shrink:0;">${canPreview ? '<button type="button" class="dex-preview-button" style="border:1px solid rgba(96,165,250,.45);background:rgba(96,165,250,.12);color:#93c5fd;border-radius:6px;padding:4px 8px;cursor:pointer;white-space:nowrap;">View details</button>' : ''}${chart}</span></div>
         </div>`;
     }).join('');
 
     container.querySelectorAll('[data-dex-preview-index]').forEach(card => {
         const open = () => openDexValidatedPreview(Number(card.dataset.dexPreviewIndex));
         card.addEventListener('click', event => {
-            if (event.target.closest('a')) return;
+            if (event.target.closest('a') || event.target.closest('[onclick*="toggleDexReasonExpand"]')) return;
             open();
         });
         card.addEventListener('keydown', event => {
@@ -2308,9 +2426,15 @@ async function openDexValidatedPreview(index) {
     }
     const subtitle = document.getElementById('tg-msg-modal-subtitle');
     if (subtitle) {
-        subtitle.textContent = item.status === 'passed'
-            ? 'Exact message sent or ready for Telegram'
-            : `${String(item.status || 'result').toUpperCase()}: ${item.reason || 'Signal did not pass the workflow'}`;
+        if (item.status === 'passed') {
+            subtitle.textContent = 'Exact message sent or ready for Telegram';
+        } else {
+            const parts = splitWorkflowReasons(item.reason);
+            const summary = parts.length > 2
+                ? `${parts.slice(0, 2).join('; ')} (+${parts.length - 2} more)`
+                : (item.reason || 'Signal did not pass the workflow');
+            subtitle.textContent = `${String(item.status || 'result').toUpperCase()}: ${summary}`;
+        }
     }
 }
 
@@ -2854,14 +2978,16 @@ function debounceTokenSearch() {
 }
 
 function populateTokenWorkflowPresets() {
-    const tdPresetSelect = document.getElementById('td-workflow-preset');
-    if (!tdPresetSelect) return;
-    const currentPreset = tdPresetSelect.value;
-    tdPresetSelect.innerHTML = '<option value="">No Preset (Custom Filters)</option>';
-    (workflows || []).forEach(wf => {
-        tdPresetSelect.innerHTML += `<option value="${wf.id}">${escapeHtml(wf.name)} (${(wf.rules || []).length} rules)</option>`;
+    ['td-workflow-preset', 'dvd-workflow-preset'].forEach(selectId => {
+        const selectEl = document.getElementById(selectId);
+        if (!selectEl) return;
+        const currentPreset = selectEl.value;
+        selectEl.innerHTML = '<option value="">No Preset (Custom Filters)</option>';
+        (workflows || []).forEach(wf => {
+            selectEl.innerHTML += `<option value="${wf.id}">${escapeHtml(wf.name)} (${(wf.rules || []).length} rules)</option>`;
+        });
+        selectEl.value = currentPreset;
     });
-    tdPresetSelect.value = currentPreset;
 }
 
 function updateActiveFiltersCount() {
@@ -3347,6 +3473,41 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
     }
 }
 
+function extractForwardedFlowNames(status, rawReason) {
+    const s = String(status || '').toLowerCase();
+    if (s !== 'forwarded') return [];
+    let cleaned = String(rawReason || '')
+        .replace(/^Sent via workflows to:\s*/i, '')
+        .replace(/^Passed test via:\s*/i, '')
+        .trim();
+    if (!cleaned || cleaned === '-') return [];
+    const tokens = cleaned.split(/\s*[,;]\s*/).map(t => t.replace(/^Preview:\s*/i, '').trim()).filter(Boolean);
+    const resolved = [];
+    tokens.forEach(tok => {
+        if (/^-?\d{6,}$/.test(tok) && Array.isArray(workflows)) {
+            const matched = workflows.filter(w => String(w.target_channel_id || '').trim() === tok || String(w.target_channel || '').trim() === tok);
+            if (matched.length > 0) {
+                matched.forEach(w => {
+                    if (w.name && !resolved.includes(w.name)) resolved.push(w.name);
+                });
+                return;
+            }
+        }
+        if (!resolved.includes(tok)) resolved.push(tok);
+    });
+    return resolved;
+}
+
+function formatForwardedFlowsCell(status, rawReason) {
+    const flows = extractForwardedFlowNames(status, rawReason);
+    if (!flows.length) {
+        return `<td title="Not forwarded"><span style="color: var(--text-muted); font-size: 0.78rem;">None</span></td>`;
+    }
+    const fullText = flows.join(', ');
+    const badgesHtml = flows.map(name => `<span style="display:inline-block; background:rgba(16,185,129,0.12); color:#6ee7b7; border:1px solid rgba(16,185,129,0.3); padding:1px 7px; border-radius:5px; font-size:0.74rem; font-weight:600; white-space:nowrap;">${escapeHtml(name)}</span>`).join(' ');
+    return `<td title="${escapeHtml(fullText)}"><div style="display:flex; flex-wrap:wrap; gap:4px; align-items:center;">${badgesHtml}</div></td>`;
+}
+
 function renderTokenRow(p) {
     const timeFormatted = formatRelativeTime(p.timestamp || p.created_at);
     const fullDate = p.timestamp ? new Date(p.timestamp * 1000).toLocaleString() : (p.created_at || '');
@@ -3454,9 +3615,7 @@ function renderTokenRow(p) {
             <td>${perf6hBadge}</td>
             <td>${perf24hBadge}</td>
             <td>${statusPill}</td>
-            <td title="${escapeHtml(reasonText)}">
-                <span style="color: var(--text-muted); font-size: 0.78rem;">${escapeHtml(reasonShort)}</span>
-            </td>
+            ${formatForwardedFlowsCell(p.status, p.reason)}
             <td style="text-align: right; padding-right: 1.5rem;">
                 ${dexUrl ? `
                     <a href="${dexUrl}" target="_blank" class="btn-table-action" title="Open DexScreener Chart">
@@ -3499,7 +3658,16 @@ function formatStatusPill(status) {
 
 function formatRelativeTime(ts) {
     if (!ts) return 'Just now';
-    let timeMs = typeof ts === 'number' ? ts * 1000 : new Date(ts).getTime();
+    let timeMs;
+    if (typeof ts === 'number') {
+        timeMs = ts > 1e12 ? ts : ts * 1000;
+    } else {
+        const raw = String(ts).trim();
+        const iso = (!raw.endsWith('Z') && !/[+-]\d{2}:?\d{2}$/.test(raw))
+            ? raw.replace(' ', 'T') + 'Z'
+            : raw;
+        timeMs = new Date(iso).getTime();
+    }
     if (isNaN(timeMs)) return String(ts);
     const diffSec = Math.floor((Date.now() - timeMs) / 1000);
     if (diffSec < 60) return `${Math.max(1, diffSec)}s ago`;
@@ -3829,3 +3997,800 @@ if (activeTokenTab && !activeTokenTab.classList.contains('hidden')) {
 } else {
     renderTokenDataFromCache();
 }
+
+// ==========================================
+// DEX Validated Enriched Data Table
+// ==========================================
+
+function debounceDexValidatedDataSearch() {
+    clearTimeout(dexValidatedDataSearchTimer);
+    dexValidatedDataSearchTimer = setTimeout(() => {
+        loadDexValidatedTableData(1);
+    }, 300);
+}
+
+function updateDexValidatedDataActiveFiltersCount() {
+    let count = 0;
+    const search = String(document.getElementById('dvd-search')?.value || '').trim();
+    const category = document.getElementById('dvd-category')?.value;
+    const status = document.getElementById('dvd-status')?.value;
+    const platform = document.getElementById('dvd-platform')?.value;
+    const excludePlatform = document.getElementById('dvd-exclude-platform')?.value;
+    const timeframe = document.getElementById('dvd-timeframe')?.value;
+    const minMc = String(document.getElementById('dvd-min-mc')?.value || '').trim();
+    const maxMc = String(document.getElementById('dvd-max-mc')?.value || '').trim();
+    const minLiquidity = String(document.getElementById('dvd-min-liquidity')?.value || '').trim();
+    const maxLiquidity = String(document.getElementById('dvd-max-liquidity')?.value || '').trim();
+    const minVolume = String(document.getElementById('dvd-min-volume')?.value || '').trim();
+    const maxVolume = String(document.getElementById('dvd-max-volume')?.value || '').trim();
+    const minPerf = String(document.getElementById('dvd-min-perf')?.value || '').trim();
+    const maxPerf = String(document.getElementById('dvd-max-perf')?.value || '').trim();
+    const minAge = String(document.getElementById('dvd-min-age')?.value || '').trim();
+    const maxAge = String(document.getElementById('dvd-max-age')?.value || '').trim();
+    const minMigrationAge = String(document.getElementById('dvd-min-migration-age')?.value || '').trim();
+    const maxMigrationAge = String(document.getElementById('dvd-max-migration-age')?.value || '').trim();
+    const migrated = document.getElementById('dvd-migrated')?.value;
+    const namePat = String(document.getElementById('dvd-token-name-pattern')?.value || '').trim();
+    const wordFilter = String(document.getElementById('dvd-word-filter')?.value || '').trim();
+    const preset = document.getElementById('dvd-workflow-preset')?.value;
+
+    if (search) count++;
+    if (category && category !== 'all') count++;
+    if (status && status !== 'all') count++;
+    if (platform && platform !== 'all') count++;
+    if (excludePlatform && excludePlatform !== 'none') count++;
+    if (timeframe && timeframe !== 'all') count++;
+    if (minMc) count++;
+    if (maxMc) count++;
+    if (minLiquidity) count++;
+    if (maxLiquidity) count++;
+    if (minVolume) count++;
+    if (maxVolume) count++;
+    if (minPerf) count++;
+    if (maxPerf) count++;
+    if (minAge) count++;
+    if (maxAge) count++;
+    if (minMigrationAge) count++;
+    if (maxMigrationAge) count++;
+    if (migrated && migrated !== 'all') count++;
+    if (namePat && namePat !== '.*') count++;
+    if (wordFilter) count++;
+    if (preset) count++;
+
+    const badge = document.getElementById('dvd-active-filters-count');
+    if (badge) {
+        if (count > 0) {
+            badge.innerText = `${count} filter${count > 1 ? 's' : ''} active`;
+            badge.style.display = 'inline-block';
+        } else {
+            badge.style.display = 'none';
+        }
+    }
+}
+
+function applyDexValidatedPresetToFilters() {
+    const select = document.getElementById('dvd-workflow-preset');
+    const wfId = select ? select.value : '';
+    if (!wfId) {
+        updateDexValidatedDataActiveFiltersCount();
+        loadDexValidatedTableData(1);
+        return;
+    }
+
+    const wf = (workflows || []).find(w => String(w.id) === String(wfId));
+    if (!wf || !wf.rules) {
+        loadDexValidatedTableData(1);
+        return;
+    }
+
+    const clearIds = [
+        'dvd-min-age', 'dvd-max-age', 'dvd-min-migration-age', 'dvd-max-migration-age',
+        'dvd-min-mc', 'dvd-max-mc', 'dvd-min-liquidity', 'dvd-max-liquidity',
+        'dvd-min-volume', 'dvd-max-volume', 'dvd-min-perf', 'dvd-max-perf',
+        'dvd-token-name-pattern', 'dvd-word-filter'
+    ];
+    clearIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+
+    const perfTfEl = document.getElementById('dvd-perf-tf');
+    if (perfTfEl) {
+        perfTfEl.value = '5m';
+        delete perfTfEl.dataset.appliedTf;
+    }
+    const migratedEl = document.getElementById('dvd-migrated');
+    if (migratedEl) migratedEl.value = 'all';
+    const excludePlatformEl = document.getElementById('dvd-exclude-platform');
+    if (excludePlatformEl) excludePlatformEl.value = 'none';
+    const nameModeEl = document.getElementById('dvd-token-name-mode');
+    if (nameModeEl) nameModeEl.value = 'include';
+    const categoryEl = document.getElementById('dvd-category');
+    if (categoryEl) categoryEl.value = 'all';
+
+    wf.rules.forEach(rule => {
+        const type = rule.rule_type;
+        if (type === 'token_age') {
+            const ageType = (rule.search_text || 'creation').toLowerCase();
+            if (ageType === 'migration') {
+                const minMig = document.getElementById('dvd-min-migration-age');
+                const maxMig = document.getElementById('dvd-max-migration-age');
+                if (minMig && rule.time_min !== undefined && rule.time_min !== null) minMig.value = rule.time_min;
+                if (maxMig && rule.time_max !== undefined && rule.time_max !== null) maxMig.value = rule.time_max;
+            } else {
+                const minAge = document.getElementById('dvd-min-age');
+                const maxAge = document.getElementById('dvd-max-age');
+                if (minAge && rule.time_min !== undefined && rule.time_min !== null) minAge.value = rule.time_min;
+                if (maxAge && rule.time_max !== undefined && rule.time_max !== null) maxAge.value = rule.time_max;
+            }
+        } else if (type === 'market_cap') {
+            const minMc = document.getElementById('dvd-min-mc');
+            const maxMc = document.getElementById('dvd-max-mc');
+            if (minMc && rule.time_min !== undefined && rule.time_min !== null) minMc.value = rule.time_min;
+            if (maxMc && rule.time_max !== undefined && rule.time_max !== null) maxMc.value = rule.time_max;
+        } else if (type === 'performance') {
+            const tfClean = (rule.search_text || '5m').toLowerCase().replace('hr', 'h');
+            const currentAppliedTf = perfTfEl ? perfTfEl.dataset.appliedTf : null;
+            if (!currentAppliedTf || tfClean === '5m' || (tfClean === '1h' && currentAppliedTf !== '5m')) {
+                if (perfTfEl && ['5m', '1h', '6h', '24h'].includes(tfClean)) {
+                    perfTfEl.value = tfClean;
+                    perfTfEl.dataset.appliedTf = tfClean;
+                }
+                const minP = document.getElementById('dvd-min-perf');
+                const maxP = document.getElementById('dvd-max-perf');
+                if (minP && rule.time_min !== undefined && rule.time_min !== null) minP.value = rule.time_min;
+                if (maxP && rule.time_max !== undefined && rule.time_max !== null) maxP.value = rule.time_max;
+            }
+        } else if (type === 'liquidity') {
+            const minL = document.getElementById('dvd-min-liquidity');
+            const maxL = document.getElementById('dvd-max-liquidity');
+            if (minL && rule.time_min !== undefined && rule.time_min !== null) minL.value = rule.time_min;
+            if (maxL && rule.time_max !== undefined && rule.time_max !== null) maxL.value = rule.time_max;
+        } else if (type === 'volume') {
+            const tf = (rule.search_text || '24h').toLowerCase().replace('hr', 'h');
+            const tfEl = document.getElementById('dvd-volume-tf');
+            const minV = document.getElementById('dvd-min-volume');
+            const maxV = document.getElementById('dvd-max-volume');
+            if (tfEl && ['5m', '1h', '6h', '24h'].includes(tf)) tfEl.value = tf;
+            if (minV && rule.time_min !== undefined && rule.time_min !== null) minV.value = rule.time_min;
+            if (maxV && rule.time_max !== undefined && rule.time_max !== null) maxV.value = rule.time_max;
+        } else if (type === 'migrated') {
+            if (migratedEl) migratedEl.value = (rule.search_text || 'yes').toLowerCase();
+        } else if (type === 'exclude_platform') {
+            if (excludePlatformEl) {
+                const p = (rule.search_text || '').toLowerCase();
+                if (p.includes('pump')) excludePlatformEl.value = 'pump';
+                else if (p.includes('raydium')) excludePlatformEl.value = 'raydium';
+                else if (p.includes('moon')) excludePlatformEl.value = 'moonshot';
+            }
+        } else if (type === 'token_name') {
+            const patEl = document.getElementById('dvd-token-name-pattern');
+            if (patEl) patEl.value = rule.search_text || '.*';
+            if (nameModeEl) nameModeEl.value = (rule.replace_text || 'include').toLowerCase();
+        } else if (type === 'filter') {
+            const wfEl = document.getElementById('dvd-word-filter');
+            if (wfEl) wfEl.value = rule.search_text || '';
+        } else if (type === 'category' && categoryEl) {
+            const catVal = (rule.search_text || '').toLowerCase();
+            if (catVal === 'cto' || catVal === 'boost' || catVal === 'dex_profile' || catVal === 'dex_ad') {
+                categoryEl.value = catVal;
+            }
+        }
+    });
+
+    updateDexValidatedDataActiveFiltersCount();
+    loadDexValidatedTableData(1);
+}
+
+function resetDexValidatedDataFilters() {
+    const els = {
+        'dvd-workflow-preset': '',
+        'dvd-search': '',
+        'dvd-category': 'all',
+        'dvd-status': 'all',
+        'dvd-platform': 'all',
+        'dvd-exclude-platform': 'none',
+        'dvd-timeframe': 'all',
+        'dvd-sort-by': 'id_desc',
+        'dvd-min-mc': '',
+        'dvd-max-mc': '',
+        'dvd-min-liquidity': '',
+        'dvd-max-liquidity': '',
+        'dvd-volume-tf': '24h',
+        'dvd-min-volume': '',
+        'dvd-max-volume': '',
+        'dvd-perf-tf': '5m',
+        'dvd-min-perf': '',
+        'dvd-max-perf': '',
+        'dvd-min-age': '',
+        'dvd-max-age': '',
+        'dvd-min-migration-age': '',
+        'dvd-max-migration-age': '',
+        'dvd-migrated': 'all',
+        'dvd-token-name-mode': 'include',
+        'dvd-token-name-pattern': '',
+        'dvd-word-filter': ''
+    };
+    for (const [id, val] of Object.entries(els)) {
+        const el = document.getElementById(id);
+        if (el) el.value = val;
+    }
+    updateDexValidatedDataActiveFiltersCount();
+    loadDexValidatedTableData(1);
+}
+
+function toggleDexValidatedDataAutoRefresh() {
+    const select = document.getElementById('dvd-autorefresh');
+    let intervalMs = parseInt(select ? select.value : '3000', 10);
+    if (isNaN(intervalMs) || intervalMs < 0) {
+        intervalMs = 3000;
+        if (select) select.value = '3000';
+    }
+    if (dexValidatedDataAutoRefreshInterval) {
+        clearInterval(dexValidatedDataAutoRefreshInterval);
+        dexValidatedDataAutoRefreshInterval = null;
+    }
+    if (intervalMs > 0) {
+        dexValidatedDataAutoRefreshInterval = setInterval(() => {
+            const dvdTab = document.getElementById('tab-dex-validated-data');
+            if (dvdTab && !dvdTab.classList.contains('hidden')) {
+                loadDexValidatedTableData(currentDexValidatedDataPage, false);
+            }
+        }, intervalMs);
+    }
+}
+
+async function loadDexValidatedTableData(page = 1, showLoading = false) {
+    currentDexValidatedDataPage = page;
+    const tbody = document.getElementById('dex-validated-data-tbody');
+    const tbodyText = tbody ? (tbody.innerText || tbody.textContent || '') : '';
+    const hasRows = tbody && tbody.children && tbody.children.length > 0 && !tbodyText.includes('Connecting') && !tbodyText.includes('Loading');
+    if (showLoading && tbody && !hasRows) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="15" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite;"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                        <span>Loading enriched DEX Validated records...</span>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }
+
+    try {
+        const search = String(document.getElementById('dvd-search')?.value || '').trim();
+        const category = document.getElementById('dvd-category')?.value || 'all';
+        const status = document.getElementById('dvd-status')?.value || 'all';
+        const platform = document.getElementById('dvd-platform')?.value || 'all';
+        const excludePlatform = document.getElementById('dvd-exclude-platform')?.value || 'none';
+        const timeframe = document.getElementById('dvd-timeframe')?.value || 'all';
+        const sortVal = document.getElementById('dvd-sort-by')?.value || 'id_desc';
+        const minMc = String(document.getElementById('dvd-min-mc')?.value || '').trim();
+        const maxMc = String(document.getElementById('dvd-max-mc')?.value || '').trim();
+        const minLiquidity = String(document.getElementById('dvd-min-liquidity')?.value || '').trim();
+        const maxLiquidity = String(document.getElementById('dvd-max-liquidity')?.value || '').trim();
+        const volumeTf = document.getElementById('dvd-volume-tf')?.value || '24h';
+        const minVolume = String(document.getElementById('dvd-min-volume')?.value || '').trim();
+        const maxVolume = String(document.getElementById('dvd-max-volume')?.value || '').trim();
+        const perfTf = document.getElementById('dvd-perf-tf')?.value || '5m';
+        const minPerf = String(document.getElementById('dvd-min-perf')?.value || '').trim();
+        const maxPerf = String(document.getElementById('dvd-max-perf')?.value || '').trim();
+        const minAge = String(document.getElementById('dvd-min-age')?.value || '').trim();
+        const maxAge = String(document.getElementById('dvd-max-age')?.value || '').trim();
+        const minMigrationAge = String(document.getElementById('dvd-min-migration-age')?.value || '').trim();
+        const maxMigrationAge = String(document.getElementById('dvd-max-migration-age')?.value || '').trim();
+        const migrated = document.getElementById('dvd-migrated')?.value || 'all';
+        const tokenNamePattern = String(document.getElementById('dvd-token-name-pattern')?.value || '').trim();
+        const tokenNameMode = document.getElementById('dvd-token-name-mode')?.value || 'include';
+        const wordFilter = String(document.getElementById('dvd-word-filter')?.value || '').trim();
+        const limit = document.getElementById('dvd-limit')?.value || '100';
+
+        const lastIdx = sortVal.lastIndexOf('_');
+        const sortBy = lastIdx !== -1 ? sortVal.slice(0, lastIdx) : sortVal;
+        const sortOrder = lastIdx !== -1 ? sortVal.slice(lastIdx + 1) : 'desc';
+
+        const params = new URLSearchParams({
+            page: page,
+            limit: limit,
+            search: search,
+            category: category,
+            status: status,
+            platform: platform,
+            exclude_platform: excludePlatform,
+            timeframe: timeframe,
+            sort_by: sortBy || 'id',
+            sort_order: sortOrder || 'desc'
+        });
+
+        if (minMc) params.append('min_mc', minMc);
+        if (maxMc) params.append('max_mc', maxMc);
+        if (minLiquidity) params.append('min_liquidity', minLiquidity);
+        if (maxLiquidity) params.append('max_liquidity', maxLiquidity);
+        if (volumeTf) params.append('volume_tf', volumeTf);
+        if (minVolume) params.append('min_volume', minVolume);
+        if (maxVolume) params.append('max_volume', maxVolume);
+        if (perfTf) params.append('perf_tf', perfTf);
+        if (minPerf) params.append('min_perf', minPerf);
+        if (maxPerf) params.append('max_perf', maxPerf);
+        if (minAge) params.append('min_age', minAge);
+        if (maxAge) params.append('max_age', maxAge);
+        if (minMigrationAge) params.append('min_migration_age', minMigrationAge);
+        if (maxMigrationAge) params.append('max_migration_age', maxMigrationAge);
+        if (migrated && migrated !== 'all') params.append('migrated', migrated);
+        if (tokenNamePattern) params.append('token_name_pattern', tokenNamePattern);
+        if (tokenNameMode) params.append('token_name_mode', tokenNameMode);
+        if (wordFilter) params.append('word_filter', wordFilter);
+
+        updateDexValidatedDataActiveFiltersCount();
+
+        const res = await fetch(`/api/dex-validated/records?${params.toString()}`, { cache: 'no-store' });
+        const data = await res.json();
+
+        const badge = document.getElementById('dvd-sync-badge');
+        if (!data.success) {
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="15" style="text-align: center; color: #ef4444; padding: 2rem;">Error: ${escapeHtml(data.error || 'Failed to fetch data')}</td></tr>`;
+            }
+            return;
+        }
+
+        if (badge) {
+            const wsCount = Number(data.ws_connected || 0);
+            badge.innerHTML = `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${wsCount > 0 ? '#34d399' : '#fbbf24'};box-shadow:0 0 6px ${wsCount > 0 ? '#10b981' : '#f59e0b'};"></span> <span>${wsCount > 0 ? `Live WebSocket (${wsCount}/4 Feeds)` : 'WebSocket Connecting...'}</span>`;
+        }
+
+        if (data.stats) {
+            const kpiTotal = document.getElementById('dvd-kpi-total');
+            const kpiForwarded = document.getElementById('dvd-kpi-forwarded');
+            const kpiUnique = document.getElementById('dvd-kpi-unique');
+            const kpiVolume = document.getElementById('dvd-kpi-volume');
+            const breakdown = document.getElementById('dvd-category-breakdown');
+
+            if (kpiTotal) kpiTotal.innerText = Number(data.stats.total || 0).toLocaleString();
+            if (kpiForwarded) kpiForwarded.innerText = Number(data.stats.forwarded || 0).toLocaleString();
+            if (kpiUnique) kpiUnique.innerText = Number(data.stats.unique_tokens || 0).toLocaleString();
+            if (kpiVolume) {
+                kpiVolume.innerText = formatUsdMetric(data.stats.total_volume || 0);
+            }
+            if (breakdown) {
+                breakdown.innerHTML = `CTO: <strong style="color:#a78bfa;">${Number(data.stats.cto_count || 0).toLocaleString()}</strong> · Boost: <strong style="color:#fbbf24;">${Number(data.stats.boost_count || 0).toLocaleString()}</strong> · DEX: <strong style="color:#67e8f9;">${Number(data.stats.dex_count || 0).toLocaleString()}</strong>`;
+            }
+        }
+
+        const records = data.records || [];
+        if (records.length === 0) {
+            if (tbody) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="15" style="text-align: center; padding: 3.5rem; color: var(--text-muted);">
+                            <div style="display:flex; justify-content:center; margin-bottom: 10px;">
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                            </div>
+                            <div style="font-weight: 500; font-size: 0.95rem; color: white;">Waiting for DEX Validated events...</div>
+                            <div style="font-size: 0.8rem; margin-top: 4px;">Tokens from DEX Screener WebSockets will be enriched and displayed here automatically as soon as they appear.</div>
+                        </td>
+                    </tr>
+                `;
+            }
+            renderDexValidatedDataPagination(0, 0, page, 1);
+            return;
+        }
+
+        if (tbody) {
+            tbody.innerHTML = records.map(r => renderDexValidatedDataRow(r)).join('');
+        }
+        renderDexValidatedDataPagination(data.total, records.length, data.page, data.total_pages);
+    } catch (err) {
+        console.error('Failed to load DEX Validated table data:', err);
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="15" style="text-align: center; color: #ef4444; padding: 2rem;">Error loading data: ${escapeHtml(err.message)}</td></tr>`;
+        }
+    }
+}
+
+function renderDexValidatedDataRow(r) {
+    const timeFormatted = formatRelativeTime(r.timestamp || r.created_at);
+    const fullDate = r.timestamp ? new Date(r.timestamp * 1000).toLocaleString() : (r.created_at || '');
+    const tokenName = r.token_name || r.name || 'Unknown';
+    const ca = r.ca || '';
+    const caShort = ca ? `${ca.slice(0, 4)}...${ca.slice(-4)}` : '-';
+    const platform = r.platform ? r.platform.toUpperCase() : 'SOLANA';
+    const isMigrated = Boolean(r.is_migrated);
+
+    const cat = String(r.category_display || 'DEX PROFILE').toUpperCase();
+    let catColor = '#67e8f9';
+    let catBg = 'rgba(6, 182, 212, 0.15)';
+    let catBorder = 'rgba(6, 182, 212, 0.35)';
+    if (cat === 'CTO') {
+        catColor = '#c4b5fd';
+        catBg = 'rgba(139, 92, 246, 0.18)';
+        catBorder = 'rgba(139, 92, 246, 0.4)';
+    } else if (cat === 'BOOST') {
+        catColor = '#fcd34d';
+        catBg = 'rgba(245, 158, 11, 0.18)';
+        catBorder = 'rgba(245, 158, 11, 0.4)';
+    } else if (cat === 'DEX AD') {
+        catColor = '#f472b6';
+        catBg = 'rgba(236, 72, 153, 0.16)';
+        catBorder = 'rgba(236, 72, 153, 0.38)';
+    }
+
+    const boostSub = r.boost_amount ? `⚡ ${r.boost_amount} Boosts` : (r.detection_seconds != null ? `⚡ ${Number(r.detection_seconds).toFixed(1)}s latency` : (r.order_status ? r.order_status.toUpperCase() : 'APPROVED'));
+
+    const mc = r.market_cap || '-';
+    const liquidity = formatUsdMetric(r.liquidity_usd);
+    const volume5m = formatUsdMetric(r.volume_5m);
+    const volume1h = formatUsdMetric(r.volume_1h);
+    const volume6h = formatUsdMetric(r.volume_6h);
+    const volume24h = formatUsdMetric(r.volume_24h);
+    const creationAge = r.creation_age || r.age || '-';
+    const migrationAge = r.migration_age && r.migration_age !== '0' && r.migration_age !== '-' ? r.migration_age : null;
+
+    const perf5mBadge = formatPerfBadge(r.perf_5m);
+    const perf1hBadge = formatPerfBadge(r.perf_1h);
+    const perf6hBadge = formatPerfBadge(r.perf_6h);
+    const perf24hBadge = formatPerfBadge(r.perf_24h);
+
+    const statusPill = formatStatusPill(r.status);
+    const reasonText = r.reason || '-';
+    const reasonShort = reasonText.length > 35 ? `${reasonText.slice(0, 32)}...` : reasonText;
+
+    const dexUrl = r.dex_url || (ca ? `https://dexscreener.com/solana/${ca}` : '');
+    const solscanUrl = ca ? `https://solscan.io/token/${ca}` : '';
+    const encodedMsg = encodeURIComponent(r.formatted_message || '');
+    const encodedTokenName = encodeURIComponent(tokenName);
+
+    return `
+        <tr>
+            <td title="${escapeHtml(fullDate)}">
+                <div style="color: var(--text-main); font-weight: 500;">${escapeHtml(timeFormatted)}</div>
+                <div style="font-size: 0.72rem; color: var(--text-muted);">${escapeHtml(fullDate.split(',')[0])}</div>
+            </td>
+            <td>
+                <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                    <span style="font-weight: 600; color: white; font-size: 0.9rem;">${escapeHtml(tokenName)}</span>
+                    <span class="badge-platform">${escapeHtml(platform)}</span>
+                    ${isMigrated ? '<span style="background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid rgba(16,185,129,0.3); padding: 1px 4px; border-radius: 4px; font-size: 0.68rem;">Raydium</span>' : ''}
+                </div>
+            </td>
+            <td>
+                ${ca ? `
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span class="code-address" onclick="copyTextToClipboard('${ca}', this)" title="Click to copy full CA">${caShort}</span>
+                        <a href="${dexUrl}" target="_blank" title="View Chart on DexScreener" style="color: #60a5fa; text-decoration: none; display: inline-flex; align-items: center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></a>
+                        <a href="${solscanUrl}" target="_blank" title="View on Solscan" style="color: var(--text-muted); text-decoration: none; display: inline-flex; align-items: center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>
+                    </div>
+                ` : '<span style="color: var(--text-muted);">-</span>'}
+            </td>
+            <td>
+                <span style="display:inline-block; background:${catBg}; color:${catColor}; border:1px solid ${catBorder}; padding:2px 7px; border-radius:5px; font-size:0.74rem; font-weight:700;">${escapeHtml(cat)}</span>
+                <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 3px;">${escapeHtml(boostSub)}</div>
+            </td>
+            <td><strong style="color: #e2e8f0;">${escapeHtml(mc)}</strong></td>
+            <td><strong style="color: #2dd4bf;">${liquidity}</strong></td>
+            <td title="5m: ${volume5m}, 1h: ${volume1h}, 6h: ${volume6h}, 24h: ${volume24h}">
+                <div style="font-size:0.74rem; white-space:nowrap;">5m ${volume5m} · 1h ${volume1h}</div>
+                <div style="font-size:0.74rem; color:var(--text-muted); white-space:nowrap;">6h ${volume6h} · 24h ${volume24h}</div>
+            </td>
+            <td>
+                <div style="font-weight: 500; color: #e2e8f0; font-size: 0.85rem;" title="Creation Age: ${escapeHtml(creationAge)}">${escapeHtml(creationAge)}</div>
+                ${migrationAge ? `<div style="font-size: 0.72rem; color: #34d399; margin-top: 1px;" title="Migration Age: ${escapeHtml(migrationAge)}">Mig: ${escapeHtml(migrationAge)}</div>` : ''}
+            </td>
+            <td>${perf5mBadge}</td>
+            <td>${perf1hBadge}</td>
+            <td>${perf6hBadge}</td>
+            <td>${perf24hBadge}</td>
+            <td>${statusPill}</td>
+            ${formatForwardedFlowsCell(r.status, r.reason)}
+            <td style="text-align: right; padding-right: 1.5rem; white-space: nowrap;">
+                <button type="button" class="btn-table-action" onclick="openTgMsgModal('${encodedMsg}', '${encodedTokenName}')" title="View Formatted Signal Details" style="margin-right: 6px; cursor: pointer;">
+                    Details
+                </button>
+                ${dexUrl ? `
+                    <a href="${dexUrl}" target="_blank" class="btn-table-action" title="Open DexScreener Chart">
+                        Chart
+                    </a>
+                ` : ''}
+            </td>
+        </tr>
+    `;
+}
+
+function renderDexValidatedDataPagination(total, count, page, totalPages) {
+    const infoEl = document.getElementById('dvd-pagination-info');
+    const controlsEl = document.getElementById('dvd-pagination-controls');
+
+    if (infoEl) {
+        const limitVal = parseInt(document.getElementById('dvd-limit')?.value || '100', 10);
+        const start = total === 0 ? 0 : (page - 1) * limitVal + 1;
+        const end = total === 0 ? 0 : Math.min(total, start + count - 1);
+        infoEl.innerHTML = `Showing <strong>${start.toLocaleString()}-${end.toLocaleString()}</strong> of <strong>${total.toLocaleString()}</strong> records`;
+    }
+
+    if (!controlsEl) return;
+
+    let html = '';
+    html += `<button class="page-btn" ${page <= 1 ? 'disabled' : ''} onclick="loadDexValidatedTableData(${page - 1})">← Prev</button>`;
+
+    const maxButtons = 5;
+    let startPage = Math.max(1, page - Math.floor(maxButtons / 2));
+    let endPage = Math.min(totalPages, startPage + maxButtons - 1);
+    if (endPage - startPage + 1 < maxButtons) {
+        startPage = Math.max(1, endPage - maxButtons + 1);
+    }
+
+    if (startPage > 1) {
+        html += `<button class="page-btn" onclick="loadDexValidatedTableData(1)">1</button>`;
+        if (startPage > 2) html += `<span style="color: var(--text-muted); padding: 0 4px;">...</span>`;
+    }
+
+    for (let p = startPage; p <= endPage; p++) {
+        html += `<button class="page-btn ${p === page ? 'active' : ''}" onclick="loadDexValidatedTableData(${p})">${p}</button>`;
+    }
+
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) html += `<span style="color: var(--text-muted); padding: 0 4px;">...</span>`;
+        html += `<button class="page-btn" onclick="loadDexValidatedTableData(${totalPages})">${totalPages}</button>`;
+    }
+
+    html += `<button class="page-btn" ${page >= totalPages ? 'disabled' : ''} onclick="loadDexValidatedTableData(${page + 1})">Next →</button>`;
+    controlsEl.innerHTML = html;
+}
+
+async function exportDexValidatedDataCSV() {
+    try {
+        const res = await fetch('/api/dex-validated/records?page=1&limit=10000', { cache: 'no-store' });
+        const data = await res.json();
+        if (!data.success || !data.records || data.records.length === 0) {
+            alert('No DEX Validated records available to export.');
+            return;
+        }
+        const headers = ['ID', 'Time', 'Token Name', 'CA', 'Category', 'Platform', 'Market Cap', 'Liquidity USD', 'Vol 5m', 'Vol 1h', 'Vol 6h', 'Vol 24h', 'Creation Age', 'Migration Age', 'Perf 5m %', 'Perf 1h %', 'Perf 6h %', 'Perf 24h %', 'Status', 'Reason', 'DEX URL'];
+        const csvRows = [headers.join(',')];
+        data.records.forEach(r => {
+            const vals = [
+                r.id,
+                r.timestamp ? new Date(r.timestamp * 1000).toISOString() : (r.created_at || ''),
+                `"${String(r.token_name || '').replace(/"/g, '""')}"`,
+                r.ca || '',
+                r.category_display || '',
+                `"${String(r.platform || '').replace(/"/g, '""')}"`,
+                `"${String(r.market_cap || '').replace(/"/g, '""')}"`,
+                r.liquidity_usd || 0,
+                r.volume_5m || 0,
+                r.volume_1h || 0,
+                r.volume_6h || 0,
+                r.volume_24h || 0,
+                `"${String(r.creation_age || '').replace(/"/g, '""')}"`,
+                `"${String(r.migration_age || '').replace(/"/g, '""')}"`,
+                r.perf_5m || 0,
+                r.perf_1h || 0,
+                r.perf_6h || 0,
+                r.perf_24h || 0,
+                r.status || '',
+                `"${String(r.reason || '').replace(/"/g, '""')}"`,
+                r.dex_url || ''
+            ];
+            csvRows.push(vals.join(','));
+        });
+        const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `dex_validated_data_${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    } catch (e) {
+        alert('Failed to export CSV: ' + e.message);
+    }
+}
+
+async function loadDashboardOverview(showToast = false) {
+    try {
+        const res = await fetch('/api/dashboard/overview', { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.success) return;
+
+        const sys = data.system || {};
+        const dv = data.dex_validated || {};
+        const dp = data.dex_paid || {};
+
+        const setEl = (id, html, isHtml = false) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            if (isHtml) el.innerHTML = html;
+            else el.textContent = html;
+        };
+
+        const wsCount = Number(sys.ws_connected || 0);
+        setEl('dash-ws-badge', `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${wsCount > 0 ? '#34d399' : '#fbbf24'};box-shadow:0 0 8px ${wsCount > 0 ? '#10b981' : '#f59e0b'};"></span><span>${wsCount}/4 WebSockets Live</span>`, true);
+        setEl('dash-sol-price', sys.sol_price ? `$${Number(sys.sol_price).toFixed(2)}` : '$—');
+
+        setEl('dash-sys-ws', `${wsCount}/4 Feeds · ${sys.dex_validated_auto ? 'Auto Forward ON' : 'Stream Capture ON'}`);
+        setEl('dash-sys-paid', sys.helius_configured ? (sys.dex_paid_auto ? 'Live Scan Active' : 'Helius Ready') : 'API Key Needed');
+        setEl('dash-sys-workflows', `${Number(sys.active_workflows || 0)} Active / ${Number(sys.total_workflows || 0)} Total`);
+        setEl('dash-sys-cloud', sys.supabase_connected ? 'Supabase Synced' : 'Local SQLite Mode');
+
+        const dvTotal = Number(dv.total || 0);
+        const dpTotal = Number(dp.total || 0);
+        const combinedTotal = dvTotal + dpTotal;
+        const combinedForwarded = Number(dv.forwarded || 0) + Number(dp.forwarded || 0);
+        const combinedVol = Number(dv.total_volume_24h || 0) + Number(dp.total_volume_24h || 0);
+        const passRate = combinedTotal > 0 ? ((combinedForwarded / combinedTotal) * 100).toFixed(1) : '0.0';
+        const avgLiq = dvTotal > 0 ? Number(dv.avg_liquidity_usd || 0) : Number(dp.avg_liquidity_usd || 0);
+
+        setEl('dash-kpi-dv-total', dvTotal.toLocaleString());
+        setEl('dash-kpi-dv-sub', `${Number(dv.unique_tokens || 0).toLocaleString()} Unique · ${formatUsdMetric(dv.total_volume_24h || 0)} 24h Vol`);
+
+        setEl('dash-kpi-dp-total', dpTotal.toLocaleString());
+        setEl('dash-kpi-dp-sub', `${formatUsdMetric(dp.total_paid_usd || 0)} Spend · ${Number(dp.unique_tokens || 0).toLocaleString()} Unique`);
+
+        setEl('dash-kpi-forwarded', combinedForwarded.toLocaleString());
+        setEl('dash-kpi-pass-rate', `${passRate}% pass rate · ${Number(dv.detected || 0).toLocaleString()} detected`);
+
+        setEl('dash-kpi-combined-vol', formatUsdMetric(combinedVol));
+        setEl('dash-kpi-avg-liq', `Avg Liquidity: ${formatUsdMetric(avgLiq)}`);
+
+        setEl('dash-total-combined-pill', `${combinedTotal.toLocaleString()} total signals`);
+
+        // Category Distribution Bars
+        const distEl = document.getElementById('dash-distribution-bars');
+        if (distEl) {
+            const items = [
+                { label: 'CTO (Community Takeover)', count: Number(dv.cto_count || 0), color: '#a78bfa', tab: 'dex-validated-data', cat: 'cto' },
+                { label: 'Token Boosts', count: Number(dv.boost_count || 0), color: '#fbbf24', tab: 'dex-validated-data', cat: 'boost' },
+                { label: 'DEX Profiles', count: Number(dv.profile_count || 0), color: '#34d399', tab: 'dex-validated-data', cat: 'dex_profile' },
+                { label: 'DEX Ads', count: Number(dv.ad_count || 0), color: '#f472b6', tab: 'dex-validated-data', cat: 'dex_ad' },
+                { label: 'DEX Paid (Helius Wallet)', count: dpTotal, color: '#22d3ee', tab: 'token-data', cat: null }
+            ];
+            const maxVal = Math.max(1, ...items.map(i => i.count));
+            distEl.innerHTML = items.map(item => {
+                const pct = combinedTotal > 0 ? ((item.count / combinedTotal) * 100).toFixed(1) : '0.0';
+                const barWidth = Math.max(3, Math.round((item.count / maxVal) * 100));
+                return `
+                    <div style="cursor:pointer;" onclick="openDashboardCategory('${item.tab}', '${item.cat || ''}')">
+                        <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:5px;">
+                            <span style="color:#e5e7eb; font-weight:500;">${escapeHtml(item.label)}</span>
+                            <span style="color:var(--text-muted);"><strong style="color:white;">${item.count.toLocaleString()}</strong> (${pct}%)</span>
+                        </div>
+                        <div style="width:100%; height:8px; background:rgba(255,255,255,0.05); border-radius:999px; overflow:hidden;">
+                            <div style="width:${barWidth}%; height:100%; background:${item.color}; border-radius:999px; transition:width 0.35s ease;"></div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        const totalMigYes = Number(dv.migrated_count || 0) + Number(dp.migrated_count || 0);
+        const totalMigNo = Number(dv.unmigrated_count || 0) + Number(dp.unmigrated_count || 0);
+        setEl('dash-mig-yes', totalMigYes.toLocaleString());
+        setEl('dash-mig-no', totalMigNo.toLocaleString());
+        setEl('dash-avg-mc', formatUsdMetric(dv.avg_mc_usd || 0));
+
+        // Top Momentum Movers
+        const moversEl = document.getElementById('dash-top-movers');
+        const movers = data.top_movers || [];
+        if (moversEl) {
+            if (!movers.length) {
+                moversEl.innerHTML = '<div style="color:var(--text-muted);font-size:0.85rem;padding:2rem;text-align:center;">Waiting for enriched tokens...</div>';
+            } else {
+                moversEl.innerHTML = movers.map(m => {
+                    const p1h = Number(m.perf_1h || 0);
+                    const p5m = Number(m.perf_5m || 0);
+                    const p1hColor = p1h >= 0 ? '#34d399' : '#f87171';
+                    const p5mColor = p5m >= 0 ? '#34d399' : '#f87171';
+                    const caShort = m.ca ? `${m.ca.slice(0, 4)}...${m.ca.slice(-4)}` : '-';
+                    const encMsg = encodeURIComponent(m.formatted_message || '');
+                    const encName = encodeURIComponent(m.token_name || 'Token');
+                    return `
+                        <div style="background:rgba(255,255,255,0.025); border:1px solid var(--border-color); border-radius:11px; padding:11px 13px; display:flex; flex-direction:column; gap:6px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+                                <strong style="color:white; font-size:0.88rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(m.token_name)}</strong>
+                                <span style="font-size:0.66rem; font-weight:700; padding:2px 6px; border-radius:4px; background:rgba(6,182,212,0.14); color:#67e8f9; white-space:nowrap;">${escapeHtml(m.source || 'SIGNAL')}</span>
+                            </div>
+                            <div style="display:flex; justify-content:space-between; font-size:0.76rem; color:var(--text-muted);">
+                                <span>MC: <strong style="color:#e2e8f0;">${escapeHtml(m.market_cap || '-')}</strong></span>
+                                <span>Liq: <strong style="color:#2dd4bf;">${formatUsdMetric(m.liquidity_usd)}</strong></span>
+                            </div>
+                            <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.76rem; padding-top:4px; border-top:1px solid rgba(255,255,255,0.05);">
+                                <span>5m: <strong style="color:${p5mColor};">${p5m >= 0 ? '+' : ''}${p5m.toFixed(1)}%</strong> · 1h: <strong style="color:${p1hColor};">${p1h >= 0 ? '+' : ''}${p1h.toFixed(1)}%</strong></span>
+                                <div style="display:flex; gap:6px;">
+                                    <button type="button" onclick="openTgMsgModal('${encMsg}', '${encName}')" style="background:none;border:none;color:#93c5fd;font-size:0.73rem;cursor:pointer;padding:0;">Details</button>
+                                    <a href="${escapeHtml(m.dex_url || '#')}" target="_blank" style="color:#34d399;font-size:0.73rem;text-decoration:none;" title="${escapeHtml(caShort)}">Chart ↗</a>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+        }
+
+        // Render Dual Live Streams
+        const renderStreamRow = (item, isPaid) => {
+            const timeStr = formatRelativeTime(item.timestamp || item.created_at);
+            const p5m = Number(item.perf_5m || 0);
+            const p1h = Number(item.perf_1h || 0);
+            const p5mColor = p5m >= 0 ? '#34d399' : '#f87171';
+            const p1hColor = p1h >= 0 ? '#34d399' : '#f87171';
+            const badgeText = isPaid ? `$${Number(item.amount_usd || 0).toFixed(0)} PAID` : (item.category_display || 'DEX');
+            const badgeBg = isPaid ? 'rgba(6,182,212,0.15)' : (badgeText === 'CTO' ? 'rgba(139,92,246,0.18)' : badgeText === 'BOOST' ? 'rgba(245,158,11,0.18)' : 'rgba(16,185,129,0.16)');
+            const badgeColor = isPaid ? '#67e8f9' : (badgeText === 'CTO' ? '#c4b5fd' : badgeText === 'BOOST' ? '#fcd34d' : '#34d399');
+            const encMsg = encodeURIComponent(item.formatted_message || '');
+            const encName = encodeURIComponent(item.token_name || 'Token');
+            const ca = item.ca || '';
+            const caShort = ca ? `${ca.slice(0, 4)}...${ca.slice(-4)}` : '-';
+
+            return `
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:9px 12px; border-radius:9px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05);">
+                    <div style="min-width:0; flex:1.2;">
+                        <div style="display:flex; align-items:center; gap:7px;">
+                            <strong style="color:white; font-size:0.86rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(item.token_name)}</strong>
+                            <span style="font-size:0.66rem; font-weight:700; padding:1px 6px; border-radius:4px; background:${badgeBg}; color:${badgeColor}; white-space:nowrap;">${escapeHtml(badgeText)}</span>
+                        </div>
+                        <div style="font-size:0.72rem; color:var(--text-muted); margin-top:2px; display:flex; gap:8px; align-items:center;">
+                            <span>${escapeHtml(timeStr)}</span>
+                            <span>·</span>
+                            <span class="code-address" onclick="copyTextToClipboard('${ca}', this)" style="font-size:0.7rem; padding:0 4px; cursor:pointer;" title="Copy CA">${escapeHtml(caShort)}</span>
+                            <span>· Age ${escapeHtml(item.age || '-')}</span>
+                        </div>
+                    </div>
+                    <div style="text-align:right; font-size:0.76rem; white-space:nowrap;">
+                        <div>MC <strong style="color:#e2e8f0;">${escapeHtml(item.market_cap || '-')}</strong> · Liq <strong style="color:#2dd4bf;">${formatUsdMetric(item.liquidity_usd)}</strong></div>
+                        <div style="margin-top:2px;">5m <strong style="color:${p5mColor};">${p5m >= 0 ? '+' : ''}${p5m.toFixed(1)}%</strong> · 1h <strong style="color:${p1hColor};">${p1h >= 0 ? '+' : ''}${p1h.toFixed(1)}%</strong></div>
+                    </div>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <button type="button" class="btn-table-action" onclick="openTgMsgModal('${encMsg}', '${encName}')" style="padding:4px 8px; font-size:0.72rem; cursor:pointer;">Details</button>
+                        <a href="${escapeHtml(item.dex_url || '#')}" target="_blank" class="btn-table-action" style="padding:4px 8px; font-size:0.72rem;">Chart</a>
+                    </div>
+                </div>
+            `;
+        };
+
+        const dvStreamEl = document.getElementById('dash-dv-stream');
+        if (dvStreamEl) {
+            const dvList = data.dv_recent || [];
+            dvStreamEl.innerHTML = dvList.length
+                ? dvList.map(item => renderStreamRow(item, false)).join('')
+                : '<div style="color:var(--text-muted);font-size:0.85rem;padding:2rem;text-align:center;">Waiting for DEX Validated WebSocket signals...</div>';
+        }
+
+        const dpStreamEl = document.getElementById('dash-dp-stream');
+        if (dpStreamEl) {
+            const dpList = data.dp_recent || [];
+            dpStreamEl.innerHTML = dpList.length
+                ? dpList.map(item => renderStreamRow(item, true)).join('')
+                : '<div style="color:var(--text-muted);font-size:0.85rem;padding:2rem;text-align:center;">No DEX Paid records yet.</div>';
+        }
+
+        if (showToast) {
+            showAppToast('Dashboard insights refreshed.', 'success', 1800);
+        }
+    } catch (err) {
+        console.error('Error loading dashboard overview:', err);
+    }
+}
+
+function openDashboardCategory(tabId, category) {
+    if (tabId === 'dex-validated-data' && category) {
+        const catEl = document.getElementById('dvd-category');
+        if (catEl) catEl.value = category;
+    }
+    switchTab(tabId);
+}
+
+toggleDexValidatedDataAutoRefresh();
+loadDexValidatedTableData(1, false);
+loadDexValidatedLiveResults();
+loadDashboardOverview(false);
+setInterval(() => {
+    const dashTab = document.getElementById('tab-dashboard');
+    if (dashTab && !dashTab.classList.contains('hidden')) {
+        loadDashboardOverview(false);
+    }
+}, 4000);
+
+const initialUrlTab = getTabFromPathname(window.location.pathname) || 'dashboard';
+switchTab(initialUrlTab, { skipPushState: true });

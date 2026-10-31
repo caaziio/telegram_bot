@@ -320,37 +320,12 @@
     </style>
 </head>
 <body>
-    <div id="system-landing" class="system-landing">
-        <div class="system-landing__inner">
-            <div class="system-landing__brand">TeleFlow</div>
-            <h1>Choose a monitoring system</h1>
-            <p class="system-landing__subtitle">Each scanner runs independently with its own trigger and configuration.</p>
-            <div class="system-options">
-                <button type="button" class="system-option" onclick="selectSystem('sol')">
-                    <div class="system-option__icon">
-                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v12M6 12h12"/></svg>
-                    </div>
-                    <h2>SOL Payment</h2>
-                    <p>Monitor Solana wallet payments through Helius, discover the related token, apply filters, and forward passing signals.</p>
-                    <span class="system-option__action">Open SOL Payment →</span>
-                </button>
-                <button type="button" class="system-option system-option--dex" onclick="selectSystem('dex')">
-                    <div class="system-option__icon">
-                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                    </div>
-                    <h2>DEX Validated</h2>
-                    <p>Monitor Dexscreener-confirmed orders and boosts, enrich the token, apply filters, and forward validated signals.</p>
-                    <span class="system-option__action">Open DEX Validated →</span>
-                </button>
-            </div>
-        </div>
-    </div>
     <div class="dashboard-container">
         <!-- Single Unified Akoueflow Sidebar -->
         <aside class="akoue-sidebar grok-sidebar" id="akoue-sidebar">
             <!-- Unified Header: Logo, Brand once, and Sidebar Collapse Toggle -->
             <div class="akoue-sidebar-header">
-                <div class="akoue-brand" onclick="switchTab('workflows')" title="Akoueflow Workflows">
+                <div class="akoue-brand" onclick="switchTab('dashboard')" title="Akoueflow Dashboard">
                     <svg class="akoue-brand-logo" width="22" height="22" viewBox="0 0 24 24" fill="none">
                         <defs>
                             <linearGradient id="akoueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -386,21 +361,21 @@
 
             <!-- Navigation Body -->
             <div class="akoue-sidebar-body">
-                <!-- Systems Switcher -->
-                <button type="button" class="akoue-nav-item" onclick="showSystemLanding()" title="Switch System (CTO / DEX)">
+                <!-- Executive Dashboard -->
+                <a href="/dashboard" class="akoue-nav-item active" id="rail-nav-dashboard" onclick="return navigateSidebarTab(event, 'dashboard')" title="Overview & Analytics Dashboard">
                     <svg class="akoue-nav-icon" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
-                        <rect x="14" y="3" width="7" height="7" rx="1.5"></rect>
-                        <rect x="14" y="14" width="7" height="7" rx="1.5"></rect>
-                        <rect x="3" y="14" width="7" height="7" rx="1.5"></rect>
+                        <rect x="3" y="3" width="7" height="9" rx="1.5"></rect>
+                        <rect x="14" y="3" width="7" height="5" rx="1.5"></rect>
+                        <rect x="14" y="12" width="7" height="9" rx="1.5"></rect>
+                        <rect x="3" y="16" width="7" height="5" rx="1.5"></rect>
                     </svg>
-                    <span class="akoue-nav-text">Systems</span>
-                    <span class="akoue-nav-tag">CTO / DEX</span>
-                </button>
+                    <span class="akoue-nav-text">Dashboard</span>
+                    <span class="akoue-nav-tag" style="color:#22d3ee;background:rgba(6,182,212,0.12);border:1px solid rgba(6,182,212,0.25);">LIVE</span>
+                </a>
 
                 <!-- Workflows + Folders Dropdown Accordion -->
                 <div class="akoue-workflows-section open">
-                    <button type="button" class="akoue-nav-item active" id="rail-nav-workflows" onclick="handleWorkflowsNavClick(event)" title="Workflows & Folders">
+                    <a href="/workflows" class="akoue-nav-item" id="rail-nav-workflows" onclick="return handleWorkflowsNavClick(event)" title="Workflows & Folders">
                         <svg class="akoue-nav-icon" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path>
                         </svg>
@@ -411,7 +386,7 @@
                                 <polyline points="6 9 12 15 18 9"></polyline>
                             </svg>
                         </span>
-                    </button>
+                    </a>
 
                     <!-- Embedded Folders Group (Dropdown Content) -->
                     <div class="akoue-folders-group" id="akoue-folders-group">
@@ -425,33 +400,57 @@
                     </div>
                 </div>
 
-                <!-- Wallet Tracker -->
-                <button type="button" class="akoue-nav-item" id="rail-nav-wallet-tracker" onclick="switchTab('wallet-tracker')" title="Wallet Tracker">
-                    <svg class="akoue-nav-icon" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon>
-                    </svg>
-                    <span class="akoue-nav-text">Wallet Tracker</span>
-                </button>
+                <!-- DEX Paid Section -->
+                <div class="akoue-nav-section">
+                    <div class="akoue-nav-section-label">
+                        <span class="akoue-nav-section-dot" style="background: #22d3ee; box-shadow: 0 0 6px rgba(34, 211, 238, 0.5);"></span>
+                        <span>DEX Paid</span>
+                    </div>
 
-                <!-- DEX Validated -->
-                <button type="button" class="akoue-nav-item" id="rail-nav-dex-validated" onclick="switchTab('dex-validated')" title="DEX Validated Signals">
-                    <svg class="akoue-nav-icon" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path>
-                        <line x1="4" y1="22" x2="4" y2="15"></line>
-                    </svg>
-                    <span class="akoue-nav-text">DEX Validated</span>
-                </button>
+                    <!-- Wallet Tracker -->
+                    <a href="/wallet-tracker" class="akoue-nav-item" id="rail-nav-wallet-tracker" onclick="return navigateSidebarTab(event, 'wallet-tracker')" title="DEX Paid · Wallet Tracker">
+                        <svg class="akoue-nav-icon" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon>
+                        </svg>
+                        <span class="akoue-nav-text">Wallet Tracker</span>
+                    </a>
 
-                <!-- Token Wallet Data -->
-                <button type="button" class="akoue-nav-item" id="rail-nav-token-data" onclick="switchTab('token-data')" title="Token Wallet Data">
-                    <svg class="akoue-nav-icon" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <line x1="18" y1="20" x2="18" y2="10"></line>
-                        <line x1="12" y1="20" x2="12" y2="4"></line>
-                        <line x1="6" y1="20" x2="6" y2="14"></line>
-                    </svg>
-                    <span class="akoue-nav-text">Token Data</span>
-                </button>
+                    <!-- Token Wallet Data -->
+                    <a href="/token-data" class="akoue-nav-item" id="rail-nav-token-data" onclick="return navigateSidebarTab(event, 'token-data')" title="DEX Paid · Token Data">
+                        <svg class="akoue-nav-icon" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="20" x2="18" y2="10"></line>
+                            <line x1="12" y1="20" x2="12" y2="4"></line>
+                            <line x1="6" y1="20" x2="6" y2="14"></line>
+                        </svg>
+                        <span class="akoue-nav-text">Token Data</span>
+                    </a>
+                </div>
+
+                <!-- DEX Validated Section -->
+                <div class="akoue-nav-section">
+                    <div class="akoue-nav-section-label">
+                        <span class="akoue-nav-section-dot" style="background: #10b981; box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);"></span>
+                        <span>DEX Validated</span>
+                    </div>
+
+                    <!-- DEX Validated Scanner -->
+                    <a href="/dex-validated" class="akoue-nav-item" id="rail-nav-dex-validated" onclick="return navigateSidebarTab(event, 'dex-validated')" title="DEX Validated · Scanner">
+                        <svg class="akoue-nav-icon" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path>
+                            <line x1="4" y1="22" x2="4" y2="15"></line>
+                        </svg>
+                        <span class="akoue-nav-text">Scanner</span>
+                    </a>
+
+                    <!-- DEX Validated Enriched Data Table -->
+                    <a href="/dex-validated-data" class="akoue-nav-item" id="rail-nav-dex-validated-data" onclick="return navigateSidebarTab(event, 'dex-validated-data')" title="DEX Validated · Validated Data">
+                        <svg class="akoue-nav-icon" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                        </svg>
+                        <span class="akoue-nav-text">Validated Data</span>
+                    </a>
+                </div>
             </div>
 
             <!-- Sidebar Footer Dock -->
@@ -473,13 +472,13 @@
                 </button>
 
                 <!-- Settings -->
-                <button type="button" class="akoue-nav-item" id="rail-nav-settings" onclick="switchTab('settings')" title="Settings">
+                <a href="/settings" class="akoue-nav-item" id="rail-nav-settings" onclick="return navigateSidebarTab(event, 'settings')" title="Settings">
                     <svg class="akoue-nav-icon" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="12" cy="12" r="3"></circle>
                         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
                     </svg>
                     <span class="akoue-nav-text">Settings</span>
-                </button>
+                </a>
 
                 <!-- Version Tag -->
                 <div class="akoue-version-bar">
@@ -491,9 +490,195 @@
 
         <!-- Main Content -->
         <main class="main-content">
+
+            <!-- Executive Intelligence Dashboard Tab -->
+            <div id="tab-dashboard">
+                <!-- Hero Header & Live Status Strip -->
+                <div class="header" style="margin-bottom: 1.25rem;">
+                    <div class="header-title">
+                        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                            <h1 style="background: linear-gradient(135deg, #ffffff 0%, #67e8f9 60%, #34d399 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Command Dashboard</h1>
+                            <div id="dash-ws-badge" style="display: inline-flex; align-items: center; gap: 6px; background: rgba(16, 185, 129, 0.14); border: 1px solid rgba(16, 185, 129, 0.35); color: #34d399; font-size: 0.74rem; font-weight: 600; padding: 3px 10px; border-radius: 20px;">
+                                <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#34d399;box-shadow:0 0 8px #10b981;"></span>
+                                <span>4/4 WebSockets Live</span>
+                            </div>
+                            <div id="dash-sol-badge" style="display: inline-flex; align-items: center; gap: 6px; background: rgba(6, 182, 212, 0.12); border: 1px solid rgba(6, 182, 212, 0.3); color: #67e8f9; font-size: 0.74rem; font-weight: 600; padding: 3px 10px; border-radius: 20px;">
+                                <span>SOL</span>
+                                <strong id="dash-sol-price">$—</strong>
+                            </div>
+                        </div>
+                        <p>Unified real-time intelligence across DEX Paid Solana payments and DEX Validated WebSocket streams</p>
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                        <button type="button" class="btn-primary" onclick="switchTab('workflows')" style="background: rgba(255,255,255,0.04); border: 1px solid var(--border-color); color: var(--text-main); box-shadow: none;">
+                            <span>Manage Workflows</span>
+                        </button>
+                        <button type="button" class="btn-primary" onclick="loadDashboardOverview(true)" style="display: inline-flex; align-items: center; gap: 6px;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                            <span>Refresh Insights</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- System Telemetry Ribbon -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin-bottom: 1.5rem;">
+                    <div class="workflow-card" style="padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; background: linear-gradient(135deg, rgba(16,185,129,0.08), rgba(0,0,0,0.2)); border-color: rgba(16,185,129,0.22); cursor: pointer;" onclick="switchTab('dex-validated')">
+                        <div>
+                            <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em;">DEX Validated Stream</div>
+                            <div id="dash-sys-ws" style="font-size: 0.92rem; font-weight: 700; color: #34d399; margin-top: 3px;">4/4 Feeds Active</div>
+                        </div>
+                        <span style="width: 30px; height: 30px; border-radius: 8px; background: rgba(16,185,129,0.15); color: #34d399; display: grid; place-items: center;">⚡</span>
+                    </div>
+                    <div class="workflow-card" style="padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; background: linear-gradient(135deg, rgba(6,182,212,0.08), rgba(0,0,0,0.2)); border-color: rgba(6,182,212,0.22); cursor: pointer;" onclick="switchTab('wallet-tracker')">
+                        <div>
+                            <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em;">DEX Paid Monitor</div>
+                            <div id="dash-sys-paid" style="font-size: 0.92rem; font-weight: 700; color: #67e8f9; margin-top: 3px;">Helius Ready</div>
+                        </div>
+                        <span style="width: 30px; height: 30px; border-radius: 8px; background: rgba(6,182,212,0.15); color: #22d3ee; display: grid; place-items: center;">💎</span>
+                    </div>
+                    <div class="workflow-card" style="padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer;" onclick="switchTab('workflows')">
+                        <div>
+                            <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em;">Routing Workflows</div>
+                            <div id="dash-sys-workflows" style="font-size: 0.92rem; font-weight: 700; color: white; margin-top: 3px;">0 Active / 0 Total</div>
+                        </div>
+                        <span style="width: 30px; height: 30px; border-radius: 8px; background: rgba(139,92,246,0.15); color: #c4b5fd; display: grid; place-items: center;">🔀</span>
+                    </div>
+                    <div class="workflow-card" style="padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer;" onclick="switchTab('settings')">
+                        <div>
+                            <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em;">Cloud &amp; Sync</div>
+                            <div id="dash-sys-cloud" style="font-size: 0.92rem; font-weight: 700; color: #fcd34d; margin-top: 3px;">Supabase Connected</div>
+                        </div>
+                        <span style="width: 30px; height: 30px; border-radius: 8px; background: rgba(245,158,11,0.15); color: #fcd34d; display: grid; place-items: center;">☁️</span>
+                    </div>
+                </div>
+
+                <!-- 4 Executive KPI Cards -->
+                <div class="stats-grid" style="margin-bottom: 1.5rem;">
+                    <div class="stat-card" style="cursor: pointer;" onclick="switchTab('dex-validated-data')">
+                        <div class="stat-icon-wrapper" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        </div>
+                        <div class="stat-content">
+                            <span class="stat-label">DEX Validated Signals</span>
+                            <h2 class="stat-value" id="dash-kpi-dv-total">0</h2>
+                            <span class="stat-sub" id="dash-kpi-dv-sub">0 Unique Tokens · $0 Vol</span>
+                        </div>
+                    </div>
+
+                    <div class="stat-card" style="cursor: pointer;" onclick="switchTab('token-data')">
+                        <div class="stat-icon-wrapper" style="background: rgba(6, 182, 212, 0.15); color: #22d3ee;">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                        </div>
+                        <div class="stat-content">
+                            <span class="stat-label">DEX Paid Signals</span>
+                            <h2 class="stat-value" id="dash-kpi-dp-total" style="color: #67e8f9;">0</h2>
+                            <span class="stat-sub" id="dash-kpi-dp-sub">$0 Tracked Spend · 0 Unique</span>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon-wrapper" style="background: rgba(139, 92, 246, 0.15); color: #c4b5fd;">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                        </div>
+                        <div class="stat-content">
+                            <span class="stat-label">Forwarded to Telegram</span>
+                            <h2 class="stat-value" id="dash-kpi-forwarded" style="color: #c4b5fd;">0</h2>
+                            <span class="stat-sub" id="dash-kpi-pass-rate">0.0% overall pass rate</span>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon-wrapper" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24;">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                        </div>
+                        <div class="stat-content">
+                            <span class="stat-label">Combined 24h Volume</span>
+                            <h2 class="stat-value" id="dash-kpi-combined-vol" style="color: #fbbf24;">$0</h2>
+                            <span class="stat-sub" id="dash-kpi-avg-liq">Avg Liquidity: $0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Middle Row: Signal Distribution Analytics + Top Momentum Movers -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 1.25rem; margin-bottom: 1.5rem;">
+                    <!-- Left: Signal Distribution & Migration Analytics -->
+                    <div class="workflow-card" style="padding: 1.35rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.1rem;">
+                            <div>
+                                <h3 style="font-size: 1.05rem; font-weight: 700; color: white;">Signal Category &amp; Migration Breakdown</h3>
+                                <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">Distribution across CTO, Boost, Profile, Ads, and SOL Paid</p>
+                            </div>
+                            <span id="dash-total-combined-pill" class="status-badge" style="background: rgba(6,182,212,0.12); color: #67e8f9; border: 1px solid rgba(6,182,212,0.3);">0 total</span>
+                        </div>
+
+                        <div id="dash-distribution-bars" style="display: flex; flex-direction: column; gap: 12px;">
+                            <!-- Populated dynamically by JS -->
+                        </div>
+
+                        <div style="margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--border-color); display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; text-align: center;">
+                            <div style="background: rgba(255,255,255,0.025); border: 1px solid var(--border-color); border-radius: 10px; padding: 10px;">
+                                <div style="font-size: 0.7rem; color: var(--text-muted);">RAYDIUM MIGRATED</div>
+                                <strong id="dash-mig-yes" style="font-size: 1.05rem; color: #34d399; display: block; margin-top: 4px;">0</strong>
+                            </div>
+                            <div style="background: rgba(255,255,255,0.025); border: 1px solid var(--border-color); border-radius: 10px; padding: 10px;">
+                                <div style="font-size: 0.7rem; color: var(--text-muted);">UNMIGRATED (PUMP)</div>
+                                <strong id="dash-mig-no" style="font-size: 1.05rem; color: #fbbf24; display: block; margin-top: 4px;">0</strong>
+                            </div>
+                            <div style="background: rgba(255,255,255,0.025); border: 1px solid var(--border-color); border-radius: 10px; padding: 10px;">
+                                <div style="font-size: 0.7rem; color: var(--text-muted);">AVG MARKET CAP</div>
+                                <strong id="dash-avg-mc" style="font-size: 1.05rem; color: #67e8f9; display: block; margin-top: 4px;">$0</strong>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right: Top Momentum Movers -->
+                    <div class="workflow-card" style="padding: 1.35rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <div>
+                                <h3 style="font-size: 1.05rem; font-weight: 700; color: white;">🔥 Top Momentum Movers (1h / 5m)</h3>
+                                <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">Highest-gaining enriched tokens captured across both engines</p>
+                            </div>
+                        </div>
+                        <div id="dash-top-movers" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px;">
+                            <div style="color: var(--text-muted); font-size: 0.85rem; padding: 2rem; text-align: center;">Loading top movers...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bottom Row: Side-by-Side Live Streams (DEX Validated vs DEX Paid) -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 1.25rem;">
+                    <!-- DEX Validated Live Feed -->
+                    <div class="workflow-card" style="padding: 1.35rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span style="width: 9px; height: 9px; border-radius: 50%; background: #10b981; box-shadow: 0 0 8px #10b981;"></span>
+                                <h3 style="font-size: 1.02rem; font-weight: 700; color: white;">Live DEX Validated Stream</h3>
+                            </div>
+                            <a href="/dex-validated-data" onclick="return navigateSidebarTab(event, 'dex-validated-data')" style="color: #34d399; font-size: 0.8rem; font-weight: 600; text-decoration: none;">Open Full Table →</a>
+                        </div>
+                        <div id="dash-dv-stream" style="display: flex; flex-direction: column; gap: 8px;">
+                            <div style="color: var(--text-muted); font-size: 0.85rem; padding: 2rem; text-align: center;">Loading live DEX Validated stream...</div>
+                        </div>
+                    </div>
+
+                    <!-- DEX Paid Live Feed -->
+                    <div class="workflow-card" style="padding: 1.35rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span style="width: 9px; height: 9px; border-radius: 50%; background: #22d3ee; box-shadow: 0 0 8px #22d3ee;"></span>
+                                <h3 style="font-size: 1.02rem; font-weight: 700; color: white;">Live DEX Paid Stream</h3>
+                            </div>
+                            <a href="/token-data" onclick="return navigateSidebarTab(event, 'token-data')" style="color: #67e8f9; font-size: 0.8rem; font-weight: 600; text-decoration: none;">Open Full Table →</a>
+                        </div>
+                        <div id="dash-dp-stream" style="display: flex; flex-direction: column; gap: 8px;">
+                            <div style="color: var(--text-muted); font-size: 0.85rem; padding: 2rem; text-align: center;">Loading live DEX Paid stream...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
             
             <!-- Workflows Tab -->
-            <div id="tab-workflows">
+            <div id="tab-workflows" class="hidden">
                 <div class="header workflow-page-header">
                     <div class="header-title">
                         <h1>SOL Payment Workflows</h1>
@@ -531,11 +716,17 @@
                         <h1>DEX Validated</h1>
                         <p>Forward newly published Dexscreener CTO, Boost, Profile, and Ad events after workflow filters pass</p>
                     </div>
-                    <span id="dex-validated-status" class="status-badge">Inactive</span>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <button type="button" class="btn-primary" onclick="switchTab('dex-validated-data')" style="background:rgba(6,182,212,.16);border:1px solid rgba(6,182,212,.4);color:#67e8f9;box-shadow:none;display:inline-flex;align-items:center;gap:6px;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                            <span>Open Validated Data Table</span>
+                        </button>
+                        <span id="dex-validated-status" class="status-badge">Inactive</span>
+                    </div>
                 </div>
 
                 <div class="dex-monitor-grid" id="dex-monitor-grid">
-                    <div class="workflow-card" style="padding:14px;"><div style="font-size:.72rem;color:var(--text-muted);">NEXT FETCH</div><strong id="dex-monitor-countdown" style="display:block;margin-top:6px;font-size:1.2rem;color:#67e8f9;">—</strong></div>
+                    <div class="workflow-card" style="padding:14px;"><div style="font-size:.72rem;color:var(--text-muted);">STREAM STATUS</div><strong id="dex-monitor-countdown" style="display:block;margin-top:6px;font-size:1.2rem;color:#67e8f9;">—</strong></div>
                     <div class="workflow-card" style="padding:14px;"><div style="font-size:.72rem;color:var(--text-muted);">LAST CHECK</div><strong id="dex-monitor-last-check" style="display:block;margin-top:6px;font-size:.92rem;">Never</strong></div>
                     <div class="workflow-card" style="padding:14px;"><div style="font-size:.72rem;color:var(--text-muted);">SCAN TIME</div><strong id="dex-monitor-scan-time" style="display:block;margin-top:6px;font-size:1.2rem;">—</strong></div>
                     <div class="workflow-card" style="padding:14px;"><div style="font-size:.72rem;color:var(--text-muted);">DETECTION</div><strong id="dex-monitor-latency" style="display:block;margin-top:6px;font-size:1.2rem;color:#6ee7b7;">—</strong></div>
@@ -1183,7 +1374,7 @@
                                     <th>6h</th>
                                     <th>24h</th>
                                     <th>Status</th>
-                                    <th>Reason / Route</th>
+                                    <th>Forwarded Flow</th>
                                     <th style="text-align: right; padding-right: 1.5rem;">Actions</th>
                                 </tr>
                             </thead>
@@ -1203,6 +1394,353 @@
                             Showing 0 of 0 records
                         </div>
                         <div id="td-pagination-controls" style="display: flex; gap: 6px; align-items: center;">
+                            <!-- Filled dynamically by JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- DEX Validated Enriched Token Data Tab -->
+            <div id="tab-dex-validated-data" class="hidden">
+                <div class="header">
+                    <div class="header-title">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <h1>DEX Validated Data</h1>
+                            <div id="dvd-sync-badge" style="display: inline-flex; align-items: center; gap: 6px; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); color: #34d399; font-size: 0.72rem; font-weight: 600; padding: 3px 9px; border-radius: 20px;">
+                                <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#34d399;box-shadow:0 0 6px #10b981;"></span>
+                                <span>Live WebSocket Stream</span>
+                            </div>
+                        </div>
+                        <p>Real-time enriched DEX Screener CTO, Boost, Profile &amp; Ad tokens streamed instantly via WebSocket</p>
+                    </div>
+                    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); padding: 0.4rem 0.8rem; border-radius: 8px;">
+                            <label style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0;">Live Feed:</label>
+                            <select id="dvd-autorefresh" onchange="toggleDexValidatedDataAutoRefresh()" style="background: transparent; border: none; color: var(--text-main); font-size: 0.8rem; outline: none; cursor: pointer;">
+                                <option value="0" style="background:#1f2937;">Off</option>
+                                <option value="3000" selected style="background:#1f2937;">Live (3s)</option>
+                                <option value="10000" style="background:#1f2937;">10 sec</option>
+                                <option value="30000" style="background:#1f2937;">30 sec</option>
+                                <option value="60000" style="background:#1f2937;">1 min</option>
+                            </select>
+                        </div>
+                        <button class="btn-primary" onclick="exportDexValidatedDataCSV()" style="background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-main); box-shadow: none; display: inline-flex; align-items: center; gap: 6px;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            <span>Export CSV</span>
+                        </button>
+                        <button class="btn-primary" onclick="loadDexValidatedTableData(1, true)" style="display: inline-flex; align-items: center; gap: 6px;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                            <span>Refresh Data</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- KPI Stats Grid -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon-wrapper" style="background: rgba(6, 182, 212, 0.15); color: #22d3ee;">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-label">Total Validated Events</div>
+                            <div class="stat-value" id="dvd-kpi-total">-</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon-wrapper" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-label">Forwarded to TG</div>
+                            <div class="stat-value" id="dvd-kpi-forwarded">-</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon-wrapper" style="background: rgba(236, 72, 153, 0.15); color: #f472b6;">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 18 3 22 9 12 22 2 9"/><polyline points="11 3 8 9 12 22 16 9 13 3"/><polyline points="2 9 22 9"/></svg>
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-label">Unique Tokens</div>
+                            <div class="stat-value" id="dvd-kpi-unique">-</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon-wrapper" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24;">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-label">24h Volume ($ USD)</div>
+                            <div class="stat-value" id="dvd-kpi-volume">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Filter Toolbar -->
+                <div class="filter-panel">
+                    <!-- Row 1: Workflow Preset & Primary Controls -->
+                    <div style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 1rem;">
+                        <div class="form-group" style="margin-bottom: 0; min-width: 230px; flex: 1.8;">
+                            <label style="display: flex; justify-content: space-between; align-items: center;">
+                                <span style="display:inline-flex;align-items:center;gap:5px;">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                                    Apply Workflow Rules Preset
+                                </span>
+                                <span style="font-size: 0.72rem; color: #22d3ee;">Auto-loads workflow rules</span>
+                            </label>
+                            <select class="form-input" id="dvd-workflow-preset" onchange="applyDexValidatedPresetToFilters()" style="-webkit-appearance: none; background: rgba(6, 182, 212, 0.12); border-color: rgba(6, 182, 212, 0.35); color: #a5f3fc; font-weight: 500;">
+                                <option value="">No Preset (Custom Filters)</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0; min-width: 240px; flex: 2.2;">
+                            <label>Search Token, CA, Order or Reason</label>
+                            <input type="text" class="form-input" id="dvd-search" placeholder="Search by name, CA, category, reason..." oninput="debounceDexValidatedDataSearch()" />
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0; min-width: 145px; flex: 1;">
+                            <label>Category</label>
+                            <select class="form-input" id="dvd-category" onchange="loadDexValidatedTableData(1)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white;">
+                                <option value="all">All Categories</option>
+                                <option value="cto">CTO (Takeover)</option>
+                                <option value="boost">Boost</option>
+                                <option value="dex_profile">DEX Profile</option>
+                                <option value="dex_ad">DEX Ad</option>
+                                <option value="dex">All DEX (Profile + Ad)</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0; min-width: 135px; flex: 1;">
+                            <label>Status</label>
+                            <select class="form-input" id="dvd-status" onchange="loadDexValidatedTableData(1)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white;">
+                                <option value="all">All Statuses</option>
+                                <option value="forwarded">Forwarded</option>
+                                <option value="detected">Detected</option>
+                                <option value="dropped">Dropped</option>
+                                <option value="skipped">Skipped</option>
+                                <option value="send_failed">Send Failed</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0; min-width: 135px; flex: 1;">
+                            <label>Timeframe</label>
+                            <select class="form-input" id="dvd-timeframe" onchange="loadDexValidatedTableData(1)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white;">
+                                <option value="all">All Time</option>
+                                <option value="1h">Past 1 Hour</option>
+                                <option value="6h">Past 6 Hours</option>
+                                <option value="24h">Past 24 Hours</option>
+                                <option value="7d">Past 7 Days</option>
+                                <option value="30d">Past 30 Days</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0; min-width: 165px; flex: 1.2;">
+                            <label>Sort By</label>
+                            <select class="form-input" id="dvd-sort-by" onchange="loadDexValidatedTableData(1)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white;">
+                                <option value="id_desc">Newest First</option>
+                                <option value="id_asc">Oldest First</option>
+                                <option value="perf_5m_desc">Top 5m Gainers</option>
+                                <option value="perf_1h_desc">Top 1h Gainers</option>
+                                <option value="perf_6h_desc">Top 6h Gainers</option>
+                                <option value="perf_24h_desc">Top 24h Gainers</option>
+                                <option value="market_cap_desc">Highest Market Cap</option>
+                                <option value="liquidity_usd_desc">Highest Liquidity</option>
+                                <option value="volume_5m_desc">Highest 5m Volume</option>
+                                <option value="volume_1h_desc">Highest 1h Volume</option>
+                                <option value="volume_6h_desc">Highest 6h Volume</option>
+                                <option value="volume_24h_desc">Highest 24h Volume</option>
+                                <option value="age_asc">Youngest Creation Age</option>
+                                <option value="migration_age_asc">Youngest Migration Age</option>
+                                <option value="token_name_asc">Token Name (A-Z)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Row 2: Workflow Metric Rules -->
+                    <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 0.85rem 1rem; margin-bottom: 1rem;">
+                        <div style="font-size: 0.76rem; font-weight: 600; text-transform: uppercase; color: var(--accent-color); letter-spacing: 0.5px; margin-bottom: 0.6rem; display: flex; align-items: center; gap: 6px;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                            <span>Token Metric Filters (From Workflows)</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1rem; align-items: flex-end;">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Token Name Match / Regex</label>
+                                <div style="display: flex; gap: 4px;">
+                                    <select id="dvd-token-name-mode" onchange="loadDexValidatedTableData(1)" style="width: 85px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 6px; font-size: 0.8rem;">
+                                        <option value="include">Match</option>
+                                        <option value="exclude">Exclude</option>
+                                    </select>
+                                    <input type="text" class="form-input" id="dvd-token-name-pattern" placeholder="e.g. .* or PEPE|AI" oninput="debounceDexValidatedDataSearch()" style="flex: 1; padding: 6px 10px; font-size: 0.8rem;" />
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Market Cap Range ($ USD)</label>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <input type="number" class="form-input" id="dvd-min-mc" placeholder="Min $" onchange="loadDexValidatedTableData(1)" style="flex: 1; padding: 6px 10px; font-size: 0.8rem;" />
+                                    <span style="color: var(--text-muted); font-size: 0.8rem;">to</span>
+                                    <input type="number" class="form-input" id="dvd-max-mc" placeholder="Max $" onchange="loadDexValidatedTableData(1)" style="flex: 1; padding: 6px 10px; font-size: 0.8rem;" />
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Performance Gain/Loss (%)</label>
+                                <div style="display: flex; gap: 4px; align-items: center;">
+                                    <select id="dvd-perf-tf" onchange="loadDexValidatedTableData(1)" style="width: 65px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 6px; font-size: 0.8rem;">
+                                        <option value="5m">5m</option>
+                                        <option value="1h">1h</option>
+                                        <option value="6h">6h</option>
+                                        <option value="24h">24h</option>
+                                    </select>
+                                    <input type="number" step="any" class="form-input" id="dvd-min-perf" placeholder="Min %" onchange="loadDexValidatedTableData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                    <span style="color: var(--text-muted); font-size: 0.8rem;">to</span>
+                                    <input type="number" step="any" class="form-input" id="dvd-max-perf" placeholder="Max %" onchange="loadDexValidatedTableData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Liquidity Range ($ USD)</label>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <input type="number" class="form-input" id="dvd-min-liquidity" placeholder="Min $" onchange="loadDexValidatedTableData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                    <span style="color: var(--text-muted);">to</span>
+                                    <input type="number" class="form-input" id="dvd-max-liquidity" placeholder="Max $" onchange="loadDexValidatedTableData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Volume Range ($ USD)</label>
+                                <div style="display: flex; gap: 4px; align-items: center;">
+                                    <select id="dvd-volume-tf" onchange="loadDexValidatedTableData(1)" style="width: 65px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 6px; font-size: 0.8rem;">
+                                        <option value="5m">5m</option><option value="1h">1h</option><option value="6h">6h</option><option value="24h" selected>24h</option>
+                                    </select>
+                                    <input type="number" class="form-input" id="dvd-min-volume" placeholder="Min $" onchange="loadDexValidatedTableData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                    <span style="color: var(--text-muted);">to</span>
+                                    <input type="number" class="form-input" id="dvd-max-volume" placeholder="Max $" onchange="loadDexValidatedTableData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Creation Age (Minutes)</label>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <input type="number" class="form-input" id="dvd-min-age" placeholder="Min m" onchange="loadDexValidatedTableData(1)" style="flex: 1; padding: 6px 10px; font-size: 0.8rem;" />
+                                    <span style="color: var(--text-muted); font-size: 0.8rem;">to</span>
+                                    <input type="number" class="form-input" id="dvd-max-age" placeholder="Max m" onchange="loadDexValidatedTableData(1)" style="flex: 1; padding: 6px 10px; font-size: 0.8rem;" />
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Migration Age (Minutes)</label>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <input type="number" class="form-input" id="dvd-min-migration-age" placeholder="Min m" onchange="loadDexValidatedTableData(1)" style="flex: 1; padding: 6px 10px; font-size: 0.8rem;" />
+                                    <span style="color: var(--text-muted); font-size: 0.8rem;">to</span>
+                                    <input type="number" class="form-input" id="dvd-max-migration-age" placeholder="Max m" onchange="loadDexValidatedTableData(1)" style="flex: 1; padding: 6px 10px; font-size: 0.8rem;" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Row 3: Platform, Migration & Content Filters -->
+                    <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 0.85rem 1rem; margin-bottom: 1rem;">
+                        <div style="font-size: 0.76rem; font-weight: 600; text-transform: uppercase; color: #10b981; letter-spacing: 0.5px; margin-bottom: 0.6rem; display: flex; align-items: center; gap: 6px;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                            <span>Migration, Platform &amp; Content Filters</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; align-items: flex-end;">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Migration Status</label>
+                                <select class="form-input" id="dvd-migrated" onchange="loadDexValidatedTableData(1)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white; padding: 6px 10px; font-size: 0.8rem;">
+                                    <option value="all">All Migration Status</option>
+                                    <option value="yes">Migrated Only (Raydium)</option>
+                                    <option value="no">Unmigrated (Pump.fun, etc.)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Platform Included</label>
+                                <select class="form-input" id="dvd-platform" onchange="loadDexValidatedTableData(1)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white; padding: 6px 10px; font-size: 0.8rem;">
+                                    <option value="all">All Platforms</option>
+                                    <option value="solana">Solana (SOL)</option>
+                                    <option value="pump">Pump.fun</option>
+                                    <option value="raydium">Raydium</option>
+                                    <option value="moonshot">Moonshot</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Exclude Platform</label>
+                                <select class="form-input" id="dvd-exclude-platform" onchange="loadDexValidatedTableData(1)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white; padding: 6px 10px; font-size: 0.8rem;">
+                                    <option value="none">No Exclusion</option>
+                                    <option value="pump">Exclude Pump.fun</option>
+                                    <option value="raydium">Exclude Raydium</option>
+                                    <option value="moonshot">Exclude Moonshot</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.78rem;">Word Regex (Drop if matched)</label>
+                                <input type="text" class="form-input" id="dvd-word-filter" placeholder="e.g. scam|rug" title="Case-insensitive regular expression" oninput="debounceDexValidatedDataSearch()" style="padding: 6px 10px; font-size: 0.8rem;" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Bottom Action Toolbar -->
+                    <div style="display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap; padding-top: 0.5rem;">
+                        <div style="display: flex; gap: 1.25rem; align-items: center; flex-wrap: wrap;">
+                            <span style="font-size: 0.8rem; color: var(--text-muted);" id="dvd-category-breakdown">CTO: 0 · Boost: 0 · DEX: 0</span>
+                            <span id="dvd-active-filters-count" style="font-size: 0.78rem; background: rgba(6, 182, 212, 0.15); color: #22d3ee; padding: 2px 8px; border-radius: 12px; display: none;">0 filters active</span>
+                        </div>
+
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <button onclick="resetDexValidatedDataFilters()" style="background: none; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 4px 10px; color: var(--text-muted); font-size: 0.8rem; cursor: pointer; transition: all 0.2s ease; display: inline-flex; align-items: center; gap: 5px;">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                                <span>Reset All Filters</span>
+                            </button>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="font-size: 0.8rem; color: var(--text-muted);">Per page:</span>
+                                <select id="dvd-limit" onchange="loadDexValidatedTableData(1)" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 3px 6px; font-size: 0.8rem;">
+                                    <option value="25">25</option>
+                                    <option value="50">50</option>
+                                    <option value="100" selected>100</option>
+                                    <option value="250">250</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DEX Validated Data Table -->
+                <div class="token-table-wrapper">
+                    <div class="token-table-scroll">
+                        <table class="token-data-table">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Token</th>
+                                    <th>Contract Address</th>
+                                    <th>Category / Order</th>
+                                    <th>Market Cap</th>
+                                    <th>Liquidity</th>
+                                    <th>Volume (5m / 1h / 6h / 24h)</th>
+                                    <th>Age (Create / Mig)</th>
+                                    <th>5m</th>
+                                    <th>1h</th>
+                                    <th>6h</th>
+                                    <th>24h</th>
+                                    <th>Status</th>
+                                    <th>Forwarded Flow</th>
+                                    <th style="text-align: right; padding-right: 1.5rem;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dex-validated-data-tbody">
+                                <tr>
+                                    <td colspan="15" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                                        Connecting to DEX Screener WebSocket streams...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Pagination Bar -->
+                    <div class="pagination-bar">
+                        <div id="dvd-pagination-info" style="font-size: 0.85rem; color: var(--text-muted);">
+                            Showing 0 of 0 records
+                        </div>
+                        <div id="dvd-pagination-controls" style="display: flex; gap: 6px; align-items: center;">
                             <!-- Filled dynamically by JS -->
                         </div>
                     </div>

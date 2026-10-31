@@ -8,6 +8,7 @@ import json
 from datetime import datetime, timezone
 import time
 import requests
+import websockets
 from collections import OrderedDict
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
@@ -33,7 +34,7 @@ app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.jinja_env.auto_reload = True
 
 # Release label format: <major>.<YYYY>.<MM>.<DD>. Update this on each push.
-APP_VERSION = "21.2026.10.31"
+APP_VERSION = "23.2026.10.31"
 
 # Globals for async bridge
 telethon_loop = None
@@ -49,7 +50,10 @@ orders_check_cache = {}
 
 # Live operational telemetry for the DEX Validated dashboard.
 dex_validated_runtime_lock = threading.RLock()
+dex_validated_active_ws_feeds = set()
 dex_validated_runtime = {
+    'mode': 'websocket',
+    'ws_connected': 0,
     'last_checked_at': None,
     'next_check_at': None,
     'last_scan_seconds': None,
@@ -1395,10 +1399,277 @@ def process_message(text, rules, message_date):
 # ================= FLASK ROUTES =================
 
 @app.route('/')
+@app.route('/dashboard')
+@app.route('/workflows')
+@app.route('/wallet-tracker')
+@app.route('/token-data')
+@app.route('/dex-validated')
+@app.route('/dex-validated-data')
+@app.route('/settings')
 def index():
     workflows = get_workflows()
     settings = get_settings()
     return render_template('index.html', workflows=workflows, settings=settings, app_version=APP_VERSION)
+
+
+@app.route('/api/dashboard/overview', methods=['GET'])
+def get_dashboard_overview():
+    """Unified analytics and live feed overview for the main Dashboard page."""
+    try:
+        settings = get_settings()
+        workflows = get_workflows()
+        active_wf_count = sum(1 for w in workflows if w.get('is_active'))
+        total_wf_count = len(workflows)
+        sol_price = get_token_price_usd('SOL') or 150.0
+
+        with dex_validated_runtime_lock:
+            ws_connected = len(dex_validated_active_ws_feeds)
+            dv_runtime = dict(dex_validated_runtime)
+
+        with db_lock:
+            conn = get_db()
+            conn.create_function('parse_mc_usd', 1, parse_mc_usd)
+            cursor = conn.cursor()
+
+            dv_where = (
+                "WHERE name IS NOT NULL AND TRIM(name) != '' "
+                "AND UPPER(TRIM(name)) NOT IN ('SOL', 'USDT', 'USDC', 'WSOL', 'WRAPPED SOL', 'UNKNOWN') "
+                "AND ca IS NOT NULL AND TRIM(ca) != '' "
+                "AND market_cap IS NOT NULL AND TRIM(market_cap) != '' AND UPPER(TRIM(market_cap)) != 'UNKNOWN' "
+                "AND age IS NOT NULL AND TRIM(age) != '' AND UPPER(TRIM(age)) != 'UNKNOWN'"
+            )
+            dv_stats_row = cursor.execute(f"""
+                SELECT
+                    COUNT(*),
+                    COUNT(DISTINCT ca),
+                    COUNT(CASE WHEN LOWER(status) = 'forwarded' THEN 1 END),
+                    COUNT(CASE WHEN LOWER(status) = 'detected' THEN 1 END),
+                    COUNT(CASE WHEN LOWER(status) = 'dropped' THEN 1 END),
+                    COUNT(CASE WHEN LOWER(signal_type) = 'cto' OR LOWER(migration_status) LIKE '%takeover%' THEN 1 END),
+                    COUNT(CASE WHEN LOWER(signal_type) = 'boost' OR LOWER(migration_status) LIKE '%boost%' THEN 1 END),
+                    COUNT(CASE WHEN LOWER(migration_status) LIKE '%profile%' THEN 1 END),
+                    COUNT(CASE WHEN LOWER(migration_status) LIKE '%ad%' THEN 1 END),
+                    COUNT(CASE WHEN LOWER(COALESCE(formatted_message, '')) LIKE '%migrated: yes%' OR LOWER(COALESCE(formatted_message, '')) LIKE '%raydium%' THEN 1 END),
+                    COALESCE(SUM(COALESCE(volume_24h, 0)), 0),
+                    COALESCE(AVG(NULLIF(liquidity_usd, 0)), 0),
+                    COALESCE(AVG(NULLIF(parse_mc_usd(market_cap), 0)), 0)
+                FROM dex_validated
+                {dv_where}
+            """).fetchone()
+
+            dv_total = int(dv_stats_row[0] or 0) if dv_stats_row else 0
+            dv_migrated = int(dv_stats_row[9] or 0) if dv_stats_row else 0
+            dv_summary = {
+                'total': dv_total,
+                'unique_tokens': int(dv_stats_row[1] or 0) if dv_stats_row else 0,
+                'forwarded': int(dv_stats_row[2] or 0) if dv_stats_row else 0,
+                'detected': int(dv_stats_row[3] or 0) if dv_stats_row else 0,
+                'dropped': int(dv_stats_row[4] or 0) if dv_stats_row else 0,
+                'cto_count': int(dv_stats_row[5] or 0) if dv_stats_row else 0,
+                'boost_count': int(dv_stats_row[6] or 0) if dv_stats_row else 0,
+                'profile_count': int(dv_stats_row[7] or 0) if dv_stats_row else 0,
+                'ad_count': int(dv_stats_row[8] or 0) if dv_stats_row else 0,
+                'migrated_count': dv_migrated,
+                'unmigrated_count': max(0, dv_total - dv_migrated),
+                'total_volume_24h': round(float(dv_stats_row[10] or 0.0), 2) if dv_stats_row else 0.0,
+                'avg_liquidity_usd': round(float(dv_stats_row[11] or 0.0), 2) if dv_stats_row else 0.0,
+                'avg_mc_usd': round(float(dv_stats_row[12] or 0.0), 2) if dv_stats_row else 0.0,
+            }
+
+            dv_recent_rows = cursor.execute(f"""
+                SELECT id, ca, name, platform, market_cap, age,
+                       perf_5m, perf_1h, perf_6h, perf_24h,
+                       liquidity_usd, volume_24h, status, dex_url,
+                       migration_status, signal_type, payment_timestamp,
+                       fetched_at, published_at, created_at, reason, formatted_message
+                FROM dex_validated
+                {dv_where}
+                ORDER BY id DESC
+                LIMIT 8
+            """).fetchall()
+
+            dv_recent = []
+            for r in dv_recent_rows:
+                rd = dict(r) if isinstance(r, dict) else {}
+                mig_lower = str(rd.get('migration_status') or '').lower()
+                sig_lower = str(rd.get('signal_type') or '').lower()
+                if 'takeover' in mig_lower or sig_lower == 'cto':
+                    cat_disp = 'CTO'
+                elif 'boost' in mig_lower or sig_lower == 'boost':
+                    cat_disp = 'BOOST'
+                elif 'ad' in mig_lower:
+                    cat_disp = 'DEX AD'
+                else:
+                    cat_disp = 'DEX PROFILE'
+                raw_ms = rd.get('fetched_at') or rd.get('published_at') or 0
+                ts_sec = int(raw_ms / 1000) if isinstance(raw_ms, (int, float)) and raw_ms > 1_000_000_000_000 else None
+                dv_recent.append({
+                    'id': rd.get('id'),
+                    'ca': rd.get('ca'),
+                    'token_name': rd.get('name') or 'Unknown',
+                    'platform': rd.get('platform') or 'Solana (SOL)',
+                    'category_display': cat_disp,
+                    'market_cap': rd.get('market_cap') or '-',
+                    'liquidity_usd': float(rd.get('liquidity_usd') or 0.0),
+                    'volume_24h': float(rd.get('volume_24h') or 0.0),
+                    'perf_5m': float(rd.get('perf_5m') or 0.0),
+                    'perf_1h': float(rd.get('perf_1h') or 0.0),
+                    'perf_24h': float(rd.get('perf_24h') or 0.0),
+                    'age': rd.get('age') or '-',
+                    'status': rd.get('status') or 'detected',
+                    'reason': rd.get('reason') or '',
+                    'dex_url': rd.get('dex_url') or f"https://dexscreener.com/solana/{rd.get('ca')}",
+                    'timestamp': ts_sec,
+                    'created_at': rd.get('created_at'),
+                    'formatted_message': rd.get('formatted_message') or '',
+                })
+
+            dp_where = (
+                "WHERE token_name IS NOT NULL AND TRIM(token_name) != '' "
+                "AND UPPER(TRIM(token_name)) NOT IN ('SOL', 'USDT', 'USDC', 'WSOL', 'WRAPPED SOL', 'UNKNOWN') "
+                "AND ca IS NOT NULL AND TRIM(ca) != '' "
+                "AND market_cap IS NOT NULL AND TRIM(market_cap) != '' AND UPPER(TRIM(market_cap)) != 'UNKNOWN'"
+            )
+            dp_stats_row = cursor.execute(f"""
+                SELECT
+                    COUNT(*),
+                    COUNT(DISTINCT ca),
+                    COUNT(CASE WHEN LOWER(status) = 'forwarded' THEN 1 END),
+                    COUNT(CASE WHEN LOWER(status) = 'dropped' THEN 1 END),
+                    COALESCE(SUM(CASE WHEN UPPER(COALESCE(mint, 'SOL')) = 'SOL' THEN COALESCE(amount, 0) * ? ELSE COALESCE(amount, 0) END), 0),
+                    COALESCE(SUM(COALESCE(volume_24h, 0)), 0),
+                    COALESCE(AVG(NULLIF(liquidity_usd, 0)), 0),
+                    COUNT(CASE WHEN (migration_age IS NOT NULL AND TRIM(migration_age) NOT IN ('', '0', '-')) OR LOWER(COALESCE(formatted_message, '')) LIKE '%migrated: yes%' THEN 1 END)
+                FROM wallet_payments
+                {dp_where}
+            """, (sol_price,)).fetchone()
+
+            dp_total = int(dp_stats_row[0] or 0) if dp_stats_row else 0
+            dp_migrated = int(dp_stats_row[7] or 0) if dp_stats_row else 0
+            dp_summary = {
+                'total': dp_total,
+                'unique_tokens': int(dp_stats_row[1] or 0) if dp_stats_row else 0,
+                'forwarded': int(dp_stats_row[2] or 0) if dp_stats_row else 0,
+                'dropped': int(dp_stats_row[3] or 0) if dp_stats_row else 0,
+                'total_paid_usd': round(float(dp_stats_row[4] or 0.0), 2) if dp_stats_row else 0.0,
+                'total_volume_24h': round(float(dp_stats_row[5] or 0.0), 2) if dp_stats_row else 0.0,
+                'avg_liquidity_usd': round(float(dp_stats_row[6] or 0.0), 2) if dp_stats_row else 0.0,
+                'migrated_count': dp_migrated,
+                'unmigrated_count': max(0, dp_total - dp_migrated),
+            }
+
+            dp_recent_rows = cursor.execute(f"""
+                SELECT id, ca, token_name, platform, market_cap, age, migration_age,
+                       amount, mint, sender_address, timestamp,
+                       perf_5m, perf_1h, perf_24h, liquidity_usd, volume_24h,
+                       status, reason, dex_url, formatted_message
+                FROM wallet_payments
+                {dp_where}
+                ORDER BY timestamp DESC, id DESC
+                LIMIT 8
+            """).fetchall()
+
+            dp_recent = []
+            for r in dp_recent_rows:
+                rd = dict(r) if isinstance(r, dict) else {}
+                amt = float(rd.get('amount') or 0.0)
+                mint_str = str(rd.get('mint') or 'SOL').upper()
+                amt_usd = round(amt * sol_price, 2) if mint_str == 'SOL' else round(amt, 2)
+                dp_recent.append({
+                    'id': rd.get('id'),
+                    'ca': rd.get('ca'),
+                    'token_name': rd.get('token_name') or 'Unknown',
+                    'platform': rd.get('platform') or 'Solana (SOL)',
+                    'amount_usd': amt_usd,
+                    'sender_address': rd.get('sender_address') or '',
+                    'market_cap': rd.get('market_cap') or '-',
+                    'liquidity_usd': float(rd.get('liquidity_usd') or 0.0),
+                    'volume_24h': float(rd.get('volume_24h') or 0.0),
+                    'perf_5m': float(rd.get('perf_5m') or 0.0),
+                    'perf_1h': float(rd.get('perf_1h') or 0.0),
+                    'perf_24h': float(rd.get('perf_24h') or 0.0),
+                    'age': rd.get('age') or '-',
+                    'status': rd.get('status') or 'detected',
+                    'reason': rd.get('reason') or '',
+                    'dex_url': rd.get('dex_url') or f"https://dexscreener.com/solana/{rd.get('ca')}",
+                    'timestamp': rd.get('timestamp'),
+                    'formatted_message': rd.get('formatted_message') or '',
+                })
+
+            # Top Movers across both pipelines (sorted by 1h / 5m performance & volume)
+            top_movers_map = {}
+            for item in dv_recent + dp_recent:
+                ca_key = item.get('ca')
+                if not ca_key:
+                    continue
+                score = float(item.get('perf_1h') or 0.0) * 1.2 + float(item.get('perf_5m') or 0.0)
+                if ca_key not in top_movers_map or score > top_movers_map[ca_key]['_score']:
+                    entry = dict(item)
+                    entry['source'] = item.get('category_display') or 'DEX PAID'
+                    entry['_score'] = score
+                    top_movers_map[ca_key] = entry
+
+            # Also pull top gainers from dex_validated and wallet_payments tables
+            dv_top_rows = cursor.execute(f"""
+                SELECT ca, name, market_cap, liquidity_usd, volume_24h, perf_5m, perf_1h, perf_24h,
+                       dex_url, migration_status, signal_type, formatted_message
+                FROM dex_validated
+                {dv_where}
+                ORDER BY COALESCE(perf_1h, 0) DESC, COALESCE(volume_24h, 0) DESC
+                LIMIT 10
+            """).fetchall()
+            for r in dv_top_rows:
+                rd = dict(r) if isinstance(r, dict) else {}
+                ca_key = rd.get('ca')
+                if not ca_key:
+                    continue
+                mig_lower = str(rd.get('migration_status') or '').lower()
+                sig_lower = str(rd.get('signal_type') or '').lower()
+                src = 'CTO' if ('takeover' in mig_lower or sig_lower == 'cto') else ('BOOST' if ('boost' in mig_lower or sig_lower == 'boost') else ('DEX AD' if 'ad' in mig_lower else 'DEX PROFILE'))
+                score = float(rd.get('perf_1h') or 0.0) * 1.2 + float(rd.get('perf_5m') or 0.0)
+                if ca_key not in top_movers_map or score > top_movers_map[ca_key]['_score']:
+                    top_movers_map[ca_key] = {
+                        'ca': ca_key,
+                        'token_name': rd.get('name') or 'Unknown',
+                        'market_cap': rd.get('market_cap') or '-',
+                        'liquidity_usd': float(rd.get('liquidity_usd') or 0.0),
+                        'volume_24h': float(rd.get('volume_24h') or 0.0),
+                        'perf_5m': float(rd.get('perf_5m') or 0.0),
+                        'perf_1h': float(rd.get('perf_1h') or 0.0),
+                        'perf_24h': float(rd.get('perf_24h') or 0.0),
+                        'dex_url': rd.get('dex_url') or f"https://dexscreener.com/solana/{ca_key}",
+                        'source': src,
+                        'formatted_message': rd.get('formatted_message') or '',
+                        '_score': score,
+                    }
+
+            top_movers = sorted(top_movers_map.values(), key=lambda x: (x.get('perf_1h') or 0.0, x.get('volume_24h') or 0.0), reverse=True)[:6]
+            for tm in top_movers:
+                tm.pop('_score', None)
+
+        return jsonify({
+            'success': True,
+            'system': {
+                'ws_connected': ws_connected,
+                'dex_validated_auto': str(settings.get('dex_validated_auto_scan', 'false')).lower() == 'true',
+                'dex_paid_auto': str(settings.get('cto_auto_scan', 'false')).lower() == 'true',
+                'wallet_poll_enabled': str(settings.get('wallet_poll_enabled', 'false')).lower() == 'true',
+                'helius_configured': bool(settings.get('helius_api_key')),
+                'supabase_connected': supabase_client is not None,
+                'active_workflows': active_wf_count,
+                'total_workflows': total_wf_count,
+                'last_checked_at': dv_runtime.get('last_checked_at'),
+                'sol_price': round(float(sol_price), 2),
+            },
+            'dex_validated': dv_summary,
+            'dex_paid': dp_summary,
+            'dv_recent': dv_recent,
+            'dp_recent': dp_recent,
+            'top_movers': top_movers,
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({'success': False, 'error': str(e), 'trace': traceback.format_exc()}), 500
 
 @app.route('/api/workflows', methods=['POST'])
 def create_workflow():
@@ -2030,23 +2301,64 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
         if isinstance(published_at, (int, float)) and published_at > 0 else None
     )
 
-    # Skip if we already sent this exact signal (same status and timestamp, unless in test mode)
+    # Skip if we already processed this exact signal
+    persist_db = bool(item.get('persist_db'))
+    force_rescan = bool(item.get('force_rescan'))
     is_duplicate = False
-    if not test_mode:
+    if (not test_mode or persist_db) and not force_rescan:
         with db_lock:
             conn = get_db()
             cursor = conn.cursor()
             existing = cursor.execute(f'''
-                SELECT id FROM {storage_table}
+                SELECT id, status FROM {storage_table}
                 WHERE ca = ? AND signal_type = ? AND payment_timestamp = ? AND order_status = ?
             ''', (ca, signal_type, payment_timestamp, order_status)).fetchone()
             if existing:
-                is_duplicate = True
+                existing_status = str(existing[1] or '').lower()
+                # If we previously only recorded it as 'detected' (no TG send) and now test_mode is False,
+                # allow re-processing so it can be forwarded to Telegram.
+                if test_mode or existing_status != 'detected':
+                    is_duplicate = True
 
     if is_duplicate:
         token_info["status"] = "duplicate"
         token_info["reason"] = f"Skipped: Already processed ({order_type} - {order_status})"
         return token_info
+
+    type_display_map = {
+        "tokenBoost": "Token Boost",
+        "tokenProfile": "Token Profile",
+        "communityTakeover": "Community Takeover",
+        "tokenAd": "Token Ad",
+        "trendingBarAd": "Trending Bar Ad"
+    }
+    type_display = type_display_map.get(order_type, order_type)
+    migration_status_formatted = f"{type_display} ({order_status.upper()})"
+
+    def _save_dex_validated_early(status_val, reason_str, proj_name="Unknown", plat="Solana (SOL)", mc_val="Unknown", age_val="Unknown"):
+        if storage_table == 'dex_validated' and (not test_mode or persist_db):
+            with db_lock:
+                conn = get_db()
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO dex_validated (
+                        ca, name, platform, market_cap, age,
+                        perf_5m, perf_1h, perf_6h, perf_24h,
+                        liquidity_usd, volume_5m, volume_1h, volume_6h, volume_24h,
+                        status, dex_url, migration_status, signal_type,
+                        payment_timestamp, order_status, published_at, fetched_at,
+                        detection_seconds, reason, formatted_message
+                    ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(ca, signal_type, payment_timestamp, order_status) DO UPDATE SET
+                        fetched_at=excluded.fetched_at,
+                        reason=excluded.reason
+                ''', (
+                    ca, proj_name, plat, mc_val, age_val,
+                    status_val, f"https://dexscreener.com/solana/{ca}", migration_status_formatted, signal_type,
+                    payment_timestamp, order_status, published_at, fetched_at,
+                    token_info.get('detection_seconds'), reason_str, ''
+                ))
+                conn.commit()
 
     token_url = f"https://api.dexscreener.com/latest/dex/tokens/{ca}"
     try:
@@ -2054,18 +2366,21 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
         if token_response.status_code != 200:
             token_info["status"] = "error"
             token_info["reason"] = f"Dexscreener token API returned {token_response.status_code}"
+            _save_dex_validated_early("skipped", token_info["reason"])
             return token_info
     except Exception as e:
         token_info["status"] = "error"
         token_info["reason"] = f"Failed to fetch token details: {e}"
+        _save_dex_validated_early("skipped", token_info["reason"])
         return token_info
 
     token_data = token_response.json()
-    pairs = token_data.get("pairs", [])
+    pairs = token_data.get("pairs") or []
 
     if not pairs:
-        token_info["status"] = "error"
+        token_info["status"] = "skipped" if storage_table == 'dex_validated' else "error"
         token_info["reason"] = "No active trading pairs found on Dexscreener"
+        _save_dex_validated_early("skipped", token_info["reason"])
         if not test_mode:
             sig = item.get("signature")
             payer = item.get("payer_address")
@@ -2086,6 +2401,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
     if raw_chain != "solana":
         token_info["status"] = "skipped"
         token_info["reason"] = f"Skipped: Chain is {raw_chain} (not Solana)"
+        _save_dex_validated_early("skipped", token_info["reason"], plat=raw_chain.capitalize())
         if not test_mode:
             sig = item.get("signature")
             payer = item.get("payer_address")
@@ -2099,16 +2415,6 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                         cursor.execute("UPDATE wallet_payments SET ca=?, status='dropped', reason=? WHERE sender_address=? AND (timestamp * 1000 BETWEEN ? AND ?)", (ca, token_info["reason"], payer, payment_timestamp - 180000, payment_timestamp + 180000))
                     conn.commit()
         return token_info
-
-    type_display_map = {
-        "tokenBoost": "Token Boost",
-        "tokenProfile": "Token Profile",
-        "communityTakeover": "Community Takeover",
-        "tokenAd": "Token Ad",
-        "trendingBarAd": "Trending Bar Ad"
-    }
-    type_display = type_display_map.get(order_type, order_type)
-    migration_status_formatted = f"{type_display} ({order_status.upper()})"
 
     project_name = primary_pair.get("baseToken", {}).get("name", "Unknown")
     chain_map = {
@@ -2154,8 +2460,8 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
             else:
                 age_creation_str = f"{int(age_creation_minutes / 60)}h {age_creation_minutes % 60}m"
 
-    # If market cap or creation age is unknown, skip further fetching/processing and abort
-    if mc_str == "Unknown" or age_creation_str == "Unknown":
+    # If market cap or creation age is unknown on non-dex_validated flows, skip further fetching/processing and abort
+    if storage_table != 'dex_validated' and (mc_str == "Unknown" or age_creation_str == "Unknown"):
         token_info["status"] = "skipped"
         token_info["reason"] = f"Skipped: Market Cap is {mc_str}, Age is {age_creation_str}"
         if not test_mode:
@@ -2340,8 +2646,9 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
             if preview_message is None:
                 preview_message = send_msg
 
+            wf_name = str(wf.get('name') or 'Flow').strip()
             if test_mode:
-                passed_channels.append(f"Preview: {wf.get('name') or 'Flow'}")
+                passed_channels.append(wf_name)
                 continue
 
             t_id = str(wf.get('target_channel_id') or '').strip()
@@ -2350,17 +2657,17 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
             final_target = wf_target
 
             if final_target:
-                attempted_channels.append(final_target)
+                attempted_channels.append(wf_name or final_target)
                 if tg_client:
                     try:
                         await safe_send_message(tg_client, final_target, send_msg)
-                        passed_channels.append(final_target)
+                        passed_channels.append(wf_name or final_target)
                         debug_log(f"[REAL-TIME SCANNER] Token {ca} successfully forwarded to target: {final_target} via workflow {wf.get('name')}")
                     except Exception as e:
-                        send_failures.append(f"{final_target}: {e}")
+                        send_failures.append(f"{wf_name or final_target}: {e}")
                         print(f"[REAL-TIME SCANNER] Failed to send to {final_target}: {e}", flush=True)
                 else:
-                    send_failures.append(f"{final_target}: Telegram client is not running/authorized")
+                    send_failures.append(f"{wf_name or final_target}: Telegram client is not running/authorized")
                     print(f"[REAL-TIME SCANNER] WARNING: Token {ca} passed filters, but Telegram client is not running/authorized! Cannot send to {final_target}.", flush=True)
             else:
                 print(f"[REAL-TIME SCANNER] Workflow '{wf.get('name')}' matched but has no target channel configured. Skipping.", flush=True)
@@ -2368,8 +2675,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
         if passed_any:
             if passed_channels:
                 token_info["status"] = "passed"
-                token_info["reason"] = (f"Passed test via: {', '.join(passed_channels)}" if test_mode
-                                        else f"Sent via workflows to: {', '.join(passed_channels)}")
+                token_info["reason"] = ", ".join(passed_channels)
                 token_info["formatted_message"] = preview_message or msg
             elif attempted_channels:
                 token_info["status"] = "send_failed"
@@ -2385,10 +2691,10 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
         token_info["status"] = "dropped"
         token_info["reason"] = "Dropped: No active workflows configured"
 
-    if not test_mode:
+    if not test_mode or persist_db:
         result_status = token_info.get("status")
         if result_status == "passed":
-            db_status = "forwarded"
+            db_status = "detected" if test_mode else "forwarded"
         elif result_status == "dropped":
             db_status = "dropped"
         elif result_status == "send_failed":
@@ -2407,7 +2713,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
             )
             if storage_table == 'dex_validated':
                 cursor.execute('''
-                    INSERT OR IGNORE INTO dex_validated (
+                    INSERT INTO dex_validated (
                         ca, name, platform, market_cap, age,
                         perf_5m, perf_1h, perf_6h, perf_24h,
                         liquidity_usd, volume_5m, volume_1h, volume_6h, volume_24h,
@@ -2415,10 +2721,33 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                         payment_timestamp, order_status, published_at, fetched_at,
                         detection_seconds, reason, formatted_message
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(ca, signal_type, payment_timestamp, order_status) DO UPDATE SET
+                        name=excluded.name,
+                        platform=excluded.platform,
+                        market_cap=excluded.market_cap,
+                        age=excluded.age,
+                        perf_5m=excluded.perf_5m,
+                        perf_1h=excluded.perf_1h,
+                        perf_6h=excluded.perf_6h,
+                        perf_24h=excluded.perf_24h,
+                        liquidity_usd=excluded.liquidity_usd,
+                        volume_5m=excluded.volume_5m,
+                        volume_1h=excluded.volume_1h,
+                        volume_6h=excluded.volume_6h,
+                        volume_24h=excluded.volume_24h,
+                        status=CASE WHEN dex_validated.status = 'forwarded' THEN 'forwarded' ELSE excluded.status END,
+                        dex_url=excluded.dex_url,
+                        migration_status=excluded.migration_status,
+                        published_at=COALESCE(excluded.published_at, dex_validated.published_at),
+                        fetched_at=excluded.fetched_at,
+                        detection_seconds=COALESCE(excluded.detection_seconds, dex_validated.detection_seconds),
+                        reason=excluded.reason,
+                        formatted_message=excluded.formatted_message
                 ''', common_values + (
                     published_at, fetched_at, token_info.get('detection_seconds'), token_info.get('reason'),
                     token_info.get('formatted_message') or msg
                 ))
+                conn.commit()
             else:
                 cursor.execute('''
                     INSERT INTO cto_signals (
@@ -2429,6 +2758,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                         payment_timestamp, order_status, reason
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', common_values + (token_info.get('reason'),))
+                conn.commit()
 
             # Only record to wallet_payments if we have a real, confirmed project token name (not SOL/USDT/USDC/Unknown)
             is_valid_token_name = (
@@ -4714,6 +5044,101 @@ async def helius_polling_loop():
 
         await asyncio.sleep(poll_interval)
 
+DEX_VALIDATED_FEED_SPECS = (
+    ('cto', 'communityTakeover', 'wss://api.dexscreener.com/community-takeovers/latest/v1', 'https://api.dexscreener.com/community-takeovers/latest/v1'),
+    ('boost', 'tokenBoost', 'wss://api.dexscreener.com/token-boosts/latest/v1', 'https://api.dexscreener.com/token-boosts/latest/v1'),
+    ('dex', 'tokenProfile', 'wss://api.dexscreener.com/token-profiles/latest/v1', 'https://api.dexscreener.com/token-profiles/latest/v1'),
+    ('dex', 'tokenAd', 'wss://api.dexscreener.com/ads/latest/v1', 'https://api.dexscreener.com/ads/latest/v1'),
+)
+
+
+def get_enabled_dex_validated_categories(settings):
+    return {
+        category for category, setting_key in (
+            ('boost', 'dex_validated_include_boosts'),
+            ('cto', 'dex_validated_include_cto'),
+            ('dex', 'dex_validated_include_dex'),
+        )
+        if str(settings.get(setting_key, 'true')).lower() == 'true'
+    }
+
+
+def extract_dex_validated_events(payload, category, order_type, fetched_at_ms=None):
+    """Normalize raw Dexscreener WebSocket/HTTP feed payloads into Solana event items (newest first)."""
+    if fetched_at_ms is None:
+        fetched_at_ms = int(time.time() * 1000)
+
+    if isinstance(payload, dict):
+        # DEX Screener's {"limit": 90, "data": [...]} WebSocket envelopes append newest items at the end.
+        data = payload.get('data')
+        raw_items = list(reversed(data)) if isinstance(data, list) else []
+    elif isinstance(payload, list):
+        raw_items = payload
+    else:
+        raw_items = []
+
+    events = []
+    for event in raw_items:
+        if not isinstance(event, dict):
+            continue
+        addr = event.get('tokenAddress')
+        chain = str(event.get('chainId') or '').lower()
+        if not addr or chain != 'solana':
+            continue
+
+        # Date-backed feeds use their publish time. Boosts have no timestamp,
+        # so totalAmount changes identify a new published boost for the same token.
+        marker = event.get('claimDate') or event.get('date')
+        if marker:
+            try:
+                payment_timestamp = int(datetime.fromisoformat(
+                    str(marker).replace('Z', '+00:00')
+                ).timestamp() * 1000)
+            except (TypeError, ValueError):
+                payment_timestamp = 0
+        elif category == 'boost':
+            payment_timestamp = int(float(event.get('totalAmount') or event.get('amount') or 0))
+        else:
+            payment_timestamp = 0
+
+        events.append({
+            'tokenAddress': addr,
+            'chainId': chain,
+            'order_type': order_type,
+            'order_status': 'approved',
+            'payment_timestamp': payment_timestamp,
+            'published_at': payment_timestamp if marker else None,
+            'fetched_at': fetched_at_ms,
+            'event_category': category,
+            'storage_table': 'dex_validated',
+            'persist_db': True,
+        })
+    return events
+
+
+async def fetch_dex_validated_feed_snapshot(category, order_type, ws_url, http_url):
+    """One-shot WebSocket snapshot fetch for manual/test scans, with HTTP fallback."""
+    fetched_at_ms = int(time.time() * 1000)
+    try:
+        async with websockets.connect(
+            ws_url,
+            open_timeout=8,
+            close_timeout=2,
+            max_size=4 * 1024 * 1024,
+        ) as ws:
+            raw_msg = await asyncio.wait_for(ws.recv(), timeout=8)
+            fetched_at_ms = int(time.time() * 1000)
+            payload = json.loads(raw_msg)
+            return extract_dex_validated_events(payload, category, order_type, fetched_at_ms)
+    except Exception as ws_err:
+        debug_log(f"[DEX VALIDATED] One-shot WS snapshot fallback to HTTP for {order_type}: {ws_err}")
+        response = await asyncio.to_thread(requests.get, http_url, timeout=8)
+        fetched_at_ms = int(time.time() * 1000)
+        if response.status_code != 200:
+            return []
+        return extract_dex_validated_events(response.json(), category, order_type, fetched_at_ms)
+
+
 async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False, validated_only=False):
     scan_started = time.monotonic()
     try:
@@ -4723,14 +5148,7 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False, va
             # Only Dexscreener-confirmed orders are eligible for this system.
             fetch_approved = True
             fetch_pending = False
-            enabled_categories = {
-                category for category, setting_key in (
-                    ('boost', 'dex_validated_include_boosts'),
-                    ('cto', 'dex_validated_include_cto'),
-                    ('dex', 'dex_validated_include_dex'),
-                )
-                if str(settings.get(setting_key, 'true')).lower() == 'true'
-            }
+            enabled_categories = get_enabled_dex_validated_categories(settings)
         else:
             fetch_approved = settings.get('cto_fetch_approved', 'true').lower() == 'true'
             fetch_pending = settings.get('cto_fetch_pending', 'true').lower() == 'true'
@@ -4754,53 +5172,21 @@ async def perform_cto_scan(target_channel, workflow_id=None, test_mode=False, va
                 return payload if isinstance(payload, list) else []
 
             if validated_only:
-                feed_specs = (
-                    ('boost', 'tokenBoost', 'https://api.dexscreener.com/token-boosts/latest/v1'),
-                    ('cto', 'communityTakeover', 'https://api.dexscreener.com/community-takeovers/latest/v1'),
-                    ('dex', 'tokenProfile', 'https://api.dexscreener.com/token-profiles/latest/v1'),
-                    ('dex', 'tokenAd', 'https://api.dexscreener.com/ads/latest/v1'),
-                )
-                responses = await asyncio.gather(*(
-                    asyncio.to_thread(requests.get, url, timeout=8)
-                    for _, _, url in feed_specs
+                active_specs = [
+                    spec for spec in DEX_VALIDATED_FEED_SPECS
+                    if spec[0] in enabled_categories
+                ]
+                feed_event_lists = await asyncio.gather(*(
+                    fetch_dex_validated_feed_snapshot(category, order_type, ws_url, http_url)
+                    for category, order_type, ws_url, http_url in active_specs
                 ))
-
-                for (category, order_type, _), response in zip(feed_specs, responses):
-                    if category not in enabled_categories:
-                        continue
-                    for event in feed_items(response):
-                        addr = event.get('tokenAddress')
-                        chain = str(event.get('chainId') or '').lower()
-                        if not addr or chain != 'solana':
-                            continue
-
-                        # Date-backed feeds use their publish time. Boosts have
-                        # no timestamp, so totalAmount changes identify a new
-                        # published boost for the same token.
-                        marker = event.get('claimDate') or event.get('date')
-                        if marker:
-                            try:
-                                payment_timestamp = int(datetime.fromisoformat(
-                                    str(marker).replace('Z', '+00:00')
-                                ).timestamp() * 1000)
-                            except (TypeError, ValueError):
-                                payment_timestamp = 0
-                        elif category == 'boost':
-                            payment_timestamp = int(float(event.get('totalAmount') or event.get('amount') or 0))
-                        else:
-                            payment_timestamp = 0
-
-                        tokens_to_process.append({
-                            'tokenAddress': addr,
-                            'chainId': chain,
-                            'order_type': order_type,
-                            'order_status': 'approved',
-                            'payment_timestamp': payment_timestamp,
-                            'published_at': payment_timestamp if marker else None,
-                            'fetched_at': int(time.time() * 1000),
-                            'event_category': category,
-                            'storage_table': 'dex_validated',
-                        })
+                # Interleave across CTO, Boost, Profile, and Ads so one large feed
+                # does not starve the others within the 40-item manual batch cap.
+                max_len = max((len(lst) for lst in feed_event_lists), default=0)
+                for idx in range(max_len):
+                    for lst in feed_event_lists:
+                        if idx < len(lst):
+                            tokens_to_process.append(lst[idx])
             else:
                 profiles_res = await asyncio.to_thread(
                     requests.get, 'https://api.dexscreener.com/token-profiles/latest/v1', timeout=8
@@ -5026,15 +5412,385 @@ def dex_validated_status():
     settings = get_settings()
     with dex_validated_runtime_lock:
         runtime = dict(dex_validated_runtime)
+        runtime['ws_connected'] = len(dex_validated_active_ws_feeds)
     try:
         configured_interval = max(2, int(settings.get('dex_validated_scan_interval', 10) or 10))
     except (TypeError, ValueError):
         configured_interval = 10
+    latest_id = 0
+    total_records = 0
+    try:
+        with db_lock:
+            conn = get_db()
+            row = conn.cursor().execute("SELECT COALESCE(MAX(id), 0), COUNT(*) FROM dex_validated").fetchone()
+            if row:
+                latest_id = int(row[0] or 0)
+                total_records = int(row[1] or 0)
+    except Exception:
+        pass
     runtime.update({
+        'mode': 'websocket',
         'active': str(settings.get('dex_validated_auto_scan', 'false')).lower() == 'true',
         'interval': configured_interval,
+        'latest_record_id': latest_id,
+        'total_records': total_records,
     })
     return jsonify({'success': True, 'status': runtime})
+
+
+@app.route('/api/dex-validated/records', methods=['GET'])
+def get_dex_validated_records():
+    """Return enriched DEX Validated records with full filtering, sorting, KPI stats, and pagination."""
+    try:
+        page = max(1, int(request.args.get('page', 1)))
+        limit = min(max(10, int(request.args.get('limit', 100))), 50000)
+        offset = (page - 1) * limit
+
+        search = (request.args.get('search') or '').strip()
+        category = (request.args.get('category') or 'all').strip().lower()
+        status = (request.args.get('status') or 'all').strip().lower()
+        platform = (request.args.get('platform') or 'all').strip().lower()
+        exclude_platform = (request.args.get('exclude_platform') or 'none').strip().lower()
+        timeframe = (request.args.get('timeframe') or 'all').strip().lower()
+        min_mc = request.args.get('min_mc')
+        max_mc = request.args.get('max_mc')
+        min_liquidity = request.args.get('min_liquidity')
+        max_liquidity = request.args.get('max_liquidity')
+        volume_tf = (request.args.get('volume_tf') or '24h').strip().lower()
+        min_volume = request.args.get('min_volume')
+        max_volume = request.args.get('max_volume')
+        perf_tf = (request.args.get('perf_tf') or '5m').strip().lower()
+        min_perf = request.args.get('min_perf')
+        max_perf = request.args.get('max_perf')
+        min_age = request.args.get('min_age') or request.args.get('min_creation_age')
+        max_age = request.args.get('max_age') or request.args.get('max_creation_age')
+        min_migration_age = request.args.get('min_migration_age')
+        max_migration_age = request.args.get('max_migration_age')
+        migrated = (request.args.get('migrated') or 'all').strip().lower()
+        token_name_pattern = (request.args.get('token_name_pattern') or '').strip()
+        token_name_mode = (request.args.get('token_name_mode') or 'include').strip().lower()
+        word_filter = (request.args.get('word_filter') or '').strip()
+        sort_by = (request.args.get('sort_by') or 'id').lower()
+        sort_order = 'ASC' if (request.args.get('sort_order') or 'desc').upper() == 'ASC' else 'DESC'
+
+        ts_expr = (
+            "(CASE "
+            "WHEN COALESCE(fetched_at, 0) > 1000000000000 THEN fetched_at / 1000 "
+            "WHEN COALESCE(published_at, 0) > 1000000000000 THEN published_at / 1000 "
+            "WHEN COALESCE(payment_timestamp, 0) > 1000000000000 THEN payment_timestamp / 1000 "
+            "ELSE CAST(COALESCE(strftime('%s', created_at), 0) AS INTEGER) END)"
+        )
+
+        valid_sorts = {
+            'id': 'id',
+            'timestamp': ts_expr,
+            'token_name': 'name',
+            'name': 'name',
+            'perf_5m': 'perf_5m',
+            'perf_1h': 'perf_1h',
+            'perf_6h': 'perf_6h',
+            'perf_24h': 'perf_24h',
+            'status': 'status',
+            'market_cap': 'parse_mc_usd(market_cap)',
+            'liquidity_usd': 'liquidity_usd',
+            'volume_5m': 'volume_5m',
+            'volume_1h': 'volume_1h',
+            'volume_6h': 'volume_6h',
+            'volume_24h': 'volume_24h',
+            'age': 'parse_creation_age_minutes(age, formatted_message)',
+            'creation_age': 'parse_creation_age_minutes(age, formatted_message)',
+            'migration_age': 'parse_migration_age_minutes(NULL, formatted_message)',
+        }
+        order_col = valid_sorts.get(sort_by, 'id')
+
+        where_clauses = [
+            "("
+            "name IS NOT NULL AND TRIM(name) != '' "
+            "AND UPPER(TRIM(name)) NOT IN ('SOL', 'USDT', 'USDC', 'WSOL', 'WRAPPED SOL', 'UNKNOWN') "
+            "AND ca IS NOT NULL AND TRIM(ca) != '' "
+            "AND market_cap IS NOT NULL AND TRIM(market_cap) != '' AND UPPER(TRIM(market_cap)) != 'UNKNOWN' "
+            "AND age IS NOT NULL AND TRIM(age) != '' AND UPPER(TRIM(age)) != 'UNKNOWN'"
+            ")"
+        ]
+        params = []
+
+        if search:
+            s_param = f"%{search}%"
+            where_clauses.append("(name LIKE ? OR ca LIKE ? OR migration_status LIKE ? OR signal_type LIKE ? OR reason LIKE ?)")
+            params.extend([s_param, s_param, s_param, s_param, s_param])
+
+        if category and category != 'all':
+            if category == 'cto':
+                where_clauses.append("(LOWER(signal_type) = 'cto' OR LOWER(migration_status) LIKE '%takeover%')")
+            elif category == 'boost':
+                where_clauses.append("(LOWER(signal_type) = 'boost' OR LOWER(migration_status) LIKE '%boost%')")
+            elif category == 'dex_profile':
+                where_clauses.append("(LOWER(migration_status) LIKE '%profile%')")
+            elif category == 'dex_ad':
+                where_clauses.append("(LOWER(migration_status) LIKE '%ad%')")
+            elif category == 'dex':
+                where_clauses.append("(LOWER(signal_type) = 'dex' OR LOWER(migration_status) LIKE '%profile%' OR LOWER(migration_status) LIKE '%ad%')")
+
+        if status != 'all' and status:
+            where_clauses.append("LOWER(status) = ?")
+            params.append(status)
+
+        if platform != 'all' and platform:
+            where_clauses.append("(LOWER(platform) LIKE ? OR LOWER(formatted_message) LIKE ?)")
+            params.extend([f"%{platform}%", f"%{platform}%"])
+
+        if exclude_platform != 'none' and exclude_platform:
+            where_clauses.append("(LOWER(platform) NOT LIKE ? AND LOWER(COALESCE(formatted_message, '')) NOT LIKE ?)")
+            params.extend([f"%{exclude_platform}%", f"%current dex: %{exclude_platform}%"])
+
+        if timeframe and timeframe != 'all':
+            now_ts = int(time.time())
+            tf_seconds = {
+                '1h': 3600,
+                '6h': 21600,
+                '24h': 86400,
+                '7d': 604800,
+                '30d': 2592000,
+            }.get(timeframe)
+            if tf_seconds:
+                where_clauses.append(f"{ts_expr} >= ?")
+                params.append(now_ts - tf_seconds)
+
+        if min_mc:
+            try:
+                where_clauses.append("parse_mc_usd(market_cap) >= ?")
+                params.append(float(min_mc))
+            except ValueError:
+                pass
+        if max_mc:
+            try:
+                where_clauses.append("parse_mc_usd(market_cap) <= ?")
+                params.append(float(max_mc))
+            except ValueError:
+                pass
+
+        if min_liquidity:
+            try:
+                where_clauses.append("liquidity_usd >= ?")
+                params.append(float(min_liquidity))
+            except ValueError:
+                pass
+        if max_liquidity:
+            try:
+                where_clauses.append("liquidity_usd <= ?")
+                params.append(float(max_liquidity))
+            except ValueError:
+                pass
+
+        volume_col = f"volume_{volume_tf}" if volume_tf in ('5m', '1h', '6h', '24h') else 'volume_24h'
+        if min_volume:
+            try:
+                where_clauses.append(f"{volume_col} >= ?")
+                params.append(float(min_volume))
+            except ValueError:
+                pass
+        if max_volume:
+            try:
+                where_clauses.append(f"{volume_col} <= ?")
+                params.append(float(max_volume))
+            except ValueError:
+                pass
+
+        perf_col = f"perf_{perf_tf}" if perf_tf in ('5m', '1h', '6h', '24h') else 'perf_5m'
+        if min_perf:
+            try:
+                where_clauses.append(f"{perf_col} >= ?")
+                params.append(float(min_perf))
+            except ValueError:
+                pass
+        if max_perf:
+            try:
+                where_clauses.append(f"{perf_col} <= ?")
+                params.append(float(max_perf))
+            except ValueError:
+                pass
+
+        if min_age:
+            try:
+                where_clauses.append("parse_creation_age_minutes(age, formatted_message) >= ?")
+                params.append(float(min_age))
+            except ValueError:
+                pass
+        if max_age:
+            try:
+                where_clauses.append("parse_creation_age_minutes(age, formatted_message) <= ?")
+                params.append(float(max_age))
+            except ValueError:
+                pass
+
+        if min_migration_age:
+            try:
+                where_clauses.append("parse_migration_age_minutes(NULL, formatted_message) >= ?")
+                params.append(float(min_migration_age))
+            except ValueError:
+                pass
+        if max_migration_age:
+            try:
+                where_clauses.append("parse_migration_age_minutes(NULL, formatted_message) <= ?")
+                params.append(float(max_migration_age))
+            except ValueError:
+                pass
+
+        if migrated == 'yes':
+            where_clauses.append("(formatted_message LIKE '%Migrated: Yes%' OR LOWER(platform) LIKE '%raydium%')")
+        elif migrated == 'no':
+            where_clauses.append("(formatted_message LIKE '%Migrated: No%' OR (COALESCE(formatted_message, '') NOT LIKE '%Migrated: Yes%' AND LOWER(COALESCE(platform, '')) NOT LIKE '%raydium%'))")
+
+        if token_name_pattern and token_name_pattern.strip() not in ('', '.*'):
+            pat = token_name_pattern_for_sql(token_name_pattern)
+            if token_name_mode == 'exclude':
+                where_clauses.append("NOT (name REGEXP ?)")
+            else:
+                where_clauses.append("(name REGEXP ?)")
+            params.append(pat)
+
+        if word_filter:
+            where_clauses.append("NOT ((COALESCE(name, '') || '\n' || COALESCE(reason, '') || '\n' || COALESCE(formatted_message, '')) REGEXP ?)")
+            params.append(word_filter)
+
+        where_str = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+        with db_lock:
+            conn = get_db()
+            conn.create_function('parse_mc_usd', 1, parse_mc_usd)
+            conn.create_function('parse_age_minutes', 1, parse_age_minutes)
+            conn.create_function('parse_creation_age_minutes', 2, parse_creation_age_minutes)
+            conn.create_function('parse_migration_age_minutes', 2, parse_migration_age_minutes)
+            conn.create_function('regexp', 2, sqlite_regexp)
+            cursor = conn.cursor()
+
+            count_query = f"SELECT COUNT(*) FROM dex_validated{where_str}"
+            total_count = cursor.execute(count_query, params).fetchone()[0]
+
+            stats_query = f"""
+                SELECT
+                    COUNT(*),
+                    COUNT(CASE WHEN LOWER(status) = 'forwarded' THEN 1 END),
+                    COALESCE(SUM(COALESCE(volume_24h, 0)), 0),
+                    COUNT(DISTINCT ca),
+                    COUNT(CASE WHEN LOWER(signal_type) = 'cto' OR LOWER(migration_status) LIKE '%takeover%' THEN 1 END),
+                    COUNT(CASE WHEN LOWER(signal_type) = 'boost' OR LOWER(migration_status) LIKE '%boost%' THEN 1 END),
+                    COUNT(CASE WHEN LOWER(signal_type) = 'dex' OR LOWER(migration_status) LIKE '%profile%' OR LOWER(migration_status) LIKE '%ad%' THEN 1 END)
+                FROM dex_validated{where_str}
+            """
+            stats_row = cursor.execute(stats_query, params).fetchone()
+            stats = {
+                'total': stats_row[0] if stats_row else 0,
+                'forwarded': stats_row[1] if stats_row else 0,
+                'total_volume': round(float(stats_row[2] or 0.0), 2) if stats_row else 0.0,
+                'unique_tokens': stats_row[3] if stats_row else 0,
+                'cto_count': stats_row[4] if stats_row else 0,
+                'boost_count': stats_row[5] if stats_row else 0,
+                'dex_count': stats_row[6] if stats_row else 0,
+            }
+
+            data_query = f"""
+                SELECT id, ca, name, platform, market_cap, age,
+                       perf_5m, perf_1h, perf_6h, perf_24h,
+                       liquidity_usd, volume_5m, volume_1h, volume_6h, volume_24h,
+                       status, dex_url, migration_status, signal_type,
+                       payment_timestamp, order_status, published_at, fetched_at,
+                       detection_seconds, reason, formatted_message, created_at,
+                       {ts_expr} AS event_ts
+                FROM dex_validated
+                {where_str}
+                ORDER BY {order_col} {sort_order} NULLS LAST
+                LIMIT ? OFFSET ?
+            """
+            rows = cursor.execute(data_query, list(params) + [limit, offset]).fetchall()
+
+        records = []
+        for r in rows:
+            row_dict = dict(r) if isinstance(r, dict) else {
+                "id": r[0],
+                "ca": r[1],
+                "name": r[2],
+                "platform": r[3],
+                "market_cap": r[4],
+                "age": r[5],
+                "perf_5m": r[6],
+                "perf_1h": r[7],
+                "perf_6h": r[8],
+                "perf_24h": r[9],
+                "liquidity_usd": r[10],
+                "volume_5m": r[11],
+                "volume_1h": r[12],
+                "volume_6h": r[13],
+                "volume_24h": r[14],
+                "status": r[15],
+                "dex_url": r[16],
+                "migration_status": r[17],
+                "signal_type": r[18],
+                "payment_timestamp": r[19],
+                "order_status": r[20],
+                "published_at": r[21],
+                "fetched_at": r[22],
+                "detection_seconds": r[23],
+                "reason": r[24],
+                "formatted_message": r[25],
+                "created_at": r[26],
+                "timestamp": r[27],
+            }
+            raw_msg = row_dict.get("formatted_message") or ""
+            mig_status = str(row_dict.get("migration_status") or "")
+            sig_type = str(row_dict.get("signal_type") or "").lower()
+            mig_lower = mig_status.lower()
+            if "takeover" in mig_lower or sig_type == "cto":
+                cat_display = "CTO"
+            elif "boost" in mig_lower or sig_type == "boost":
+                cat_display = "BOOST"
+            elif "token ad" in mig_lower or "ad (" in mig_lower:
+                cat_display = "DEX AD"
+            else:
+                cat_display = "DEX PROFILE"
+
+            pay_ts = row_dict.get("payment_timestamp")
+            boost_amt = int(pay_ts) if (cat_display == "BOOST" and isinstance(pay_ts, (int, float)) and 0 < pay_ts < 1_000_000_000) else None
+
+            c_age = extract_creation_age_str(row_dict.get("age"), raw_msg) or row_dict.get("age") or "-"
+            m_age = extract_migration_age_str(None, raw_msg) or "-"
+            cur_dex_match = re.search(r"Current DEX:\s*(.+)", raw_msg)
+            current_dex = cur_dex_match.group(1).strip() if cur_dex_match else ""
+            is_migrated = bool("migrated: yes" in raw_msg.lower() or "raydium" in current_dex.lower())
+
+            event_ts = row_dict.get("timestamp") or row_dict.get("event_ts")
+            if not event_ts:
+                raw_ms = row_dict.get("fetched_at") or row_dict.get("published_at") or 0
+                if isinstance(raw_ms, (int, float)) and raw_ms > 1_000_000_000_000:
+                    event_ts = int(raw_ms / 1000)
+            row_dict["timestamp"] = event_ts
+            row_dict["token_name"] = row_dict.get("name") or "Unknown"
+            row_dict["category_display"] = cat_display
+            row_dict["boost_amount"] = boost_amt
+            row_dict["creation_age"] = c_age
+            row_dict["migration_age"] = m_age
+            row_dict["age"] = c_age
+            row_dict["current_dex"] = current_dex
+            row_dict["is_migrated"] = is_migrated
+            records.append(row_dict)
+
+        total_pages = max(1, (total_count + limit - 1) // limit)
+        with dex_validated_runtime_lock:
+            ws_connected = len(dex_validated_active_ws_feeds)
+
+        return jsonify({
+            "success": True,
+            "records": records,
+            "stats": stats,
+            "total": total_count,
+            "page": page,
+            "limit": limit,
+            "total_pages": total_pages,
+            "ws_connected": ws_connected,
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({"success": False, "error": str(e), "trace": traceback.format_exc()}), 500
 
 @app.route('/api/dex-validated/details', methods=['POST'])
 def dex_validated_details():
@@ -5075,41 +5831,138 @@ def dex_validated_details():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
-async def cto_auto_scanner_loop():
-    """Background scanner for the independent DEX Validated system."""
+
+async def _dex_validated_ws_worker(category, order_type, ws_url):
+    """Persistent WebSocket listener for a single DEX Screener feed (CTO, Boost, Profile, or Ad).
+    Always collects and enriches incoming events into dex_validated; forwards to Telegram when auto_scan is active.
+    """
+    seen_keys = OrderedDict()
+
+    def mark_seen(key):
+        seen_keys[key] = True
+        while len(seen_keys) > 5000:
+            seen_keys.popitem(last=False)
+
     while True:
-        interval = 60
-        is_auto = False
-        loop_started = time.monotonic()
         try:
-            settings = get_settings()
-            is_auto = str(settings.get('dex_validated_auto_scan', 'false')).lower() == 'true'
-            target = settings.get('dex_validated_target_channel', '')
-            workflow_id = settings.get('dex_validated_workflow_id', 'active_all')
-            test_mode = str(settings.get('dex_validated_test_mode', 'false')).lower() == 'true'
+            debug_log(f"[DEX VALIDATED WS] Connecting to {order_type} ({ws_url})...")
+            async with websockets.connect(
+                ws_url,
+                open_timeout=10,
+                ping_interval=20,
+                ping_timeout=20,
+                close_timeout=2,
+                max_size=4 * 1024 * 1024,
+            ) as ws:
+                with dex_validated_runtime_lock:
+                    dex_validated_active_ws_feeds.add(order_type)
+                    dex_validated_runtime['ws_connected'] = len(dex_validated_active_ws_feeds)
+                    dex_validated_runtime['next_check_at'] = None
+                    dex_validated_runtime['last_error'] = None
+                debug_log(f"[DEX VALIDATED WS] Connected to {order_type} stream.")
 
-            try:
-                interval = int(settings.get('dex_validated_scan_interval', 10))
-                if interval < 2:  # Four feeds at 2s remain below 60 rpm per endpoint.
-                    interval = 2
-            except (ValueError, TypeError):
-                interval = 10
+                is_initial_snapshot = True
+                while True:
+                    try:
+                        raw_msg = await asyncio.wait_for(ws.recv(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        continue
 
-            if is_auto and tg_client and await tg_client.is_user_authorized():
-                debug_log(f"Running DEX Validated scan (Interval: {interval}s)...")
-                await perform_cto_scan(target, workflow_id, test_mode, validated_only=True)
+                    frame_started = time.monotonic()
+                    fetched_at_ms = int(time.time() * 1000)
+                    try:
+                        payload = json.loads(raw_msg)
+                    except Exception as parse_err:
+                        debug_log(f"[DEX VALIDATED WS] JSON parse error on {order_type}: {parse_err}")
+                        continue
+
+                    events = extract_dex_validated_events(payload, category, order_type, fetched_at_ms)
+                    is_initial_frame = is_initial_snapshot
+                    if is_initial_snapshot:
+                        is_initial_snapshot = False
+                    candidate_items = events
+
+                    new_items = []
+                    for item in candidate_items:
+                        ev_key = (
+                            item.get('tokenAddress'),
+                            category,
+                            item.get('payment_timestamp'),
+                            item.get('order_status'),
+                        )
+                        if ev_key in seen_keys:
+                            continue
+                        new_items.append((ev_key, item))
+
+                    settings = get_settings()
+                    is_auto = str(settings.get('dex_validated_auto_scan', 'false')).lower() == 'true'
+                    enabled_categories = get_enabled_dex_validated_categories(settings)
+                    test_mode = str(settings.get('dex_validated_test_mode', 'false')).lower() == 'true'
+                    tg_ready = bool(tg_client and await tg_client.is_user_authorized())
+                    should_forward = is_auto and (not test_mode) and (not is_initial_frame) and (category in enabled_categories) and tg_ready
+                    effective_test_mode = not should_forward
+
+                    target = settings.get('dex_validated_target_channel', '')
+                    workflow_id = settings.get('dex_validated_workflow_id', 'active_all')
+
+                    results = []
+                    for ev_key, item in new_items:
+                        item['persist_db'] = True
+                        token_info = await process_single_cto_item(item, target, workflow_id, effective_test_mode)
+                        if token_info:
+                            results.append(token_info)
+                            if token_info.get('status') != 'error':
+                                mark_seen(ev_key)
+                            if token_info.get('status') != 'duplicate':
+                                with dex_validated_runtime_lock:
+                                    dex_validated_runtime['last_checked_at'] = datetime.now(timezone.utc).isoformat()
+                        else:
+                            mark_seen(ev_key)
+
+                    passed_count = sum(1 for r in results if r.get('status') == 'passed' and should_forward)
+                    fresh_results = [r for r in results if r.get('status') != 'duplicate']
+                    latencies = [
+                        float(r['detection_seconds']) for r in fresh_results
+                        if isinstance(r.get('detection_seconds'), (int, float))
+                    ]
+                    if fresh_results:
+                        debug_log(
+                            f"[DEX VALIDATED WS] {order_type}: Enriched={len(fresh_results)} | "
+                            f"Forwarded={passed_count} | Elapsed={time.monotonic() - frame_started:.2f}s"
+                        )
+
+                    with dex_validated_runtime_lock:
+                        dex_validated_runtime['last_checked_at'] = datetime.now(timezone.utc).isoformat()
+                        dex_validated_runtime['last_scan_seconds'] = round(time.monotonic() - frame_started, 2)
+                        dex_validated_runtime['total_checks'] += 1
+                        dex_validated_runtime['last_error'] = None
+                        if fresh_results:
+                            dex_validated_runtime['last_new_events'] = len(fresh_results)
+                            dex_validated_runtime['last_forwarded'] = passed_count
+                            dex_validated_runtime['total_events'] += len(fresh_results)
+                            dex_validated_runtime['total_forwarded'] += passed_count
+                            if latencies:
+                                dex_validated_runtime['last_detection_seconds'] = round(min(latencies), 2)
+
         except Exception as e:
-            print(f"Error in cto_auto_scanner_loop: {e}", flush=True)
+            print(f"[DEX VALIDATED WS] Error on {order_type} stream: {e}", flush=True)
+            with dex_validated_runtime_lock:
+                dex_validated_active_ws_feeds.discard(order_type)
+                dex_validated_runtime['ws_connected'] = len(dex_validated_active_ws_feeds)
+                dex_validated_runtime['last_error'] = f"{order_type}: {e}"
+            await asyncio.sleep(2.0)
+        finally:
+            with dex_validated_runtime_lock:
+                dex_validated_active_ws_feeds.discard(order_type)
+                dex_validated_runtime['ws_connected'] = len(dex_validated_active_ws_feeds)
 
-        # Keep a start-to-start cadence. Processing time should not be added on
-        # top of the configured fetch interval.
-        sleep_for = max(0.25, interval - (time.monotonic() - loop_started))
-        with dex_validated_runtime_lock:
-            dex_validated_runtime['next_check_at'] = (
-                datetime.fromtimestamp(time.time() + sleep_for, timezone.utc).isoformat()
-                if is_auto else None
-            )
-        await asyncio.sleep(sleep_for)
+
+async def cto_auto_scanner_loop():
+    """Background WebSocket supervisor for the independent DEX Validated system."""
+    await asyncio.gather(*(
+        _dex_validated_ws_worker(category, order_type, ws_url)
+        for category, order_type, ws_url, _ in DEX_VALIDATED_FEED_SPECS
+    ))
 
 def run_flask_app():
     port = int(os.environ.get("PORT", 5000))
