@@ -234,6 +234,15 @@ window.addEventListener('popstate', () => {
     switchTab(tabFromUrl, { skipPushState: true });
 });
 
+function handleBrandClick() {
+    const sidebar = document.getElementById('akoue-sidebar');
+    if (sidebar && sidebar.classList.contains('collapsed')) {
+        toggleAkoueSidebar(true);
+    } else {
+        switchTab('dashboard');
+    }
+}
+
 function toggleAkoueSidebar(forceState) {
     const sidebar = document.getElementById('akoue-sidebar') || document.querySelector('.akoue-sidebar') || document.querySelector('.grok-sidebar');
     if (!sidebar) return;
@@ -248,7 +257,11 @@ function toggleAkoueSidebar(forceState) {
     } catch (_) {}
     const toggleBtn = document.getElementById('akoue-sidebar-toggle');
     if (toggleBtn) {
-        toggleBtn.title = isCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
+        toggleBtn.title = isCollapsed ? 'Expand sidebar (⌘B)' : 'Collapse sidebar (⌘B)';
+        toggleBtn.setAttribute('aria-label', toggleBtn.title);
+        toggleBtn.innerHTML = isCollapsed
+            ? `<svg class="akoue-toggle-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path><polyline points="13 9 16 12 13 15"></polyline></svg>`
+            : `<svg class="akoue-toggle-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path><polyline points="15 9 12 12 15 15"></polyline></svg>`;
     }
 }
 
@@ -4286,7 +4299,11 @@ try {
         if (sidebar) {
             sidebar.classList.add('collapsed');
             const toggleBtn = document.getElementById('akoue-sidebar-toggle');
-            if (toggleBtn) toggleBtn.title = 'Expand sidebar';
+            if (toggleBtn) {
+                toggleBtn.title = 'Expand sidebar (⌘B)';
+                toggleBtn.setAttribute('aria-label', toggleBtn.title);
+                toggleBtn.innerHTML = `<svg class="akoue-toggle-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path><polyline points="13 9 16 12 13 15"></polyline></svg>`;
+            }
         }
     }
     const isWfDropdownOpen = localStorage.getItem('akoue_workflows_dropdown_open');
@@ -4297,6 +4314,13 @@ try {
 } catch (_) {}
 
 document.addEventListener('keydown', (e) => {
+    // ⌘B / Ctrl+B toggle sidebar
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        toggleAkoueSidebar();
+        return;
+    }
+    // ⌘K / Ctrl+K search workflows & folders
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         const searchInput = document.getElementById('grok-folder-search');
