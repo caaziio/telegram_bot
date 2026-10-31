@@ -6865,6 +6865,341 @@ def trigger_performance_scan_now():
         threading.Thread(target=lambda: asyncio.run(scan_post_signal_performance_batch(max_rows_per_table=batch_size)), daemon=True).start()
     return jsonify({'success': True, 'message': f'Started 1h/4h OHLCV Peak & Trajectory scan (up to {batch_size} rows per table).'})
 
+
+def token_matches_workflow_rules(token, rules):
+    """Check whether a candidate token dict satisfies all rules of a workflow."""
+    if not rules:
+        return True
+
+    name = str(token.get('name') or token.get('token_name') or '').strip()
+    mc = float(parse_mc_usd(token.get('market_cap')) or 0.0)
+    age_m = float(parse_age_minutes(token.get('age')) or 0.0)
+    mig_age_m = float(parse_migration_age_minutes(token.get('migration_age'), token.get('formatted_message')) or 0.0)
+    liq = float(token.get('liquidity_usd') or 0.0)
+    plat = str(token.get('platform') or '').lower()
+    migrated_status = str(token.get('migration_status') or '').lower()
+    is_migrated = ('migrated' in migrated_status) or ('raydium' in plat) or ('migrated: yes' in str(token.get('formatted_message') or '').lower())
+    
+    sig_type = str(token.get('signal_type') or token.get('category') or '').lower()
+    cat = 'boost' if 'boost' in sig_type else ('cto' if ('takeover' in sig_type or sig_type == 'cto') else 'dex')
+
+    for r in rules:
+        rtype = r.get('rule_type')
+        tmin = float(r['time_min']) if r.get('time_min') not in (None, '') else None
+        tmax = float(r['time_max']) if r.get('time_max') not in (None, '') else None
+        stext = r.get('search_text')
+        rtext = r.get('replace_text')
+
+        if rtype == 'market_cap':
+            if tmin is not None and mc < tmin:
+                return False
+            if tmax is not None and mc > tmax:
+                return False
+
+        elif rtype == 'token_age':
+            age_kind = (stext or 'creation').lower().strip()
+            eval_age = mig_age_m if age_kind == 'migration' else age_m
+            if tmin is not None and eval_age < tmin:
+                return False
+            if tmax is not None and eval_age > tmax:
+                return False
+
+        elif rtype == 'liquidity':
+            if tmin is not None and liq < tmin:
+                return False
+            if tmax is not None and liq > tmax:
+                return False
+
+        elif rtype == 'volume':
+            v_tf = (stext or '24h').lower().replace('hr', 'h')
+            vol = float(token.get(f'volume_{v_tf}') or token.get('volume_24h') or 0.0)
+            if tmin is not None and vol < tmin:
+                return False
+            if tmax is not None and vol > tmax:
+                return False
+
+        elif rtype == 'performance':
+            p_tf = (stext or '5m').lower().replace('hr', 'h')
+            perf = float(token.get(f'perf_{p_tf}') or token.get('perf_5m') or 0.0)
+            if tmin is not None and perf < tmin:
+                return False
+            if tmax is not None and perf > tmax:
+                return False
+
+        elif rtype == 'migrated':
+            req = str(stext or 'yes').lower().strip()
+            if req == 'yes' and not is_migrated:
+                return False
+            if req == 'no' and is_migrated:
+                return False
+
+        elif rtype == 'exclude_platform':
+            ex = str(stext or '').lower().strip()
+            if ex and ex in plat:
+                return False
+
+        elif rtype == 'category':
+            req_cat = str(stext or '').lower().strip()
+            if req_cat and req_cat != 'all' and req_cat != cat:
+                return False
+
+        elif rtype == 'token_name':
+            pattern = (stext or '').strip()
+            mode = (rtext or 'include').strip().lower()
+            structured_filter = None
+            if pattern.startswith('token_name_filter:'):
+                try:
+                    structured_filter = json.loads(pattern[len('token_name_filter:'):])
+                except Exception:
+                    structured_filter = {'exact': [], 'contains': []}
+
+            if structured_filter is not None:
+                norm_name = name.casefold().strip()
+                exacts = [str(x).strip('"').casefold() for x in structured_filter.get('exact', []) if str(x).strip('"')]
+                contains = [(str(x).strip('"').casefold(), str(x).startswith('"') and str(x).endswith('"')) for x in structured_filter.get('contains', []) if str(x).strip('"')]
+                c_match = any(lit in norm_name if q else bool(re.search(rf'(?<!\w){re.escape(lit)}(?!\w)', norm_name, re.IGNORECASE)) for lit, q in contains)
+                is_match = (norm_name in exacts) or c_match
+            else:
+                pat = pattern or '.*'
+                is_match = bool(re.search(pat, name, re.IGNORECASE))
+
+            if mode == 'exclude' and is_match and name:
+                return False
+            if mode != 'exclude' and not is_match:
+                return False
+
+        elif rtype == 'dex_payment':
+            if token.get('source_system') == 'paid' and token.get('amount') is not None:
+                amt = float(token.get('amount') or 0.0)
+                usd_amt = (amt * 180.0) if amt < 25.0 else amt
+                if tmin is not None and usd_amt < tmin:
+                    return False
+                if tmax is not None and usd_amt > tmax:
+                    return False
+
+    return True
+
+
+@app.route('/api/workflows/performance', methods=['GET'])
+def get_workflows_performance():
+    system = request.args.get('system', 'validated').lower().strip()
+    timeframe = request.args.get('timeframe', 'day').lower().strip()
+    sort_by = request.args.get('sort_by', 'win_rate_2x').lower().strip()
+
+    now_ts = int(time.time())
+    tf_seconds = {
+        'day': 86400,
+        'week': 7 * 86400,
+        'month': 30 * 86400,
+        'all': None
+    }.get(timeframe, 86400)
+
+    # 1. Fetch active workflows & rules directly from Supabase
+    wf_rows = []
+    rule_rows = []
+    if supabase_client:
+        try:
+            wf_rows = supabase_client.table('workflows').select('id,name,is_active').eq('is_active', True).execute().data or []
+            rule_rows = supabase_client.table('rules').select('id,workflow_id,rule_type,search_text,replace_text,time_min,time_max').execute().data or []
+        except Exception as e:
+            debug_log(f"[WF PERF] Error pulling workflows/rules from Supabase: {e}")
+
+    wf_map = {}
+    for w in wf_rows:
+        w_id = w['id']
+        w_name = w['name']
+        wf_map[w_id] = {'id': w_id, 'name': w_name, 'rules': []}
+
+    for r in rule_rows:
+        wid = r['workflow_id']
+        if wid in wf_map:
+            wf_map[wid]['rules'].append(r)
+
+    # 2. Fetch candidate tokens from memory / Supabase fallback
+    candidate_tokens = []
+    ts_dv_expr = "(CASE WHEN COALESCE(fetched_at, 0) > 1000000000000 THEN fetched_at / 1000 WHEN COALESCE(published_at, 0) > 1000000000000 THEN published_at / 1000 WHEN COALESCE(payment_timestamp, 0) > 1000000000000 THEN payment_timestamp / 1000 ELSE CAST(COALESCE(strftime('%s', created_at), 0) AS INTEGER) END)"
+    ts_wp_expr = "(CASE WHEN COALESCE(timestamp, 0) > 1000000000000 THEN timestamp / 1000 WHEN COALESCE(timestamp, 0) > 0 THEN timestamp ELSE CAST(COALESCE(strftime('%s', created_at), 0) AS INTEGER) END)"
+
+    with db_lock:
+        conn = get_db()
+        cursor = conn.cursor()
+
+        if system in ('validated', 'all'):
+            where_dv = [
+                "name IS NOT NULL AND TRIM(name) != ''",
+                "UPPER(TRIM(name)) NOT IN ('SOL','USDT','USDC','WSOL','WRAPPED SOL','UNKNOWN')",
+                "market_cap IS NOT NULL AND TRIM(market_cap) != '' AND UPPER(TRIM(market_cap)) != 'UNKNOWN'",
+                "peak_mult_1h IS NOT NULL"
+            ]
+            params_dv = []
+            if tf_seconds:
+                where_dv.append(f"{ts_dv_expr} >= ?")
+                params_dv.append(now_ts - tf_seconds)
+            dv_query = f"""
+                SELECT id, name, ca, platform, market_cap, age, perf_5m, perf_1h, perf_6h, perf_24h,
+                       liquidity_usd, volume_5m, volume_1h, volume_6h, volume_24h, migration_status,
+                       signal_type, formatted_message, max_mc_1h, peak_mult_1h, min_mc_1h, min_dd_1h_pct,
+                       pre_peak_low_mc_1h, pre_peak_dd_1h_pct, path_1h, max_mc_4h, peak_mult_4h, min_mc_4h,
+                       min_dd_4h_pct, pre_peak_low_mc_4h, pre_peak_dd_4h_pct, path_4h, {ts_dv_expr} AS event_ts
+                FROM dex_validated
+                WHERE {' AND '.join(where_dv)}
+                ORDER BY id DESC
+            """
+            try:
+                for row in cursor.execute(dv_query, params_dv).fetchall():
+                    d = dict(row) if isinstance(row, dict) else {
+                        'id': row[0], 'name': row[1], 'ca': row[2], 'platform': row[3], 'market_cap': row[4],
+                        'age': row[5], 'perf_5m': row[6], 'perf_1h': row[7], 'perf_6h': row[8], 'perf_24h': row[9],
+                        'liquidity_usd': row[10], 'volume_5m': row[11], 'volume_1h': row[12], 'volume_6h': row[13],
+                        'volume_24h': row[14], 'migration_status': row[15], 'signal_type': row[16],
+                        'formatted_message': row[17], 'max_mc_1h': row[18], 'peak_mult_1h': row[19],
+                        'min_mc_1h': row[20], 'min_dd_1h_pct': row[21], 'pre_peak_low_mc_1h': row[22],
+                        'pre_peak_dd_1h_pct': row[23], 'path_1h': row[24], 'max_mc_4h': row[25],
+                        'peak_mult_4h': row[26], 'min_mc_4h': row[27], 'min_dd_4h_pct': row[28],
+                        'pre_peak_low_mc_4h': row[29], 'pre_peak_dd_4h_pct': row[30], 'path_4h': row[31],
+                        'event_ts': row[32], 'source_system': 'validated'
+                    }
+                    candidate_tokens.append(d)
+            except Exception as e:
+                debug_log(f"[WF PERF] Error querying dex_validated: {e}")
+
+        if system in ('paid', 'all'):
+            where_wp = [
+                "token_name IS NOT NULL AND TRIM(token_name) != ''",
+                "UPPER(TRIM(token_name)) NOT IN ('SOL','USDT','USDC','WSOL','WRAPPED SOL','UNKNOWN')",
+                "market_cap IS NOT NULL AND TRIM(market_cap) != '' AND UPPER(TRIM(market_cap)) != 'UNKNOWN'",
+                "peak_mult_1h IS NOT NULL"
+            ]
+            params_wp = []
+            if tf_seconds:
+                where_wp.append(f"{ts_wp_expr} >= ?")
+                params_wp.append(now_ts - tf_seconds)
+            wp_query = f"""
+                SELECT id, token_name AS name, ca, platform, market_cap, age, perf_5m, perf_1h, perf_6h, perf_24h,
+                       liquidity_usd, volume_5m, volume_1h, volume_6h, volume_24h, migration_status,
+                       'paid' AS signal_type, formatted_message, max_mc_1h, peak_mult_1h, min_mc_1h, min_dd_1h_pct,
+                       pre_peak_low_mc_1h, pre_peak_dd_1h_pct, path_1h, max_mc_4h, peak_mult_4h, min_mc_4h,
+                       min_dd_4h_pct, pre_peak_low_mc_4h, pre_peak_dd_4h_pct, path_4h, {ts_wp_expr} AS event_ts
+                FROM wallet_payments
+                WHERE {' AND '.join(where_wp)}
+                ORDER BY id DESC
+            """
+            try:
+                for row in cursor.execute(wp_query, params_wp).fetchall():
+                    d = dict(row) if isinstance(row, dict) else {
+                        'id': row[0], 'name': row[1], 'ca': row[2], 'platform': row[3], 'market_cap': row[4],
+                        'age': row[5], 'perf_5m': row[6], 'perf_1h': row[7], 'perf_6h': row[8], 'perf_24h': row[9],
+                        'liquidity_usd': row[10], 'volume_5m': row[11], 'volume_1h': row[12], 'volume_6h': row[13],
+                        'volume_24h': row[14], 'migration_status': row[15], 'signal_type': row[16],
+                        'formatted_message': row[17], 'max_mc_1h': row[18], 'peak_mult_1h': row[19],
+                        'min_mc_1h': row[20], 'min_dd_1h_pct': row[21], 'pre_peak_low_mc_1h': row[22],
+                        'pre_peak_dd_1h_pct': row[23], 'path_1h': row[24], 'max_mc_4h': row[25],
+                        'peak_mult_4h': row[26], 'min_mc_4h': row[27], 'min_dd_4h_pct': row[28],
+                        'pre_peak_low_mc_4h': row[29], 'pre_peak_dd_4h_pct': row[30], 'path_4h': row[31],
+                        'event_ts': row[32], 'source_system': 'paid'
+                    }
+                    candidate_tokens.append(d)
+            except Exception as e:
+                debug_log(f"[WF PERF] Error querying wallet_payments: {e}")
+
+    # Direct Supabase fallback if memory index was not hydrated yet
+    if not candidate_tokens and supabase_client:
+        try:
+            if system in ('validated', 'all'):
+                q_sb = supabase_client.table('dex_validated').select(
+                    'id,name,ca,platform,market_cap,age,perf_5m,perf_1h,perf_6h,perf_24h,liquidity_usd,volume_5m,volume_1h,volume_6h,volume_24h,migration_status,signal_type,formatted_message,max_mc_1h,peak_mult_1h,min_mc_1h,min_dd_1h_pct,pre_peak_low_mc_1h,pre_peak_dd_1h_pct,path_1h,max_mc_4h,peak_mult_4h,min_mc_4h,min_dd_4h_pct,pre_peak_low_mc_4h,pre_peak_dd_4h_pct,path_4h,fetched_at,published_at,payment_timestamp,created_at'
+                ).not_.is_('peak_mult_1h', 'null').limit(1000)
+                if tf_seconds:
+                    q_sb = q_sb.gte('fetched_at', (now_ts - tf_seconds) * 1000)
+                for item in (q_sb.execute().data or []):
+                    item['source_system'] = 'validated'
+                    candidate_tokens.append(item)
+
+            if system in ('paid', 'all'):
+                q_sb_wp = supabase_client.table('wallet_payments').select(
+                    'id,token_name,ca,platform,market_cap,age,perf_5m,perf_1h,perf_6h,perf_24h,liquidity_usd,volume_5m,volume_1h,volume_6h,volume_24h,migration_status,formatted_message,max_mc_1h,peak_mult_1h,min_mc_1h,min_dd_1h_pct,pre_peak_low_mc_1h,pre_peak_dd_1h_pct,path_1h,max_mc_4h,peak_mult_4h,min_mc_4h,min_dd_4h_pct,pre_peak_low_mc_4h,pre_peak_dd_4h_pct,path_4h,timestamp,created_at'
+                ).not_.is_('peak_mult_1h', 'null').limit(1000)
+                if tf_seconds:
+                    q_sb_wp = q_sb_wp.gte('timestamp', now_ts - tf_seconds)
+                for item in (q_sb_wp.execute().data or []):
+                    item['name'] = item.get('token_name')
+                    item['signal_type'] = 'paid'
+                    item['source_system'] = 'paid'
+                    candidate_tokens.append(item)
+        except Exception as sb_err:
+            debug_log(f"[WF PERF] Supabase fallback error: {sb_err}")
+
+    # 3. Evaluate each workflow
+    leaderboard = []
+    for wf_id, wf in wf_map.items():
+        matched = [t for t in candidate_tokens if token_matches_workflow_rules(t, wf['rules'])]
+        if not matched:
+            continue
+
+        peaks_1h = [float(x.get('peak_mult_1h') or 1.0) for x in matched if x.get('peak_mult_1h') is not None]
+        peaks_4h = [float(x.get('peak_mult_4h') or x.get('peak_mult_1h') or 1.0) for x in matched if (x.get('peak_mult_4h') is not None or x.get('peak_mult_1h') is not None)]
+        drawdowns = [float(x.get('pre_peak_dd_1h_pct') or 0.0) for x in matched if x.get('pre_peak_dd_1h_pct') is not None]
+
+        wins_2x = len([p for p in peaks_1h if p >= 2.0])
+        wins_1_5x = len([p for p in peaks_1h if p >= 1.5])
+        wins_5x = len([p for p in peaks_1h if p >= 5.0])
+
+        avg_1h = sum(peaks_1h) / len(peaks_1h) if peaks_1h else 1.0
+        avg_4h = sum(peaks_4h) / len(peaks_4h) if peaks_4h else 1.0
+        avg_dd = sum(drawdowns) / len(drawdowns) if drawdowns else 0.0
+
+        best_token = max(matched, key=lambda x: float(x.get('peak_mult_1h') or 1.0))
+        best_peak = round(float(best_token.get('peak_mult_1h') or 1.0), 2)
+
+        leaderboard.append({
+            'workflow_id': wf_id,
+            'name': wf['name'],
+            'rules_count': len(wf['rules']),
+            'matched_count': len(matched),
+            'win_rate_2x': round((wins_2x / len(matched)) * 100.0, 1),
+            'win_rate_1_5x': round((wins_1_5x / len(matched)) * 100.0, 1),
+            'win_rate_5x': round((wins_5x / len(matched)) * 100.0, 1),
+            'avg_peak_1h': round(avg_1h, 2),
+            'avg_peak_4h': round(avg_4h, 2),
+            'avg_pre_peak_dd_pct': round(avg_dd, 1),
+            'best_token_name': best_token.get('name') or 'Unknown',
+            'best_token_ca': best_token.get('ca') or '',
+            'best_token_peak': best_peak,
+        })
+
+    # Sort leaderboard
+    if sort_by == 'avg_peak_1h':
+        leaderboard.sort(key=lambda x: (x['avg_peak_1h'], x['win_rate_2x'], x['matched_count']), reverse=True)
+    elif sort_by == 'avg_peak_4h':
+        leaderboard.sort(key=lambda x: (x['avg_peak_4h'], x['win_rate_2x'], x['matched_count']), reverse=True)
+    elif sort_by == 'matched':
+        leaderboard.sort(key=lambda x: (x['matched_count'], x['win_rate_2x']), reverse=True)
+    elif sort_by == 'best_peak':
+        leaderboard.sort(key=lambda x: (x['best_token_peak'], x['win_rate_2x']), reverse=True)
+    else:  # win_rate_2x default
+        leaderboard.sort(key=lambda x: (x['win_rate_2x'], x['avg_peak_1h'], x['matched_count']), reverse=True)
+
+    best_workflow = leaderboard[0] if leaderboard else None
+
+    tf_labels = {
+        'day': 'Today (Past 24 Hours)',
+        'week': 'This Week (Past 7 Days)',
+        'month': 'This Month (Past 30 Days)',
+        'all': 'All Time'
+    }
+
+    return jsonify({
+        'success': True,
+        'system': system,
+        'timeframe': timeframe,
+        'timeframe_label': tf_labels.get(timeframe, 'Custom Timeframe'),
+        'total_signals_evaluated': len(candidate_tokens),
+        'best_workflow': best_workflow,
+        'leaderboard': leaderboard,
+        'total_active_workflows': len(wf_map),
+        'workflows_with_matches': len(leaderboard)
+    })
+
 def run_flask_app():
     port = int(os.environ.get("PORT", 5000))
     print(f"Starting Web Dashboard on http://localhost:{port}")

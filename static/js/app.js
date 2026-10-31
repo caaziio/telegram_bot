@@ -5142,6 +5142,9 @@ async function loadDashboardOverview(showToast = false) {
         if (showToast) {
             showAppToast('Dashboard insights refreshed.', 'success', 1800);
         }
+
+        // Also load workflow performance intelligence
+        loadWorkflowPerformance();
     } catch (err) {
         console.error('Error loading dashboard overview:', err);
     }
@@ -5153,6 +5156,226 @@ function openDashboardCategory(tabId, category) {
         if (catEl) catEl.value = category;
     }
     switchTab(tabId);
+}
+
+// ==========================================
+// Executive Workflow Performance & Leaderboard
+// ==========================================
+let currentWfPerfSystem = 'validated';
+let currentWfPerfTimeframe = 'day';
+let currentWfPerfSort = 'win_rate_2x';
+
+async function loadWorkflowPerformance() {
+    try {
+        const params = new URLSearchParams({
+            system: currentWfPerfSystem,
+            timeframe: currentWfPerfTimeframe,
+            sort_by: currentWfPerfSort
+        });
+        const res = await fetch(`/api/workflows/performance?${params.toString()}`);
+        const data = await res.json();
+        if (data.success) {
+            renderWorkflowPerformance(data);
+        }
+    } catch (err) {
+        console.error('Error loading workflow performance intelligence:', err);
+    }
+}
+
+function setWorkflowPerfSystem(sys) {
+    currentWfPerfSystem = sys;
+    ['validated', 'paid', 'all'].forEach(s => {
+        const btn = document.getElementById(`wf-sys-btn-${s}`);
+        if (btn) {
+            if (s === sys) {
+                btn.style.background = s === 'validated' ? '#34d399' : (s === 'paid' ? '#22d3ee' : '#a78bfa');
+                btn.style.color = '#022c22';
+                btn.style.fontWeight = '700';
+            } else {
+                btn.style.background = 'transparent';
+                btn.style.color = 'var(--text-muted)';
+                btn.style.fontWeight = '500';
+            }
+        }
+    });
+    loadWorkflowPerformance();
+}
+
+function setWorkflowPerfTimeframe(tf) {
+    currentWfPerfTimeframe = tf;
+    ['day', 'week', 'month', 'all'].forEach(t => {
+        const btn = document.getElementById(`wf-tf-btn-${t}`);
+        if (btn) {
+            if (t === tf) {
+                btn.style.background = '#22d3ee';
+                btn.style.color = '#083344';
+                btn.style.fontWeight = '700';
+            } else {
+                btn.style.background = 'transparent';
+                btn.style.color = 'var(--text-muted)';
+                btn.style.fontWeight = '500';
+            }
+        }
+    });
+    loadWorkflowPerformance();
+}
+
+function setWorkflowPerfSort(sort) {
+    currentWfPerfSort = sort;
+    loadWorkflowPerformance();
+}
+
+function openWorkflowInTable(workflowId, system) {
+    const targetSystem = system === 'paid' ? 'token-data' : 'dex-validated-data';
+    switchTab(targetSystem);
+    setTimeout(() => {
+        if (targetSystem === 'token-data') {
+            const el = document.getElementById('td-workflow-preset');
+            if (el) {
+                el.value = String(workflowId);
+                applyWorkflowPresetToFilters();
+            }
+        } else {
+            const el = document.getElementById('dvd-workflow-preset');
+            if (el) {
+                el.value = String(workflowId);
+                applyDexValidatedPresetToFilters();
+            }
+        }
+    }, 150);
+}
+
+function renderWorkflowPerformance(data) {
+    const timeBadge = document.getElementById('wf-perf-time-badge');
+    if (timeBadge) {
+        timeBadge.innerText = data.timeframe_label || 'Selected Period';
+    }
+
+    // 1. Render Hero Winner Card
+    const heroContainer = document.getElementById('wf-best-hero-container');
+    const bw = data.best_workflow;
+    if (heroContainer) {
+        if (bw && bw.matched_count > 0) {
+            const sysBadge = data.system === 'validated' ? '⚡ DEX Validated' : (data.system === 'paid' ? '💎 DEX Paid' : '🌐 Combined');
+            heroContainer.innerHTML = `
+                <div style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(16, 185, 129, 0.08), rgba(0,0,0,0.3)); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 12px; padding: 1.25rem 1.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+                    <div style="flex: 1; min-width: 260px;">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+                            <span style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: #fbbf24; font-weight: 700; background: rgba(245, 158, 11, 0.2); padding: 2px 8px; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px;">
+                                🏆 #1 Best Workflow • ${escapeHtml(data.timeframe_label)}
+                            </span>
+                            <span style="font-size: 0.75rem; color: #34d399; font-weight: 600;">
+                                ${sysBadge}
+                            </span>
+                        </div>
+                        <h2 style="font-size: 1.45rem; font-weight: 800; color: white; margin: 0 0 6px 0;">
+                            ${escapeHtml(bw.name)}
+                        </h2>
+                        <div style="display: flex; gap: 12px; font-size: 0.8rem; color: var(--text-muted); align-items: center; flex-wrap: wrap;">
+                            <span>${bw.rules_count} active rules</span>
+                            <span>•</span>
+                            <span><strong>${bw.matched_count}</strong> signals matched</span>
+                            <span>•</span>
+                            <span>Top Pick: <strong style="color: #67e8f9;">${escapeHtml(bw.best_token_name)}</strong> (<strong style="color: #34d399;">${bw.best_token_peak}x</strong>)</span>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
+                        <div style="text-align: center; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.06); padding: 8px 16px; border-radius: 10px; min-width: 100px;">
+                            <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase;">Win Rate (≥ 2x)</div>
+                            <div style="font-size: 1.45rem; font-weight: 800; color: #34d399; margin-top: 2px;">${bw.win_rate_2x}%</div>
+                        </div>
+                        <div style="text-align: center; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.06); padding: 8px 16px; border-radius: 10px; min-width: 95px;">
+                            <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase;">Avg 1h Peak</div>
+                            <div style="font-size: 1.45rem; font-weight: 800; color: #22d3ee; margin-top: 2px;">${bw.avg_peak_1h}x</div>
+                        </div>
+                        <div style="text-align: center; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.06); padding: 8px 16px; border-radius: 10px; min-width: 95px;">
+                            <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase;">Avg 4h Peak</div>
+                            <div style="font-size: 1.45rem; font-weight: 800; color: #a78bfa; margin-top: 2px;">${bw.avg_peak_4h}x</div>
+                        </div>
+                        <button type="button" class="btn-primary" onclick="openWorkflowInTable(${bw.workflow_id}, '${data.system}')" style="background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24; font-weight: 600; padding: 10px 16px; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+                            <span>View Signals</span>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                        </button>
+                    </div>
+                </div>
+            `;
+        } else {
+            heroContainer.innerHTML = `
+                <div style="background: rgba(255,255,255,0.02); border: 1px dashed var(--border-color); border-radius: 12px; padding: 1.75rem; text-align: center; color: var(--text-muted);">
+                    <div style="font-size: 1.1rem; font-weight: 600; color: white; margin-bottom: 4px;">No workflow matches in this timeframe</div>
+                    <p style="font-size: 0.82rem; margin: 0;">Try selecting <strong>This Week (7d)</strong> or <strong>All Time</strong> to see historical performance rankings.</p>
+                </div>
+            `;
+        }
+    }
+
+    // 2. Render Leaderboard Table
+    const tbody = document.getElementById('wf-perf-tbody');
+    if (!tbody) return;
+
+    const list = data.leaderboard || [];
+    if (list.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="10" style="text-align: center; padding: 2.5rem; color: var(--text-muted);">
+                    No workflow rules matched any tokens in ${escapeHtml(data.timeframe_label)}.
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    let rowsHtml = '';
+    list.forEach((item, index) => {
+        const rank = index + 1;
+        const rankBadge = rank === 1 
+            ? '<span style="background: rgba(245,158,11,0.25); color: #fbbf24; padding: 3px 8px; border-radius: 6px; font-weight: 800; font-size: 0.8rem;">🥇 #1</span>'
+            : (rank === 2 
+                ? '<span style="background: rgba(148,163,184,0.25); color: #cbd5e1; padding: 3px 8px; border-radius: 6px; font-weight: 800; font-size: 0.8rem;">🥈 #2</span>'
+                : (rank === 3 
+                    ? '<span style="background: rgba(180,83,9,0.25); color: #f97316; padding: 3px 8px; border-radius: 6px; font-weight: 800; font-size: 0.8rem;">🥉 #3</span>'
+                    : `<span style="color: var(--text-muted); font-weight: 600;">#${rank}</span>`));
+
+        const winRateColor = item.win_rate_2x >= 25 ? '#34d399' : (item.win_rate_2x >= 15 ? '#67e8f9' : (item.win_rate_2x > 0 ? '#fbbf24' : 'var(--text-muted)'));
+
+        rowsHtml += `
+            <tr style="border-bottom: 1px solid rgba(255,255,255,0.03); transition: background 0.15s ease;" onmouseover="this.style.background='rgba(255,255,255,0.02)'" onmouseout="this.style.background='transparent'">
+                <td style="padding: 10px 14px; text-align: left;">${rankBadge}</td>
+                <td style="padding: 10px 14px; text-align: left;">
+                    <strong style="color: white; font-size: 0.85rem;">${escapeHtml(item.name)}</strong>
+                    <span style="font-size: 0.72rem; color: var(--text-muted); margin-left: 6px;">(${item.rules_count} rules)</span>
+                </td>
+                <td style="padding: 10px 14px; text-align: center; font-weight: 600; color: #67e8f9;">${item.matched_count}</td>
+                <td style="padding: 10px 14px; text-align: center;">
+                    <span style="color: ${winRateColor}; font-weight: 700; font-size: 0.85rem;">${item.win_rate_2x}%</span>
+                </td>
+                <td style="padding: 10px 14px; text-align: center; font-size: 0.82rem; color: ${item.win_rate_1_5x >= 30 ? '#34d399' : 'var(--text-muted)'}; font-weight: 600;">
+                    ${item.win_rate_1_5x}%
+                </td>
+                <td style="padding: 10px 14px; text-align: center; font-weight: 700; color: #22d3ee;">
+                    ${item.avg_peak_1h}x
+                </td>
+                <td style="padding: 10px 14px; text-align: center; font-weight: 700; color: #a78bfa;">
+                    ${item.avg_peak_4h}x
+                </td>
+                <td style="padding: 10px 14px; text-align: center; font-size: 0.8rem; color: ${item.avg_pre_peak_dd_pct <= -50 ? '#f87171' : '#fbbf24'};">
+                    ${item.avg_pre_peak_dd_pct}%
+                </td>
+                <td style="padding: 10px 14px; text-align: left; font-size: 0.82rem;">
+                    <span style="color: white; font-weight: 600;">${escapeHtml(item.best_token_name)}</span>
+                    <span style="color: #34d399; font-weight: 700; margin-left: 4px;">(${item.best_token_peak}x)</span>
+                </td>
+                <td style="padding: 10px 14px; text-align: right;">
+                    <button type="button" class="btn-secondary" onclick="openWorkflowInTable(${item.workflow_id}, '${data.system}')" style="font-size: 0.75rem; padding: 3px 8px; border-radius: 6px;" title="Filter table by this workflow">
+                        View →
+                    </button>
+                </td>
+            </tr>
+        `;
+    });
+
+    tbody.innerHTML = rowsHtml;
 }
 
 // ==========================================

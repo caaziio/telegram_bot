@@ -606,6 +606,103 @@
                     </div>
                 </div>
 
+                <!-- Workflow Performance & Best Performer Intelligence Section -->
+                <div class="workflow-card" style="padding: 1.35rem; margin-bottom: 1.5rem;">
+                    <!-- Section Header & Controls Strip -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 1.25rem;">
+                        <div>
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <h3 style="font-size: 1.15rem; font-weight: 700; color: white; margin: 0; display: flex; align-items: center; gap: 8px;">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                                    <span>Workflow Performance &amp; Best Picks</span>
+                                </h3>
+                                <span id="wf-perf-time-badge" style="font-size: 0.72rem; padding: 2px 8px; border-radius: 12px; background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); font-weight: 600;">
+                                    Today (Past 24 Hours)
+                                </span>
+                            </div>
+                            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; margin-bottom: 0;">
+                                Track the best performing workflow strategy of the day, week, or month across DEX Validated and Paid systems
+                            </p>
+                        </div>
+
+                        <!-- System & Timeframe Filter Pills -->
+                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                            <!-- System Selector -->
+                            <div class="pill-group" style="display: flex; background: rgba(255,255,255,0.05); padding: 3px; border-radius: 8px; border: 1px solid var(--border-color);">
+                                <button type="button" id="wf-sys-btn-validated" class="perf-sys-btn" onclick="setWorkflowPerfSystem('validated')" style="padding: 4px 10px; font-size: 0.78rem; border-radius: 6px; border: none; background: #34d399; color: #022c22; font-weight: 700; cursor: pointer;">
+                                    ⚡ Validated
+                                </button>
+                                <button type="button" id="wf-sys-btn-paid" class="perf-sys-btn" onclick="setWorkflowPerfSystem('paid')" style="padding: 4px 10px; font-size: 0.78rem; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 500; cursor: pointer;">
+                                    💎 Paid
+                                </button>
+                                <button type="button" id="wf-sys-btn-all" class="perf-sys-btn" onclick="setWorkflowPerfSystem('all')" style="padding: 4px 10px; font-size: 0.78rem; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 500; cursor: pointer;">
+                                    🌐 Combined
+                                </button>
+                            </div>
+
+                            <!-- Timeframe Selector -->
+                            <div class="pill-group" style="display: flex; background: rgba(255,255,255,0.05); padding: 3px; border-radius: 8px; border: 1px solid var(--border-color);">
+                                <button type="button" id="wf-tf-btn-day" class="perf-tf-btn" onclick="setWorkflowPerfTimeframe('day')" style="padding: 4px 10px; font-size: 0.78rem; border-radius: 6px; border: none; background: #22d3ee; color: #083344; font-weight: 700; cursor: pointer;">
+                                    Day
+                                </button>
+                                <button type="button" id="wf-tf-btn-week" class="perf-tf-btn" onclick="setWorkflowPerfTimeframe('week')" style="padding: 4px 10px; font-size: 0.78rem; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 500; cursor: pointer;">
+                                    Week
+                                </button>
+                                <button type="button" id="wf-tf-btn-month" class="perf-tf-btn" onclick="setWorkflowPerfTimeframe('month')" style="padding: 4px 10px; font-size: 0.78rem; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 500; cursor: pointer;">
+                                    Month
+                                </button>
+                                <button type="button" id="wf-tf-btn-all" class="perf-tf-btn" onclick="setWorkflowPerfTimeframe('all')" style="padding: 4px 10px; font-size: 0.78rem; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 500; cursor: pointer;">
+                                    All Time
+                                </button>
+                            </div>
+
+                            <!-- Sort Metric Dropdown -->
+                            <select id="wf-perf-sort-select" onchange="setWorkflowPerfSort(this.value)" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: var(--text-main); font-size: 0.78rem; padding: 5px 8px; border-radius: 8px; outline: none; cursor: pointer;">
+                                <option value="win_rate_2x" selected>Rank: Win Rate (≥ 2x)</option>
+                                <option value="win_rate_1_5x">Rank: Win Rate (≥ 1.5x)</option>
+                                <option value="avg_peak_1h">Rank: Avg 1h Peak</option>
+                                <option value="avg_peak_4h">Rank: Avg 4h Peak</option>
+                                <option value="matched">Rank: Most Signals</option>
+                                <option value="best_peak">Rank: Highest Peak</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Hero Showcase: Best Performing Workflow Winner Card -->
+                    <div id="wf-best-hero-container" style="margin-bottom: 1.25rem;">
+                        <div style="padding: 1.5rem; text-align: center; color: var(--text-muted); font-size: 0.85rem;">
+                            Loading best performing workflow...
+                        </div>
+                    </div>
+
+                    <!-- Workflow Leaderboard Table -->
+                    <div style="overflow-x: auto; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: 10px;">
+                        <table class="data-table" style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr style="background: rgba(255,255,255,0.02); color: var(--text-muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border-color);">
+                                    <th style="padding: 10px 14px; text-align: left; width: 60px;">Rank</th>
+                                    <th style="padding: 10px 14px; text-align: left;">Workflow Strategy</th>
+                                    <th style="padding: 10px 14px; text-align: center;">Signals</th>
+                                    <th style="padding: 10px 14px; text-align: center;">Win Rate (≥ 2x)</th>
+                                    <th style="padding: 10px 14px; text-align: center;">Win Rate (≥ 1.5x)</th>
+                                    <th style="padding: 10px 14px; text-align: center;">Avg 1h Peak</th>
+                                    <th style="padding: 10px 14px; text-align: center;">Avg 4h Peak</th>
+                                    <th style="padding: 10px 14px; text-align: center;">Avg Drawdown</th>
+                                    <th style="padding: 10px 14px; text-align: left;">Best Pick Token</th>
+                                    <th style="padding: 10px 14px; text-align: right;">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="wf-perf-tbody">
+                                <tr>
+                                    <td colspan="10" style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                                        Loading workflow performance leaderboard...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
                 <!-- Middle Row: Signal Distribution Analytics + Top Momentum Movers -->
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 1.25rem; margin-bottom: 1.5rem;">
                     <!-- Left: Signal Distribution & Migration Analytics -->
