@@ -920,6 +920,58 @@
                         <button type="submit" class="btn-primary" style="width: 100%; justify-content: center;">Save Helius Settings</button>
                     </form>
                 </div>
+
+                <!-- Post-Signal Performance & Outcome Scanner Card -->
+                <div class="workflow-card" style="max-width: 600px; margin-top: 2rem; margin-bottom: 2rem;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;">
+                        <h3 style="font-size: 1.1rem; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                            <span>Post-Signal Outcome Scanner</span>
+                        </h3>
+                        <span id="settings-perf-status-badge" style="font-size: 0.72rem; padding: 2px 8px; border-radius: 12px; background: rgba(52, 211, 153, 0.15); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.3); font-weight: 600;">
+                            Idle
+                        </span>
+                    </div>
+                    <p style="margin-bottom: 1.25rem; font-size: 0.82rem; color: var(--text-muted); line-height: 1.4;">
+                        Controls automatic 1-minute OHLCV candle outcome tracking (1h &amp; 4h Peaks, Drawdowns, and Trajectories) and historical backfill into Supabase.
+                    </p>
+                    
+                    <div class="form-group" style="margin-bottom: 1.25rem;">
+                        <label>Automatic Outcome Scan Interval</label>
+                        <select class="form-input" id="settings-outcome-interval" onchange="updateOutcomeScanInterval(this.value)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white;">
+                            <option value="1">Every 1 minute (Fastest)</option>
+                            <option value="5">Every 5 minutes</option>
+                            <option value="10">Every 10 minutes</option>
+                            <option value="15" selected>Every 15 minutes (Default)</option>
+                            <option value="30">Every 30 minutes</option>
+                            <option value="60">Every 60 minutes (1 hour)</option>
+                            <option value="0">Manual Only (Disable auto-scan)</option>
+                        </select>
+                        <small style="color: var(--text-muted); font-size: 0.8rem; display: block; margin-top: 4px;">
+                            How frequently the scanner checks for signals reaching their 1-hour and 4-hour performance marks.
+                        </small>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 1.25rem;">
+                        <label>Historical Paid Transactions Backfill (16,919 records)</label>
+                        <div style="display: flex; gap: 10px; align-items: center; margin-top: 6px; flex-wrap: wrap;">
+                            <button type="button" id="btn-settings-toggle-backfill" class="btn-primary" onclick="togglePerformanceBackfill()" style="display: inline-flex; align-items: center; gap: 6px;">
+                                <span id="settings-backfill-icon">▶</span>
+                                <span id="settings-backfill-text">Start Paid Backfill</span>
+                            </button>
+                            <button type="button" class="btn-secondary" onclick="triggerManualOutcomeScan()" style="font-size: 0.82rem; padding: 0.45rem 0.8rem; display: inline-flex; align-items: center; gap: 5px;">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                                <span>Scan Due Now</span>
+                            </button>
+                        </div>
+                        <div id="settings-backfill-progress" style="margin-top: 8px; font-size: 0.8rem; color: var(--text-muted);">
+                            Status: Paused • Paid records populated: <strong id="settings-wp-count" style="color: #38bdf8;">350</strong> / 16,919
+                        </div>
+                        <small style="color: var(--text-muted); font-size: 0.8rem; display: block; margin-top: 6px;">
+                            Scans historical tokens from newest to oldest. You can start and stop it at will to keep your laptop cool.
+                        </small>
+                    </div>
+                </div>
             </div>
 
 
@@ -1056,6 +1108,25 @@
                         <p>Explore real-time & historical token payments, performance analytics, and Telegram routing</p>
                     </div>
                     <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 6px; background: rgba(52, 211, 153, 0.08); border: 1px solid rgba(52, 211, 153, 0.25); padding: 0.4rem 0.75rem; border-radius: 8px;">
+                            <span style="font-size: 0.8rem; color: #34d399; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;" title="How often post-signal 1h/4h peaks are automatically checked">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                Outcome:
+                            </span>
+                            <select id="td-outcome-interval" onchange="updateOutcomeScanInterval(this.value)" style="background: transparent; border: none; color: var(--text-main); font-size: 0.8rem; outline: none; cursor: pointer;">
+                                <option value="1" style="background:#1f2937;">1 min</option>
+                                <option value="5" style="background:#1f2937;">5 min</option>
+                                <option value="10" style="background:#1f2937;">10 min</option>
+                                <option value="15" selected style="background:#1f2937;">15 min</option>
+                                <option value="30" style="background:#1f2937;">30 min</option>
+                                <option value="60" style="background:#1f2937;">60 min</option>
+                                <option value="0" style="background:#1f2937;">Off</option>
+                            </select>
+                        </div>
+                        <button id="td-btn-toggle-backfill" class="btn-primary" onclick="togglePerformanceBackfill()" style="background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-main); box-shadow: none; display: inline-flex; align-items: center; gap: 6px;" title="Start or stop historical paid transactions backfill">
+                            <span id="td-backfill-icon">▶</span>
+                            <span id="td-backfill-text">Start Paid Backfill</span>
+                        </button>
                         <div style="display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); padding: 0.4rem 0.8rem; border-radius: 8px;">
                             <label style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0;">Auto-Refresh:</label>
                             <select id="token-data-autorefresh" onchange="toggleTokenDataAutoRefresh()" style="background: transparent; border: none; color: var(--text-main); font-size: 0.8rem; outline: none; cursor: pointer;">
@@ -1510,6 +1581,25 @@
                         <p>Real-time enriched DEX Screener CTO, Boost, Profile &amp; Ad tokens streamed instantly via WebSocket</p>
                     </div>
                     <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 6px; background: rgba(52, 211, 153, 0.08); border: 1px solid rgba(52, 211, 153, 0.25); padding: 0.4rem 0.75rem; border-radius: 8px;">
+                            <span style="font-size: 0.8rem; color: #34d399; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;" title="How often post-signal 1h/4h peaks are automatically checked">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                Outcome:
+                            </span>
+                            <select id="dvd-outcome-interval" onchange="updateOutcomeScanInterval(this.value)" style="background: transparent; border: none; color: var(--text-main); font-size: 0.8rem; outline: none; cursor: pointer;">
+                                <option value="1" style="background:#1f2937;">1 min</option>
+                                <option value="5" style="background:#1f2937;">5 min</option>
+                                <option value="10" style="background:#1f2937;">10 min</option>
+                                <option value="15" selected style="background:#1f2937;">15 min</option>
+                                <option value="30" style="background:#1f2937;">30 min</option>
+                                <option value="60" style="background:#1f2937;">60 min</option>
+                                <option value="0" style="background:#1f2937;">Off</option>
+                            </select>
+                        </div>
+                        <button id="dvd-btn-toggle-backfill" class="btn-primary" onclick="togglePerformanceBackfill()" style="background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-main); box-shadow: none; display: inline-flex; align-items: center; gap: 6px;" title="Start or stop historical paid transactions backfill">
+                            <span id="dvd-backfill-icon">▶</span>
+                            <span id="dvd-backfill-text">Start Paid Backfill</span>
+                        </button>
                         <div style="display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); padding: 0.4rem 0.8rem; border-radius: 8px;">
                             <label style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0;">Live Feed:</label>
                             <select id="dvd-autorefresh" onchange="toggleDexValidatedDataAutoRefresh()" style="background: transparent; border: none; color: var(--text-main); font-size: 0.8rem; outline: none; cursor: pointer;">

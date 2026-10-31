@@ -5155,6 +5155,164 @@ function openDashboardCategory(tabId, category) {
     switchTab(tabId);
 }
 
+// ==========================================
+// Post-Signal Outcome Scanner & Backfill Controls
+// ==========================================
+let performanceScannerStatusInterval = null;
+
+async function loadPerformanceScannerStatus() {
+    try {
+        const res = await fetch('/api/performance/status');
+        const data = await res.json();
+        if (!data || !data.success || !data.status) return;
+        const st = data.status;
+
+        const isBackfillActive = Boolean(st.backfill_wallet_payments);
+        const intervalMin = String(parseInt(st.scan_interval_minutes !== undefined ? st.scan_interval_minutes : 15, 10));
+        const wpChecked = st.wallet_payments_checked || 0;
+        const wpTotal = st.wallet_payments_total || 16919;
+        const isRunning = Boolean(st.running);
+
+        // Sync interval dropdowns across all tabs
+        ['td-outcome-interval', 'dvd-outcome-interval', 'settings-outcome-interval'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el && el.value !== intervalMin) {
+                if ([...el.options].some(o => o.value === intervalMin)) {
+                    el.value = intervalMin;
+                }
+            }
+        });
+
+        // Sync backfill buttons
+        const buttonConfigs = [
+            { btnId: 'td-btn-toggle-backfill', iconId: 'td-backfill-icon', textId: 'td-backfill-text' },
+            { btnId: 'dvd-btn-toggle-backfill', iconId: 'dvd-backfill-icon', textId: 'dvd-backfill-text' },
+            { btnId: 'btn-settings-toggle-backfill', iconId: 'settings-backfill-icon', textId: 'settings-backfill-text' },
+        ];
+
+        buttonConfigs.forEach(({ btnId, iconId, textId }) => {
+            const btn = document.getElementById(btnId);
+            const icon = document.getElementById(iconId);
+            const text = document.getElementById(textId);
+            if (btn) {
+                if (isBackfillActive) {
+                    btn.style.background = 'rgba(239, 68, 68, 0.15)';
+                    btn.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+                    btn.style.color = '#fca5a5';
+                    if (icon) icon.innerHTML = '<span style="display:inline-block;width:7px;height:7px;background:#ef4444;border-radius:2px;animation:pulse 1.2s infinite;vertical-align:middle;margin-right:2px;"></span>';
+                    if (text) text.innerText = `Stop Paid Backfill (${wpChecked})`;
+                } else {
+                    btn.style.background = 'rgba(255, 255, 255, 0.05)';
+                    btn.style.borderColor = 'var(--border-color)';
+                    btn.style.color = 'var(--text-main)';
+                    if (icon) icon.innerText = '▶';
+                    if (text) text.innerText = 'Start Paid Backfill';
+                }
+            }
+        });
+
+        // Sync settings tab badge & progress text
+        const badge = document.getElementById('settings-perf-status-badge');
+        if (badge) {
+            if (isBackfillActive) {
+                badge.innerText = 'Backfilling Paid...';
+                badge.style.background = 'rgba(239, 68, 68, 0.15)';
+                badge.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+                badge.style.color = '#f87171';
+            } else if (isRunning) {
+                badge.innerText = 'Scanning Due Peaks...';
+                badge.style.background = 'rgba(56, 189, 248, 0.15)';
+                badge.style.borderColor = 'rgba(56, 189, 248, 0.3)';
+                badge.style.color = '#38bdf8';
+            } else {
+                badge.innerText = `Idle (${intervalMin === '0' ? 'Manual' : intervalMin + 'm loop'})`;
+                badge.style.background = 'rgba(52, 211, 153, 0.15)';
+                badge.style.borderColor = 'rgba(52, 211, 153, 0.3)';
+                badge.style.color = '#34d399';
+            }
+        }
+
+        const wpCountEl = document.getElementById('settings-wp-count');
+        if (wpCountEl) wpCountEl.innerText = wpChecked.toLocaleString();
+
+        const progressEl = document.getElementById('settings-backfill-progress');
+        if (progressEl) {
+            progressEl.innerHTML = `Status: <strong style="color:${isBackfillActive ? '#ef4444' : 'var(--text-muted)'};">${isBackfillActive ? 'Active' : 'Paused'}</strong> • Paid records populated: <strong style="color: #38bdf8;">${wpChecked.toLocaleString()}</strong> / ${wpTotal.toLocaleString()}`;
+        }
+    } catch (err) {
+        console.warn('Could not load performance scanner status:', err);
+    }
+}
+
+async function togglePerformanceBackfill() {
+    try {
+        const res = await fetch('/api/performance/toggle_backfill', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+        const data = await res.json();
+        if (data.success) {
+            if (typeof showAppToast === 'function') {
+                showAppToast(data.message, data.backfill_wallet_payments ? 'info' : 'warning', 2500);
+            } else {
+                alert(data.message);
+            }
+            await loadPerformanceScannerStatus();
+        } else {
+            alert(`Error: ${data.error || 'Failed to toggle backfill'}`);
+        }
+    } catch (err) {
+        alert(`Error toggling backfill: ${err.message}`);
+    }
+}
+
+async function updateOutcomeScanInterval(minutes) {
+    const minVal = parseFloat(minutes);
+    try {
+        const res = await fetch('/api/performance/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ interval_minutes: minVal })
+        });
+        const data = await res.json();
+        if (data.success) {
+            if (typeof showAppToast === 'function') {
+                showAppToast(minVal === 0 ? 'Outcome auto-scan paused (Manual mode).' : `Outcome scan interval set to ${minVal} min.`, 'success', 2200);
+            }
+            await loadPerformanceScannerStatus();
+        } else {
+            alert(`Error: ${data.error || 'Failed to update interval'}`);
+        }
+    } catch (err) {
+        alert(`Error updating scan interval: ${err.message}`);
+    }
+}
+
+async function triggerManualOutcomeScan() {
+    try {
+        const res = await fetch('/api/performance/scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ batch_size: 60 })
+        });
+        const data = await res.json();
+        if (data.success) {
+            if (typeof showAppToast === 'function') {
+                showAppToast('Instant outcome scan started in background.', 'info', 2500);
+            } else {
+                alert(data.message);
+            }
+            await loadPerformanceScannerStatus();
+        }
+    } catch (err) {
+        alert(`Scan failed: ${err.message}`);
+    }
+}
+
+loadPerformanceScannerStatus();
+setInterval(loadPerformanceScannerStatus, 8000);
+
 toggleDexValidatedDataAutoRefresh();
 loadDexValidatedTableData(1, false);
 loadDexValidatedLiveResults();

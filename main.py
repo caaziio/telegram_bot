@@ -363,9 +363,9 @@ def sync_from_supabase():
 
             conn.commit()
 
-        # Sync Wallet Payments and DEX Validated directly from Supabase
-        sync_wallet_payments_from_supabase()
+        # Sync DEX Validated (instant) then Wallet Payments directly from Supabase
         sync_dex_validated_from_supabase()
+        sync_wallet_payments_from_supabase()
     except Exception as e:
         print(f"[SUPABASE] Sync error: {e}", flush=True)
 
@@ -6230,8 +6230,24 @@ perf_scanner_runtime = {
     'total_updated': 0,
     'last_error': None,
     'backfill_wallet_payments': False,
+    'scan_interval_minutes': 15.0,
+    'wake_requested': False,
 }
 _ohlcv_pool_cache = OrderedDict()
+
+
+def _sync_perf_scanner_settings():
+    try:
+        s = get_settings()
+        if 'perf_scan_interval_minutes' in s:
+            try:
+                perf_scanner_runtime['scan_interval_minutes'] = float(s['perf_scan_interval_minutes'])
+            except Exception:
+                pass
+        if 'perf_backfill_wp_enabled' in s:
+            perf_scanner_runtime['backfill_wallet_payments'] = str(s['perf_backfill_wp_enabled']).lower() in ('true', '1', 'yes')
+    except Exception as e:
+        debug_log(f"[PERF SCANNER] Could not sync settings: {e}")
 
 
 def _cache_ohlcv_get(key):
@@ -6704,38 +6720,141 @@ async def scan_post_signal_performance_batch(max_rows_per_table=60):
 
 
 async def post_signal_perf_loop():
-    """Hourly background scanner (with continuous historical backfill) for 1h & 4h OHLCV Peak & Trajectory metrics."""
+    """Background scanner for 1h & 4h OHLCV Peak & Trajectory metrics."""
     print("[PERF SCANNER] Started 1h/4h OHLCV Peak & Trajectory background scanner.", flush=True)
+    _sync_perf_scanner_settings()
     await asyncio.sleep(5)
     while True:
         try:
+            _sync_perf_scanner_settings()
+            interval_min = float(perf_scanner_runtime.get('scan_interval_minutes', 15.0) or 15.0)
+            backfill_on = bool(perf_scanner_runtime.get('backfill_wallet_payments', False))
+
+            # If interval <= 0 and backfill is off, auto-scanning is paused
+            if interval_min <= 0 and not backfill_on:
+                with perf_scanner_lock:
+                    perf_scanner_runtime['next_run_at'] = None
+                for _ in range(6):
+                    if perf_scanner_runtime.get('wake_requested', False):
+                        with perf_scanner_lock:
+                            perf_scanner_runtime['wake_requested'] = False
+                        break
+                    await asyncio.sleep(5)
+                continue
+
             res = await scan_post_signal_performance_batch(max_rows_per_table=100)
             updated = int(res.get('updated') or 0)
-            # Continue backfilling with a 5s pause whenever any due rows were updated; once caught up, run every 15 minutes
-            wait_seconds = 5 if updated > 0 else 900
+
+            # If backfill is enabled and there are rows being updated, loop quickly (5s)
+            if updated > 0 and backfill_on:
+                wait_seconds = 5
+            else:
+                wait_seconds = int(max(10, interval_min * 60)) if interval_min > 0 else 60
+
             with perf_scanner_lock:
                 perf_scanner_runtime['next_run_at'] = datetime.fromtimestamp(time.time() + wait_seconds, tz=timezone.utc).isoformat()
-            await asyncio.sleep(wait_seconds)
+
+            # Responsive wait loop
+            elapsed = 0
+            while elapsed < wait_seconds:
+                if perf_scanner_runtime.get('wake_requested', False):
+                    with perf_scanner_lock:
+                        perf_scanner_runtime['wake_requested'] = False
+                    break
+                sleep_slice = min(5, wait_seconds - elapsed)
+                await asyncio.sleep(sleep_slice)
+                elapsed += sleep_slice
+                _sync_perf_scanner_settings()
+                if perf_scanner_runtime.get('backfill_wallet_payments', False) and updated > 0:
+                    wait_seconds = 5
+                else:
+                    curr_min = float(perf_scanner_runtime.get('scan_interval_minutes', 15.0) or 15.0)
+                    if curr_min > 0:
+                        new_target = int(max(10, curr_min * 60))
+                        if new_target < wait_seconds:
+                            wait_seconds = new_target
+
         except Exception as e:
             print(f"[PERF SCANNER] Loop error: {e}", flush=True)
-            await asyncio.sleep(120)
+            await asyncio.sleep(30)
 
 
 @app.route('/api/performance/status', methods=['GET'])
 def get_performance_scanner_status():
+    _sync_perf_scanner_settings()
     with perf_scanner_lock:
         rt = dict(perf_scanner_runtime)
     try:
         with db_lock:
             conn = get_db()
             cur = conn.cursor()
-            dv_done = cur.execute("SELECT COUNT(*) FROM dex_validated WHERE COALESCE(perf_checked_stage, 0) > 0").fetchone()[0]
-            wp_done = cur.execute("SELECT COUNT(*) FROM wallet_payments WHERE COALESCE(perf_checked_stage, 0) > 0").fetchone()[0]
+            dv_done = cur.execute("SELECT COUNT(*) FROM dex_validated WHERE COALESCE(perf_checked_stage, 0) > 0 OR peak_mult_1h IS NOT NULL").fetchone()[0]
+            wp_done = cur.execute("SELECT COUNT(*) FROM wallet_payments WHERE COALESCE(perf_checked_stage, 0) > 0 OR peak_mult_1h IS NOT NULL").fetchone()[0]
+            dv_total = cur.execute("SELECT COUNT(*) FROM dex_validated").fetchone()[0]
+            wp_total = cur.execute("SELECT COUNT(*) FROM wallet_payments").fetchone()[0]
         rt['dex_validated_checked'] = dv_done
         rt['wallet_payments_checked'] = wp_done
+        rt['dex_validated_total'] = dv_total
+        rt['wallet_payments_total'] = wp_total
     except Exception:
         pass
     return jsonify({'success': True, 'status': rt})
+
+
+@app.route('/api/performance/toggle_backfill', methods=['POST'])
+def toggle_performance_backfill():
+    data = request.get_json(silent=True) or {}
+    with perf_scanner_lock:
+        if 'enabled' in data:
+            new_state = bool(data['enabled'])
+        else:
+            new_state = not perf_scanner_runtime.get('backfill_wallet_payments', False)
+        perf_scanner_runtime['backfill_wallet_payments'] = new_state
+        perf_scanner_runtime['wake_requested'] = True
+
+    with db_lock:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ('perf_backfill_wp_enabled', str(new_state)))
+        if supabase_client:
+            push_to_supabase_table('settings', {'key': 'perf_backfill_wp_enabled', 'value': str(new_state)})
+        conn.commit()
+
+    return jsonify({
+        'success': True,
+        'backfill_wallet_payments': new_state,
+        'message': f"Paid transactions backfill {'started' if new_state else 'stopped'}."
+    })
+
+
+@app.route('/api/performance/config', methods=['POST'])
+def update_performance_config():
+    data = request.get_json(silent=True) or {}
+    interval = data.get('interval_minutes')
+    if interval is None:
+        return jsonify({'success': False, 'error': 'Missing interval_minutes'}), 400
+    try:
+        interval_val = max(0.0, float(interval))
+    except (ValueError, TypeError):
+        return jsonify({'success': False, 'error': 'Invalid interval_minutes value'}), 400
+
+    with perf_scanner_lock:
+        perf_scanner_runtime['scan_interval_minutes'] = interval_val
+        perf_scanner_runtime['wake_requested'] = True
+
+    with db_lock:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ('perf_scan_interval_minutes', str(interval_val)))
+        if supabase_client:
+            push_to_supabase_table('settings', {'key': 'perf_scan_interval_minutes', 'value': str(interval_val)})
+        conn.commit()
+
+    return jsonify({
+        'success': True,
+        'scan_interval_minutes': interval_val,
+        'message': f"Outcome scan interval set to {interval_val} minutes."
+    })
 
 
 @app.route('/api/performance/scan', methods=['POST'])
