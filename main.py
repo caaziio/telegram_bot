@@ -34,7 +34,7 @@ app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.jinja_env.auto_reload = True
 
 # Release label format: <major>.<YYYY>.<MM>.<DD>. Update this on each push.
-APP_VERSION = "23.2026.10.31"
+APP_VERSION = "02.2026.10.31"
 
 # Globals for async bridge
 telethon_loop = None
