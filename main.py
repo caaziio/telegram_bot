@@ -235,11 +235,6 @@ PERSISTENT_DATA_DIR = os.environ.get("PERSISTENT_DATA_DIR")
 if not PERSISTENT_DATA_DIR and os.path.exists("/data") and os.access("/data", os.W_OK):
     PERSISTENT_DATA_DIR = "/data"
 
-if PERSISTENT_DATA_DIR:
-    DB_PATH = os.path.join(PERSISTENT_DATA_DIR, 'bot.sqlite')
-else:
-    DB_PATH = os.path.join(current_dir, 'db/bot.sqlite')
-
 SUPABASE_URL = (os.environ.get("SUPABASE_URL") or "").strip()
 SUPABASE_KEY = (os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_ANON_KEY") or "").strip()
 
