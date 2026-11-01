@@ -33,8 +33,8 @@ app = Flask(__name__,
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.jinja_env.auto_reload = True
 
-# Release label format: <major>.<YYYY>.<MM>.<DD>. Update this on each push.
-APP_VERSION = "02.2026.10.31"
+# Release label format: <major>
+APP_VERSION = "02"
 
 # Globals for async bridge
 telethon_loop = None
@@ -1222,6 +1222,14 @@ def process_message_logic(text, rules, context=None):
             selected_category = str(rule.get('search_text') or '').strip().lower()
             if not signal_category or signal_category != selected_category:
                 return None, True, f"Dropped by Category Filter (Required: {selected_category or 'none'}, Found: {signal_category or 'none'})"
+
+        elif rule_type == 'signal_type':
+            desired = str(rule.get('search_text') or 'both').lower().strip()
+            current_src = str(context.get('signal_source') or '').lower().strip()
+            if desired in ('dex_paid', 'paid') and current_src not in ('dex_paid', 'paid'):
+                return None, True, f"Dropped: Workflow requires DEX Paid signals only (found {current_src or 'validated'})"
+            elif desired == 'validated' and current_src in ('dex_paid', 'paid'):
+                return None, True, "Dropped: Workflow requires Validated signals only (found DEX Paid)"
 
         # TOKEN AGE FILTER LOGIC
         elif rule_type == 'token_age':
@@ -2814,10 +2822,12 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                 'tokenProfile': 'dex_profile',
                 'tokenAd': 'dex_ad',
             }
+            sig_source = 'validated' if storage_table == 'dex_validated' else 'dex_paid'
             modified_text, dropped, reason = process_message_logic(msg, wf.get('rules', []), context={
                 "payer_address": payer_address,
                 "token_name": project_name,
                 "category": category_key_map.get(order_type, ''),
+                "signal_source": sig_source,
             })
             if dropped:
                 token_dropped_reasons.append(f"[{wf.get('name') or 'Flow'}]: {reason}")
@@ -4026,7 +4036,7 @@ def get_wallet_history_transactions():
                                    f"📈 Chart: https://dexscreener.com/solana/{token}")
                             s["formatted_message"] = msg
 
-                            _, dropped, reason = process_message_logic(msg, workflow_rules, context={"payer_address": s.get("address"), "token_name": project_name})
+                            _, dropped, reason = process_message_logic(msg, workflow_rules, context={"payer_address": s.get("address"), "token_name": project_name, "signal_source": "dex_paid"})
                             if dropped:
                                 s["test_status"] = "dropped"
                                 s["test_reason"] = reason
@@ -6994,6 +7004,14 @@ def token_matches_workflow_rules(token, rules):
             if req_ca in ('yes', 'true', '1') and not ca_val:
                 return False
 
+        elif rtype == 'signal_type':
+            req_sig = str(stext or 'both').lower().strip()
+            src_sys = str(token.get('source_system') or 'validated').lower().strip()
+            if req_sig in ('dex_paid', 'paid') and src_sys != 'paid':
+                return False
+            if req_sig == 'validated' and src_sys == 'paid':
+                return False
+
         elif rtype == 'dex_payment':
             if token.get('source_system') == 'paid' and token.get('amount') is not None:
                 amt = float(token.get('amount') or 0.0)
@@ -7324,9 +7342,16 @@ def get_outcomes_workflows():
                 wf_map[wid]['rules'].append(r)
 
         for wid, wf_data in wf_map.items():
-            src = str(wf_data.get('source_channel') or '').lower()
-            system_hint = 'paid' if any(k in src for k in ('paid', 'wallet', 'helius')) else 'validated'
-            wf_data['system'] = system_hint
+            sig_rule = next((r for r in wf_data['rules'] if r.get('rule_type') == 'signal_type'), None)
+            if sig_rule:
+                st = str(sig_rule.get('search_text') or 'both').lower()
+                wf_data['signal_type'] = st
+                wf_data['system'] = 'paid' if st in ('dex_paid', 'paid') else ('validated' if st == 'validated' else 'all')
+            else:
+                src = str(wf_data.get('source_channel') or '').lower()
+                system_hint = 'paid' if any(k in src for k in ('paid', 'wallet', 'helius')) else 'validated'
+                wf_data['signal_type'] = 'both'
+                wf_data['system'] = system_hint
 
             pf = {
                 'min_mc': '',

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Akoueflow Dashboard</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/globals.css') }}?v={{ app_version }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/globals.css') }}?v={{ app_version }}&amp;ts=20261101_03">
     <style>
         .hidden { display: none !important; }
         .filter-panel { position: relative; z-index: 50; }
@@ -896,21 +896,21 @@
                             <span style="font-size: 0.88rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-main);">Strategy Configuration &amp; Rule Filters</span>
                         </div>
                         <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
-                            <div style="display: flex; align-items: center; gap: 6px;">
-                                <span style="font-size: 0.78rem; color: var(--text-muted); font-weight: 500;">Source:</span>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span style="font-size: 0.78rem; color: #94a3b8; font-weight: 600;">Source:</span>
                                 <div class="segmented-pill-group">
-                                    <button type="button" id="outcomes-sys-validated" class="segmented-pill-btn active" onclick="setOutcomesSystem('validated')" style="padding: 4px 11px; font-size: 0.78rem; border-radius: 6px; border: none; background: #34d399; color: #022c22; font-weight: 700; cursor: pointer;">⚡ Validated</button>
-                                    <button type="button" id="outcomes-sys-paid" class="segmented-pill-btn" onclick="setOutcomesSystem('paid')" style="padding: 4px 11px; font-size: 0.78rem; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 500; cursor: pointer;">💎 Paid</button>
-                                    <button type="button" id="outcomes-sys-all" class="segmented-pill-btn" onclick="setOutcomesSystem('all')" style="padding: 4px 11px; font-size: 0.78rem; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 500; cursor: pointer;">🌐 Combined All</button>
+                                    <button type="button" id="outcomes-sys-validated" class="segmented-pill-btn active" onclick="setOutcomesSystem('validated')">⚡ Validated</button>
+                                    <button type="button" id="outcomes-sys-paid" class="segmented-pill-btn" onclick="setOutcomesSystem('paid')">💎 DEX Paid</button>
+                                    <button type="button" id="outcomes-sys-all" class="segmented-pill-btn" onclick="setOutcomesSystem('all')">🌐 Combined All</button>
                                 </div>
                             </div>
-                            <div style="display: flex; align-items: center; gap: 6px;">
-                                <span style="font-size: 0.78rem; color: var(--text-muted); font-weight: 500;">Timeframe:</span>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span style="font-size: 0.78rem; color: #94a3b8; font-weight: 600;">Timeframe:</span>
                                 <div class="segmented-pill-group">
-                                    <button type="button" id="outcomes-tf-day" class="segmented-pill-btn" onclick="setOutcomesTimeframe('day')" style="padding: 4px 11px; font-size: 0.78rem; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 500; cursor: pointer;">24h</button>
-                                    <button type="button" id="outcomes-tf-week" class="segmented-pill-btn active" onclick="setOutcomesTimeframe('week')" style="padding: 4px 11px; font-size: 0.78rem; border-radius: 6px; border: none; background: #38bdf8; color: #082f49; font-weight: 700; cursor: pointer;">7d</button>
-                                    <button type="button" id="outcomes-tf-month" class="segmented-pill-btn" onclick="setOutcomesTimeframe('month')" style="padding: 4px 11px; font-size: 0.78rem; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 500; cursor: pointer;">30d</button>
-                                    <button type="button" id="outcomes-tf-all" class="segmented-pill-btn" onclick="setOutcomesTimeframe('all')" style="padding: 4px 11px; font-size: 0.78rem; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 500; cursor: pointer;">All</button>
+                                    <button type="button" id="outcomes-tf-day" class="segmented-pill-btn" onclick="setOutcomesTimeframe('day')">24h</button>
+                                    <button type="button" id="outcomes-tf-week" class="segmented-pill-btn active" onclick="setOutcomesTimeframe('week')">7d</button>
+                                    <button type="button" id="outcomes-tf-month" class="segmented-pill-btn" onclick="setOutcomesTimeframe('month')">30d</button>
+                                    <button type="button" id="outcomes-tf-all" class="segmented-pill-btn" onclick="setOutcomesTimeframe('all')">All</button>
                                 </div>
                             </div>
                         </div>
@@ -2613,6 +2613,18 @@
                             <option value="">Ungrouped</option>
                         </select>
                     </div>
+                    <div class="form-group">
+                        <label style="display:flex; justify-content:space-between; align-items:center;">
+                            <span>Signal Source / Type</span>
+                            <span style="font-size:0.75rem; color:var(--text-muted); font-weight:normal;">Select which signals trigger this flow</span>
+                        </label>
+                        <div class="segmented-pill-group" style="width: 100%; display: flex; gap: 4px; padding: 4px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 8px;">
+                            <button type="button" id="flow-sig-type-validated" class="segmented-pill-btn" onclick="setFlowModalSignalType('validated')" style="flex:1; padding:7px 10px; font-weight:600; text-align:center;">⚡ Validated</button>
+                            <button type="button" id="flow-sig-type-paid" class="segmented-pill-btn" onclick="setFlowModalSignalType('dex_paid')" style="flex:1; padding:7px 10px; font-weight:600; text-align:center;">💎 DEX Paid</button>
+                            <button type="button" id="flow-sig-type-both" class="segmented-pill-btn active" onclick="setFlowModalSignalType('both')" style="flex:1; padding:7px 10px; font-weight:600; text-align:center;">🌐 Both (All)</button>
+                        </div>
+                        <input type="hidden" id="flow-signal-type" value="both" />
+                    </div>
                     <input type="hidden" id="flow-source" />
                     <input type="hidden" id="flow-source-id" />
                     <div class="form-group" style="position: relative;">
@@ -2872,6 +2884,6 @@
         const initialWorkflows = {{ workflows | tojson | safe }};
         const initialSettings = {{ settings | tojson | safe }};
     </script>
-    <script src="{{ url_for('static', filename='js/app.js') }}?v={{ app_version }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v={{ app_version }}&amp;ts=20261101_03"></script>
 </body>
 </html>

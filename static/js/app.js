@@ -538,7 +538,14 @@ function renderWorkflows() {
                     <span class="workflow-card-chevron"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transform:${isExpanded ? 'rotate(90deg)' : 'rotate(0deg)'};transition:transform 0.15s ease;"><polyline points="9 18 15 12 9 6"/></svg></span>
                     <div class="workflow-title">${wf.name || 'Unnamed Flow'}</div>
                 </div>
-                <div style="display:flex;align-items:center;gap:10px;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                    ${(() => {
+                        const sigRule = (wf.rules || []).find(r => r.rule_type === 'signal_type');
+                        const st = (sigRule ? sigRule.search_text : (wf.signal_type || 'both')).toLowerCase();
+                        if (st === 'validated') return '<span class="status-badge" style="background:rgba(52,211,153,0.15); border:1px solid #34d399; color:#34d399; font-size:0.68rem; padding:2px 7px; font-weight:600;">⚡ Validated</span>';
+                        if (st === 'dex_paid' || st === 'paid') return '<span class="status-badge" style="background:rgba(34,211,238,0.15); border:1px solid #22d3ee; color:#22d3ee; font-size:0.68rem; padding:2px 7px; font-weight:600;">💎 Paid</span>';
+                        return '<span class="status-badge" style="background:rgba(167,139,250,0.15); border:1px solid #a78bfa; color:#a78bfa; font-size:0.68rem; padding:2px 7px; font-weight:600;">🌐 Both</span>';
+                    })()}
                     <span class="workflow-compact-rule-count">${(wf.rules || []).length} rule${(wf.rules || []).length === 1 ? '' : 's'}</span>
                     <div class="status-badge ${wf.is_active ? 'status-active' : 'status-paused'}">
                         ${wf.is_active ? 'Active' : 'Paused'}
@@ -1258,12 +1265,51 @@ async function saveAssignFlows() {
     }
 }
 
+function setFlowModalSignalType(type) {
+    type = type || 'both';
+    const input = document.getElementById('flow-signal-type');
+    if (input) input.value = type;
+
+    const styles = {
+        'validated': { bg: '#34d399', text: '#022c22', border: '#34d399' },
+        'dex_paid': { bg: '#22d3ee', text: '#083344', border: '#22d3ee' },
+        'both': { bg: '#a78bfa', text: '#1e1b4b', border: '#a78bfa' }
+    };
+
+    const mapping = {
+        'validated': 'flow-sig-type-validated',
+        'dex_paid': 'flow-sig-type-paid',
+        'both': 'flow-sig-type-both'
+    };
+
+    Object.keys(mapping).forEach(k => {
+        const btn = document.getElementById(mapping[k]);
+        if (btn) {
+            if (k === type || (k === 'dex_paid' && type === 'paid')) {
+                btn.classList.add('active');
+                const cfg = styles[type] || styles['both'];
+                btn.style.setProperty('background', cfg.bg, 'important');
+                btn.style.setProperty('color', cfg.text, 'important');
+                btn.style.setProperty('border-color', cfg.border, 'important');
+                btn.style.fontWeight = '700';
+            } else {
+                btn.classList.remove('active');
+                btn.style.setProperty('background', 'transparent', 'important');
+                btn.style.setProperty('color', '#94a3b8', 'important');
+                btn.style.setProperty('border-color', 'transparent', 'important');
+                btn.style.fontWeight = '500';
+            }
+        }
+    });
+}
+
 function openModal() {
     document.getElementById('workflow-modal').classList.remove('hidden');
     document.getElementById('modal-title').innerText = 'New Workflow';
     document.getElementById('flow-id').value = '';
     document.getElementById('flow-name').value = '';
     renderFlowGroupOptions('');
+    setFlowModalSignalType('both');
     
     const sourceEl = document.getElementById('flow-source');
     if (sourceEl) sourceEl.value = '';
@@ -1293,6 +1339,10 @@ function editWorkflow(id) {
     document.getElementById('flow-id').value = wf.id;
     document.getElementById('flow-name').value = wf.name || '';
     renderFlowGroupOptions(flowGroups.assignments[String(wf.id)] || '');
+
+    const sigRule = (wf.rules || []).find(r => r.rule_type === 'signal_type');
+    const sigType = sigRule ? sigRule.search_text : (wf.signal_type || 'both');
+    setFlowModalSignalType(sigType);
     
     const sourceEl = document.getElementById('flow-source');
     if (sourceEl) sourceEl.value = wf.source_channel || '';
@@ -1304,8 +1354,8 @@ function editWorkflow(id) {
     const targetIdEl = document.getElementById('flow-target-id');
     if (targetIdEl) targetIdEl.value = wf.target_channel_id || '';
     
-    // Convert rules array of objects
-    currentRules = (wf.rules || []).map(r => ({ ...r }));
+    // Convert rules array of objects (excluding internal signal_type rule handled by top selector)
+    currentRules = (wf.rules || []).filter(r => r.rule_type !== 'signal_type').map(r => ({ ...r }));
     renderRules();
     fetchChannelsList(); // Refresh channels when editing
 }
@@ -1593,14 +1643,21 @@ async function saveWorkflow(e) {
     const targetChannel = document.getElementById('flow-target').value;
     const targetChannelId = document.getElementById('flow-target-id').value;
     const selectedGroupId = document.getElementById('flow-group-id')?.value || '';
+    const signalType = document.getElementById('flow-signal-type')?.value || 'both';
     
+    const finalRules = currentRules.filter(r => r.rule_type !== 'signal_type');
+    finalRules.push({
+        rule_type: 'signal_type',
+        search_text: signalType
+    });
+
     const workflow = {
         name: name,
         source_channel: sourceChannel,
         source_channel_id: sourceChannelId,
         target_channel: targetChannel,
         target_channel_id: targetChannelId,
-        rules: currentRules
+        rules: finalRules
     };
     
     const method = id ? 'PUT' : 'POST';
@@ -5947,9 +6004,9 @@ async function loadOutcomesWorkflows() {
 
 function updateOutcomesPillsUI() {
     const sysColors = {
-        'validated': { bg: '#34d399', text: '#022c22' },
-        'paid': { bg: '#22d3ee', text: '#083344' },
-        'all': { bg: '#a78bfa', text: '#1e1b4b' }
+        'validated': { bg: '#34d399', text: '#022c22', border: '#34d399' },
+        'paid': { bg: '#22d3ee', text: '#083344', border: '#22d3ee' },
+        'all': { bg: '#a78bfa', text: '#1e1b4b', border: '#a78bfa' }
     };
 
     ['validated', 'paid', 'all'].forEach(s => {
@@ -5957,13 +6014,16 @@ function updateOutcomesPillsUI() {
         if (el) {
             if (s === outcomesState.system) {
                 el.classList.add('active');
-                el.style.background = sysColors[s]?.bg || '#34d399';
-                el.style.color = sysColors[s]?.text || '#022c22';
+                const cfg = sysColors[s] || sysColors['validated'];
+                el.style.setProperty('background', cfg.bg, 'important');
+                el.style.setProperty('color', cfg.text, 'important');
+                el.style.setProperty('border-color', cfg.border, 'important');
                 el.style.fontWeight = '700';
             } else {
                 el.classList.remove('active');
-                el.style.background = 'transparent';
-                el.style.color = 'var(--text-muted)';
+                el.style.setProperty('background', 'transparent', 'important');
+                el.style.setProperty('color', '#94a3b8', 'important');
+                el.style.setProperty('border-color', 'transparent', 'important');
                 el.style.fontWeight = '500';
             }
         }
@@ -5974,13 +6034,15 @@ function updateOutcomesPillsUI() {
         if (el) {
             if (t === outcomesState.timeframe) {
                 el.classList.add('active');
-                el.style.background = '#38bdf8';
-                el.style.color = '#082f49';
+                el.style.setProperty('background', '#38bdf8', 'important');
+                el.style.setProperty('color', '#082f49', 'important');
+                el.style.setProperty('border-color', '#38bdf8', 'important');
                 el.style.fontWeight = '700';
             } else {
                 el.classList.remove('active');
-                el.style.background = 'transparent';
-                el.style.color = 'var(--text-muted)';
+                el.style.setProperty('background', 'transparent', 'important');
+                el.style.setProperty('color', '#94a3b8', 'important');
+                el.style.setProperty('border-color', 'transparent', 'important');
                 el.style.fontWeight = '500';
             }
         }
@@ -6012,7 +6074,13 @@ function handleOutcomesWorkflowSelect(wfId) {
     const wf = outcomesState.workflows.find(w => String(w.id) === String(wfId));
     if (!wf) return;
 
-    if (wf.system && ['validated', 'paid', 'all'].includes(wf.system)) {
+    const sigRule = (wf.rules || []).find(r => r.rule_type === 'signal_type');
+    if (sigRule) {
+        const sType = String(sigRule.search_text || 'both').toLowerCase();
+        if (sType === 'validated') setOutcomesSystem('validated', false);
+        else if (sType === 'dex_paid' || sType === 'paid') setOutcomesSystem('paid', false);
+        else setOutcomesSystem('all', false);
+    } else if (wf.system && ['validated', 'paid', 'all'].includes(wf.system)) {
         setOutcomesSystem(wf.system, false);
     }
 
