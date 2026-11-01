@@ -5,10 +5,16 @@ __pycache__/
 *.pyc
 .DS_Store
 .env
+.env*
+recorded_signals.csv
+recorded_signals.json
 node_modules/
 .next/
 .gemini/
 .env
+.env*
+recorded_signals.csv
+recorded_signals.json
 *.log
 test_*.py
 test_api.py
