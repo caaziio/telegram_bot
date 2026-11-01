@@ -178,9 +178,54 @@ function navigateSidebarTab(event, tabId) {
     return false;
 }
 
+function toggleMobileSidebar() {
+    const sidebar = document.getElementById('akoue-sidebar');
+    if (!sidebar) return;
+    if (sidebar.classList.contains('mobile-open')) {
+        closeMobileSidebar();
+    } else {
+        openMobileSidebar();
+    }
+}
+
+function openMobileSidebar() {
+    const sidebar = document.getElementById('akoue-sidebar');
+    const backdrop = document.getElementById('akoue-mobile-backdrop');
+    if (sidebar) sidebar.classList.add('mobile-open');
+    if (backdrop) backdrop.classList.add('active');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeMobileSidebar() {
+    const sidebar = document.getElementById('akoue-sidebar');
+    const backdrop = document.getElementById('akoue-mobile-backdrop');
+    if (sidebar) sidebar.classList.remove('mobile-open');
+    if (backdrop) backdrop.classList.remove('active');
+    document.body.style.overflow = '';
+}
+
 function switchTab(tabId, options = {}) {
     if (!VALID_PAGE_TABS.includes(tabId)) {
         tabId = 'dashboard';
+    }
+
+    closeMobileSidebar();
+    const mobilePill = document.getElementById('akoue-mobile-page-pill');
+    if (mobilePill) {
+        const pageNames = {
+            'dashboard': 'Dashboard',
+            'workflows': 'Workflows',
+            'outcomes': 'Outcomes Lab',
+            'dex-validated': 'DEX Validated',
+            'settings': 'Settings',
+            'wallet-tracker': 'Wallet Tracker',
+            'token-data': 'Token Data',
+            'dex-validated-data': 'Validated Data'
+        };
+        mobilePill.textContent = pageNames[tabId] || 'Akoueflow';
+    }
+    if (window.innerWidth <= 768) {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     VALID_PAGE_TABS.forEach(t => {

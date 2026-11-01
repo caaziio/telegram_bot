@@ -926,162 +926,455 @@ body {
   color: white;
 }
 
-/* Mobile Responsiveness */
+/* ============================================================
+   Comprehensive Mobile & Tablet Responsive Architecture
+   ============================================================ */
+
+/* Mobile Topbar & Mobile Elements Default (Desktop) */
+.akoue-mobile-topbar {
+  display: none;
+}
+
+.akoue-mobile-backdrop {
+  display: none;
+}
+
+.akoue-mobile-close-btn {
+  display: none;
+}
+
 @media (max-width: 1024px) {
   .main-content {
-    padding: 2rem;
+    padding: 1.5rem 1.75rem;
   }
 }
 
+/* Tablet & Mobile Breakpoint (<= 768px) */
 @media (max-width: 768px) {
-  body {
-    flex-direction: column;
+  html, body {
+    overflow-x: hidden !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+    font-size: 14px;
   }
 
+  /* Container */
   .dashboard-container {
-    flex-direction: column;
+    flex-direction: column !important;
+    min-height: 100vh !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+    overflow-x: hidden !important;
   }
 
-  .sidebar {
-    width: 100%;
-    height: auto;
-    padding: 1rem 1.5rem;
-    border-right: none;
-    border-bottom: 1px solid var(--border-color);
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    flex-direction: row;
+  /* Mobile Top Navigation Bar */
+  .akoue-mobile-topbar {
+    display: flex !important;
     align-items: center;
     justify-content: space-between;
+    height: 52px;
+    padding: 0 12px;
+    background: #090d16 !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    position: sticky;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1040;
+    width: 100%;
+    box-sizing: border-box;
   }
 
-  .logo-container {
-    margin-bottom: 0;
+  .akoue-mobile-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: #f1f5f9;
+    cursor: pointer;
+    transition: all 0.15s ease;
   }
 
-  .logo-text {
-    display: none; /* Hide text on very small screens to save space */
-  }
-  
-  @media (min-width: 480px) {
-    .logo-text {
-      display: block;
-    }
+  .akoue-mobile-menu-btn:active {
+    background: rgba(255, 255, 255, 0.1);
+    transform: scale(0.96);
   }
 
-  .sidebar nav {
+  .akoue-mobile-brand {
     display: flex;
-    gap: 0.25rem;
-    flex: 1;
-    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: -0.02em;
   }
 
-  .app-version {
-    margin-top: 0;
-    padding: 0.35rem 0 0.35rem 0.75rem;
-    border-top: 0;
-    border-left: 1px solid rgba(255, 255, 255, 0.06);
-    font-size: 0.62rem;
+  .akoue-mobile-brand-title {
+    background: linear-gradient(135deg, #ffffff 0%, #38bdf8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
   }
 
-  .nav-link {
-    margin-bottom: 0;
-    padding: 0.5rem;
-    font-size: 0; /* Hide text by default on mobile */
-    flex-direction: column;
-    gap: 4px;
-    border-radius: 12px;
+  .akoue-mobile-page-pill {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: rgba(56, 189, 248, 0.12);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    color: #38bdf8;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    max-width: 130px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  @media (min-width: 480px) {
-    .nav-link {
-      font-size: 0.75rem;
-      padding: 0.6rem;
-    }
+  /* Mobile Backdrop Overlay */
+  .akoue-mobile-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    z-index: 1090;
+    opacity: 0;
+    transition: opacity 0.25s ease;
   }
 
-  .nav-link svg {
-    width: 20px;
-    height: 20px;
+  .akoue-mobile-backdrop.active {
+    display: block !important;
+    opacity: 1 !important;
   }
 
-  .nav-link.active {
-    border-left: none;
-    border-bottom: none;
-    background: rgba(6, 182, 212, 0.15);
-    color: var(--accent-color);
+  /* Slide-out Sidebar Drawer */
+  .akoue-sidebar,
+  .grok-sidebar {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    bottom: 0 !important;
+    width: 280px !important;
+    max-width: 84vw !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    z-index: 1100 !important;
+    transform: translateX(-100%) !important;
+    transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1) !important;
+    box-shadow: 10px 0 35px rgba(0, 0, 0, 0.9) !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    border-right: 1px solid rgba(255, 255, 255, 0.1) !important;
   }
 
+  .akoue-sidebar.mobile-open,
+  .grok-sidebar.mobile-open {
+    transform: translateX(0) !important;
+  }
+
+  .akoue-sidebar.collapsed,
+  .grok-sidebar.collapsed {
+    width: 280px !important; /* Keep full drawer width on mobile */
+  }
+
+  .akoue-sidebar-header {
+    height: 54px !important;
+    padding: 0 14px !important;
+  }
+
+  .akoue-toggle-btn {
+    display: none !important; /* Desktop-only collapse button */
+  }
+
+  .akoue-mobile-close-btn {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    color: #94a3b8;
+    cursor: pointer;
+  }
+
+  .akoue-rail-expand-btn {
+    display: none !important;
+  }
+
+  /* Main Content Area */
   .main-content {
-    padding: 1.25rem;
+    padding: 0.85rem 0.75rem 3.5rem 0.75rem !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+    box-sizing: border-box !important;
+    overflow-x: hidden !important;
   }
 
+  /* Headers on All Pages */
   .header {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 1.5rem;
-    margin-bottom: 2rem;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+    margin-bottom: 1.25rem !important;
   }
 
   .header-title h1 {
-    font-size: 1.5rem;
+    font-size: 1.35rem !important;
+    line-height: 1.25 !important;
   }
 
-  .btn-primary {
-    width: 100%;
-    justify-content: center;
+  .header-title p {
+    font-size: 0.78rem !important;
+    margin-top: 4px !important;
+    line-height: 1.4 !important;
   }
 
-  .workflows-grid {
-    grid-template-columns: 1fr;
+  /* Button Wrappers in Headers */
+  .header > div:last-child,
+  .workflow-page-actions {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+    width: 100% !important;
   }
 
+  .header > div:last-child .btn-primary,
+  .workflow-page-actions .btn-primary {
+    flex: 1 1 calc(50% - 6px) !important;
+    min-width: 120px !important;
+    padding: 0.55rem 0.75rem !important;
+    font-size: 0.78rem !important;
+    justify-content: center !important;
+    text-align: center !important;
+  }
+
+  /* Responsive Stat & KPI Grids */
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px !important;
+    margin-bottom: 1.25rem !important;
+  }
+
+  .stat-card {
+    padding: 10px 12px !important;
+    border-radius: 10px !important;
+    gap: 10px !important;
+  }
+
+  .stat-icon-wrapper {
+    width: 38px !important;
+    height: 38px !important;
+    min-width: 38px !important;
+    border-radius: 8px !important;
+  }
+
+  .stat-icon-wrapper svg {
+    width: 18px !important;
+    height: 18px !important;
+  }
+
+  .stat-label {
+    font-size: 0.68rem !important;
+  }
+
+  .stat-value {
+    font-size: 1.25rem !important;
+    margin-top: 2px !important;
+  }
+
+  .stat-sub {
+    font-size: 0.65rem !important;
+  }
+
+  /* Dashboard Specific Grids */
+  .dash-telemetry-ribbon {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  .dash-analytics-row {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  .dash-streams-row {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  /* DEX Validated Live Monitor */
+  .dex-monitor-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  /* Workspaces & Sidebar Folder Rail */
+  .workflow-workspace {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  .flow-folder-rail {
+    display: flex !important;
+    flex-direction: row !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap !important;
+    border-right: none !important;
+    border-bottom: 1px solid var(--border-color) !important;
+    padding-bottom: 8px !important;
+    gap: 6px !important;
+  }
+
+  .flow-folder-item {
+    flex: 0 0 auto !important;
+    padding: 6px 12px !important;
+    border-radius: 20px !important;
+    margin: 0 !important;
+  }
+
+  .workflow-control-bar {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+
+  /* Outcomes Lab Responsive Adjustments */
+  #tab-outcomes .segmented-pill-group {
+    max-width: 100% !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .outcomes-criteria-grid {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  .outcomes-kpi-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  .outcomes-breakdown-row {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  .outcomes-trajectories-grid {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+
+  /* Form Rows */
+  .settings-form-row {
+    grid-template-columns: 1fr !important;
+    gap: 0.75rem !important;
+  }
+
+  /* Tables Across All Pages */
+  .table-container,
+  .token-table-wrapper,
+  .workflow-card-table,
+  table {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  /* Modals Mobile Bottom Sheet */
   .modal-overlay {
-    align-items: flex-end; /* Slide up from bottom on mobile */
+    padding: 0 !important;
+    align-items: flex-end !important;
   }
 
   .modal-content {
-    padding: 1.5rem;
-    margin: 0;
-    width: 100%;
-    max-width: 100%;
-    border-radius: 24px 24px 0 0;
-    max-height: 95vh;
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 92vh !important;
+    max-height: 92dvh !important;
+    border-radius: 20px 20px 0 0 !important;
+    padding: 1.25rem 1rem !important;
+    margin: 0 !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
   }
 
-  /* Form layouts in modal */
-  .form-row {
-    flex-direction: column;
-    gap: 0;
+  /* Touch-Friendly Inputs (Prevent iOS Safari auto-zoom on <16px) */
+  input.form-input,
+  select.form-input,
+  textarea.form-input {
+    font-size: 16px !important;
   }
 
+  /* Tester Container */
   .tester-container {
-    flex-direction: column;
+    flex-direction: column !important;
+    gap: 14px !important;
   }
 
+  .tester-container > div {
+    min-width: 100% !important;
+    flex: 1 1 100% !important;
+  }
+
+  /* Rule Rows */
   .rule-row {
-    flex-wrap: wrap;
-    background: rgba(255,255,255,0.02);
-    padding: 0.75rem;
-    border-radius: 8px;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    padding: 10px !important;
+  }
+
+  .rule-row__badge {
+    width: 100% !important;
+    margin-bottom: 4px !important;
+  }
+
+  .rule-row__badge .status-badge {
+    width: 100% !important;
+    text-align: center !important;
+  }
+
+  .rule-row__fields {
+    width: 100% !important;
   }
 }
 
-@media (max-width: 480px) {
-  .nav-link {
-    padding: 0.5rem;
+/* Extra Small Phones (<= 440px) */
+@media (max-width: 440px) {
+  .stats-grid {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 6px !important;
   }
-  
-  .workflow-flow {
-    flex-direction: column;
-    gap: 1rem;
+
+  .stat-card {
+    padding: 8px 10px !important;
   }
-  
-  .flow-arrow {
-    transform: rotate(90deg);
+
+  .stat-value {
+    font-size: 1.1rem !important;
+  }
+
+  .outcomes-kpi-grid {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  .dash-telemetry-ribbon {
+    grid-template-columns: 1fr !important;
   }
 }
+
 
 /* Workflow workspace
    Kept in the versioned stylesheet so the JS-rendered group UI and its layout

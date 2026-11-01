@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Akoueflow Dashboard</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/globals.css') }}?v={{ app_version }}&amp;ts=20261101_03">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/globals.css') }}?v={{ app_version }}&amp;ts=20261101_04">
     <style>
         .hidden { display: none !important; }
         .filter-panel { position: relative; z-index: 50; }
@@ -328,6 +328,30 @@
 </head>
 <body>
     <div class="dashboard-container">
+        <!-- Mobile Top Navigation Bar (Visible only on <= 768px) -->
+        <header class="akoue-mobile-topbar" id="akoue-mobile-topbar">
+            <button type="button" class="akoue-mobile-menu-btn" onclick="toggleMobileSidebar()" aria-label="Open Navigation Menu" title="Open Navigation Menu">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="3" y1="12" x2="21" y2="12"></line>
+                    <line x1="3" y1="6" x2="21" y2="6"></line>
+                    <line x1="3" y1="18" x2="21" y2="18"></line>
+                </svg>
+            </button>
+            <div class="akoue-mobile-brand" onclick="switchTab('dashboard')" title="Akoueflow Dashboard">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 2.5L20.5 18.5C21 19.5 20.2 20.8 19 20.8H5C3.8 20.8 3 19.5 3.5 18.5L12 2.5Z" stroke="#22d3ee" stroke-width="2.2" stroke-linejoin="round"/>
+                    <circle cx="12" cy="10" r="1.6" fill="#22d3ee"/>
+                </svg>
+                <span class="akoue-mobile-brand-title">Akoueflow</span>
+            </div>
+            <div class="akoue-mobile-page-pill" id="akoue-mobile-page-pill">
+                Dashboard
+            </div>
+        </header>
+
+        <!-- Mobile Sidebar Backdrop Overlay -->
+        <div class="akoue-mobile-backdrop" id="akoue-mobile-backdrop" onclick="closeMobileSidebar()"></div>
+
         <!-- Single Unified Akoueflow Sidebar -->
         <aside class="akoue-sidebar grok-sidebar" id="akoue-sidebar">
             <!-- Unified Header: Logo, Brand once, and Sidebar Collapse Toggle -->
@@ -346,13 +370,21 @@
                     </svg>
                     <span class="akoue-brand-title">Akoueflow</span>
                 </div>
-                <button type="button" class="akoue-toggle-btn" onclick="toggleAkoueSidebar()" id="akoue-sidebar-toggle" title="Collapse sidebar (⌘B)">
-                    <svg class="akoue-toggle-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect width="18" height="18" x="3" y="3" rx="2"></rect>
-                        <path d="M9 3v18"></path>
-                        <polyline points="15 9 12 12 15 15"></polyline>
-                    </svg>
-                </button>
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <button type="button" class="akoue-toggle-btn" onclick="toggleAkoueSidebar()" id="akoue-sidebar-toggle" title="Collapse sidebar (⌘B)">
+                        <svg class="akoue-toggle-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect width="18" height="18" x="3" y="3" rx="2"></rect>
+                            <path d="M9 3v18"></path>
+                            <polyline points="15 9 12 12 15 15"></polyline>
+                        </svg>
+                    </button>
+                    <button type="button" class="akoue-mobile-close-btn" onclick="closeMobileSidebar()" aria-label="Close navigation" title="Close sidebar">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
             </div>
 
             <!-- Unified Quick Search -->
@@ -550,7 +582,7 @@
                 </div>
 
                 <!-- System Telemetry Ribbon -->
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin-bottom: 1.5rem;">
+                <div class="dash-telemetry-ribbon" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin-bottom: 1.5rem;">
                     <div class="workflow-card" style="padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; background: linear-gradient(135deg, rgba(16,185,129,0.08), rgba(0,0,0,0.2)); border-color: rgba(16,185,129,0.22); cursor: pointer;" onclick="switchTab('dex-validated')">
                         <div>
                             <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em;">DEX Validated Stream</div>
@@ -750,7 +782,7 @@
                 </div>
 
                 <!-- Middle Row: Signal Distribution Analytics + Top Momentum Movers -->
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 1.25rem; margin-bottom: 1.5rem;">
+                <div class="dash-analytics-row" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 1.25rem; margin-bottom: 1.5rem;">
                     <!-- Left: Signal Distribution & Migration Analytics -->
                     <div class="workflow-card" style="padding: 1.35rem;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.1rem;">
@@ -796,7 +828,7 @@
                 </div>
 
                 <!-- Bottom Row: Side-by-Side Live Streams (DEX Validated vs DEX Paid) -->
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 1.25rem;">
+                <div class="dash-streams-row" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 1.25rem;">
                     <!-- DEX Validated Live Feed -->
                     <div class="workflow-card" style="padding: 1.35rem;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
@@ -934,7 +966,7 @@
                     </div>
 
                     <!-- Full Filter Criteria Sections Grid -->
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px;">
+                    <div class="outcomes-criteria-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px;">
                         
                         <!-- Card 1: Valuation & Liquidity -->
                         <div style="background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(148, 163, 184, 0.12); border-radius: 10px; padding: 12px;">
@@ -1129,7 +1161,7 @@
                 <!-- Simulation Results Container -->
                 <div id="outcomes-results-container">
                     <!-- KPI Banner Cards -->
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 1.5rem;">
+                    <div class="outcomes-kpi-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 1.5rem;">
                         <div class="workflow-card" style="padding: 14px 16px;">
                             <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Matched Signals</div>
                             <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 4px;">
@@ -1177,7 +1209,7 @@
                     </div>
 
                     <!-- Breakdown Columns: Donut Distribution + Trajectory Analysis -->
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; margin-bottom: 1.5rem;">
+                    <div class="outcomes-breakdown-row" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; margin-bottom: 1.5rem;">
                         <!-- Left: Peak Multiplier Tier Distribution -->
                         <div class="workflow-card" style="padding: 1.25rem;">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
@@ -1201,7 +1233,7 @@
                                 </div>
                                 <span style="font-size: 0.74rem; color: var(--text-muted);">Price Action Profile</span>
                             </div>
-                            <div id="outcomes-trajectories-container" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <div id="outcomes-trajectories-container" class="outcomes-trajectories-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                                 <!-- Dynamic trajectory cards inserted by JS -->
                             </div>
                             <div id="outcomes-baseline-box" style="margin-top: 14px; padding: 10px 14px; border-radius: 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); font-size: 0.76rem; color: var(--text-muted); display: flex; align-items: center; justify-content: space-between;">
@@ -1420,7 +1452,7 @@
                             <label>DexScreener Solana Payment Address (Monitored)</label>
                             <input class="form-input" id="setting-cto-dex-payment-address" placeholder="e.g. 5P245..." />
                         </div>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                        <div class="settings-form-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
                             <div class="form-group" style="margin-bottom: 0;">
                                 <label>Wallet Polling</label>
                                 <select class="form-input" id="setting-wallet-poll-enabled" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white;">
@@ -1560,7 +1592,7 @@
                             <label>Solana Wallet Address(es) to Scan (Comma-separated)</label>
                             <input class="form-input" id="scan-wallet-address" placeholder="Enter Solana address(es), comma-separated" />
                         </div>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                        <div class="settings-form-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
                             <div class="form-group" style="margin-bottom: 0;">
                                 <label>Min Amount (USD)</label>
                                 <input type="number" step="any" class="form-input" id="scan-min-amount" placeholder="0.0" />
@@ -1570,7 +1602,7 @@
                                 <input type="number" step="any" class="form-input" id="scan-max-amount" placeholder="1000.0" />
                             </div>
                         </div>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                        <div class="settings-form-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
                             <div class="form-group" style="margin-bottom: 0;">
                                 <label>Time Value</label>
                                 <input type="number" min="1" class="form-input" id="scan-time-value" value="12" />
@@ -2884,6 +2916,6 @@
         const initialWorkflows = {{ workflows | tojson | safe }};
         const initialSettings = {{ settings | tojson | safe }};
     </script>
-    <script src="{{ url_for('static', filename='js/app.js') }}?v={{ app_version }}&amp;ts=20261101_03"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v={{ app_version }}&amp;ts=20261101_04"></script>
 </body>
 </html>
