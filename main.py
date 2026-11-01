@@ -1582,6 +1582,7 @@ def process_message(text, rules, message_date):
 @app.route('/')
 @app.route('/dashboard')
 @app.route('/workflows')
+@app.route('/outcomes')
 @app.route('/wallet-tracker')
 @app.route('/token-data')
 @app.route('/dex-validated')
@@ -6980,12 +6981,8 @@ def token_matches_workflow_rules(token, rules):
     return True
 
 
-@app.route('/api/workflows/performance', methods=['GET'])
-def get_workflows_performance():
-    system = request.args.get('system', 'validated').lower().strip()
-    timeframe = request.args.get('timeframe', 'day').lower().strip()
-    sort_by = request.args.get('sort_by', 'win_rate_2x').lower().strip()
-
+def get_historical_candidate_tokens(system='validated', timeframe='day'):
+    """Fetch candidate historical signals from memory SQLite index or Supabase fallback."""
     now_ts = int(time.time())
     tf_seconds = {
         'day': 86400,
@@ -6994,28 +6991,6 @@ def get_workflows_performance():
         'all': None
     }.get(timeframe, 86400)
 
-    # 1. Fetch active workflows & rules directly from Supabase
-    wf_rows = []
-    rule_rows = []
-    if supabase_client:
-        try:
-            wf_rows = supabase_client.table('workflows').select('id,name,is_active').eq('is_active', True).execute().data or []
-            rule_rows = supabase_client.table('rules').select('id,workflow_id,rule_type,search_text,replace_text,time_min,time_max').execute().data or []
-        except Exception as e:
-            debug_log(f"[WF PERF] Error pulling workflows/rules from Supabase: {e}")
-
-    wf_map = {}
-    for w in wf_rows:
-        w_id = w['id']
-        w_name = w['name']
-        wf_map[w_id] = {'id': w_id, 'name': w_name, 'rules': []}
-
-    for r in rule_rows:
-        wid = r['workflow_id']
-        if wid in wf_map:
-            wf_map[wid]['rules'].append(r)
-
-    # 2. Fetch candidate tokens from memory / Supabase fallback
     candidate_tokens = []
     ts_dv_expr = "(CASE WHEN COALESCE(fetched_at, 0) > 1000000000000 THEN fetched_at / 1000 WHEN COALESCE(published_at, 0) > 1000000000000 THEN published_at / 1000 WHEN COALESCE(payment_timestamp, 0) > 1000000000000 THEN payment_timestamp / 1000 ELSE CAST(COALESCE(strftime('%s', created_at), 0) AS INTEGER) END)"
     ts_wp_expr = "(CASE WHEN COALESCE(timestamp, 0) > 1000000000000 THEN timestamp / 1000 WHEN COALESCE(timestamp, 0) > 0 THEN timestamp ELSE CAST(COALESCE(strftime('%s', created_at), 0) AS INTEGER) END)"
@@ -7102,7 +7077,7 @@ def get_workflows_performance():
             except Exception as e:
                 debug_log(f"[WF PERF] Error querying wallet_payments: {e}")
 
-    # Direct Supabase fallback if memory index was not hydrated yet
+    # Fallback to Supabase if in-memory index was empty
     if not candidate_tokens and supabase_client:
         try:
             if system in ('validated', 'all'):
@@ -7128,6 +7103,39 @@ def get_workflows_performance():
                     candidate_tokens.append(item)
         except Exception as sb_err:
             debug_log(f"[WF PERF] Supabase fallback error: {sb_err}")
+
+    return candidate_tokens
+
+
+@app.route('/api/workflows/performance', methods=['GET'])
+def get_workflows_performance():
+    system = request.args.get('system', 'validated').lower().strip()
+    timeframe = request.args.get('timeframe', 'day').lower().strip()
+    sort_by = request.args.get('sort_by', 'win_rate_2x').lower().strip()
+
+    # 1. Fetch active workflows & rules directly from Supabase
+    wf_rows = []
+    rule_rows = []
+    if supabase_client:
+        try:
+            wf_rows = supabase_client.table('workflows').select('id,name,is_active').eq('is_active', True).execute().data or []
+            rule_rows = supabase_client.table('rules').select('id,workflow_id,rule_type,search_text,replace_text,time_min,time_max').execute().data or []
+        except Exception as e:
+            debug_log(f"[WF PERF] Error pulling workflows/rules from Supabase: {e}")
+
+    wf_map = {}
+    for w in wf_rows:
+        w_id = w['id']
+        w_name = w['name']
+        wf_map[w_id] = {'id': w_id, 'name': w_name, 'rules': []}
+
+    for r in rule_rows:
+        wid = r['workflow_id']
+        if wid in wf_map:
+            wf_map[wid]['rules'].append(r)
+
+    # 2. Fetch candidate tokens
+    candidate_tokens = get_historical_candidate_tokens(system, timeframe)
 
     # 3. Evaluate each workflow
     leaderboard = []
@@ -7255,6 +7263,300 @@ def get_workflows_performance():
         'total_active_workflows': len(wf_map),
         'workflows_with_matches': len(leaderboard)
     })
+
+
+@app.route('/api/outcomes/workflows', methods=['GET'])
+def get_outcomes_workflows():
+    """Return all workflows with their rules for the Outcomes Strategy Lab preset loader."""
+    try:
+        wf_rows = []
+        rule_rows = []
+        if supabase_client:
+            try:
+                wf_rows = supabase_client.table('workflows').select('id,name,is_active,source_channel,target_channel').order('name').execute().data or []
+                rule_rows = supabase_client.table('rules').select('id,workflow_id,rule_type,search_text,replace_text,time_min,time_max').execute().data or []
+            except Exception as e:
+                debug_log(f"[OUTCOMES] Error fetching workflows from Supabase: {e}")
+
+        wf_map = {}
+        for w in wf_rows:
+            wf_map[w['id']] = {
+                'id': w['id'],
+                'name': w['name'],
+                'is_active': bool(w.get('is_active', True)),
+                'rules': []
+            }
+
+        for r in rule_rows:
+            wid = r.get('workflow_id')
+            if wid in wf_map:
+                wf_map[wid]['rules'].append(r)
+
+        result_list = list(wf_map.values())
+        result_list.sort(key=lambda x: x['name'].lower())
+        return jsonify({'success': True, 'workflows': result_list})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/outcomes/simulate', methods=['POST'])
+def simulate_outcomes():
+    """Simulate workflow rules or custom filter criteria against historical signals."""
+    try:
+        req_data = request.get_json() or {}
+        system = str(req_data.get('system') or 'validated').lower().strip()
+        timeframe = str(req_data.get('timeframe') or 'all').lower().strip()
+        workflow_id = req_data.get('workflow_id')
+        custom_filters = req_data.get('filters') or {}
+
+        # 1. Fetch historical candidate tokens
+        candidates = get_historical_candidate_tokens(system, timeframe)
+
+        # 2. Build rules list
+        rules = []
+        workflow_meta = None
+
+        # Load base rules from workflow if selected
+        if workflow_id and supabase_client:
+            try:
+                wf_id_int = int(workflow_id)
+                wf_res = supabase_client.table('workflows').select('id,name,is_active').eq('id', wf_id_int).execute()
+                if wf_res.data:
+                    workflow_meta = wf_res.data[0]
+                    rule_res = supabase_client.table('rules').select('id,workflow_id,rule_type,search_text,replace_text,time_min,time_max').eq('workflow_id', wf_id_int).execute()
+                    rules.extend(rule_res.data or [])
+            except Exception as e:
+                debug_log(f"[OUTCOMES] Error fetching workflow {workflow_id}: {e}")
+
+        # Process custom filters
+        if custom_filters:
+            # Market Cap ($)
+            min_mc = custom_filters.get('min_mc')
+            max_mc = custom_filters.get('max_mc')
+            if min_mc not in (None, '') or max_mc not in (None, ''):
+                rules = [r for r in rules if r.get('rule_type') != 'market_cap']
+                rules.append({
+                    'rule_type': 'market_cap',
+                    'time_min': float(min_mc) if min_mc not in (None, '') else None,
+                    'time_max': float(max_mc) if max_mc not in (None, '') else None
+                })
+
+            # Token Age (Minutes)
+            min_age = custom_filters.get('min_age')
+            max_age = custom_filters.get('max_age')
+            age_kind = (custom_filters.get('age_kind') or 'creation').lower().strip()
+            if min_age not in (None, '') or max_age not in (None, ''):
+                rules = [r for r in rules if r.get('rule_type') != 'token_age']
+                rules.append({
+                    'rule_type': 'token_age',
+                    'time_min': float(min_age) if min_age not in (None, '') else None,
+                    'time_max': float(max_age) if max_age not in (None, '') else None,
+                    'search_text': age_kind
+                })
+
+            # Liquidity ($)
+            min_liq = custom_filters.get('min_liq')
+            max_liq = custom_filters.get('max_liq')
+            if min_liq not in (None, '') or max_liq not in (None, ''):
+                rules = [r for r in rules if r.get('rule_type') != 'liquidity']
+                rules.append({
+                    'rule_type': 'liquidity',
+                    'time_min': float(min_liq) if min_liq not in (None, '') else None,
+                    'time_max': float(max_liq) if max_liq not in (None, '') else None
+                })
+
+            # Volume ($)
+            min_vol = custom_filters.get('min_vol')
+            max_vol = custom_filters.get('max_vol')
+            vol_tf = custom_filters.get('volume_tf') or '24h'
+            if min_vol not in (None, '') or max_vol not in (None, ''):
+                rules = [r for r in rules if r.get('rule_type') != 'volume']
+                rules.append({
+                    'rule_type': 'volume',
+                    'time_min': float(min_vol) if min_vol not in (None, '') else None,
+                    'time_max': float(max_vol) if max_vol not in (None, '') else None,
+                    'search_text': vol_tf
+                })
+
+            # Category (boost, cto, ads, etc.)
+            cat = custom_filters.get('category')
+            if cat and str(cat).lower() not in ('all', '', 'any'):
+                rules = [r for r in rules if r.get('rule_type') != 'category']
+                rules.append({
+                    'rule_type': 'category',
+                    'search_text': str(cat).strip()
+                })
+
+            # Migrated Status (yes, no, all)
+            mig = custom_filters.get('migrated')
+            if mig and str(mig).lower() not in ('all', '', 'any'):
+                rules = [r for r in rules if r.get('rule_type') != 'migrated']
+                rules.append({
+                    'rule_type': 'migrated',
+                    'search_text': 'yes' if str(mig).lower() in ('yes', 'migrated', 'true', '1') else 'no'
+                })
+
+            # Platform
+            plat = custom_filters.get('platform')
+            if plat and str(plat).lower() not in ('all', '', 'any'):
+                rules = [r for r in rules if r.get('rule_type') != 'platform']
+                rules.append({
+                    'rule_type': 'platform',
+                    'search_text': str(plat).strip()
+                })
+
+            # Exclude Platform
+            ex_plat = custom_filters.get('exclude_platform')
+            if ex_plat and str(ex_plat).lower() not in ('all', '', 'any'):
+                rules = [r for r in rules if r.get('rule_type') != 'exclude_platform']
+                rules.append({
+                    'rule_type': 'exclude_platform',
+                    'search_text': str(ex_plat).strip()
+                })
+
+            # Token Name / Symbol Filter (substring or regex)
+            name_flt = custom_filters.get('name_filter')
+            if name_flt and str(name_flt).strip():
+                rules = [r for r in rules if r.get('rule_type') != 'token_name']
+                rules.append({
+                    'rule_type': 'token_name',
+                    'search_text': str(name_flt).strip()
+                })
+
+            # DEX Payment ($)
+            p_min = custom_filters.get('dex_payment_min')
+            p_max = custom_filters.get('dex_payment_max')
+            if p_min not in (None, '') or p_max not in (None, ''):
+                rules = [r for r in rules if r.get('rule_type') != 'dex_payment']
+                rules.append({
+                    'rule_type': 'dex_payment',
+                    'time_min': float(p_min) if p_min not in (None, '') else None,
+                    'time_max': float(p_max) if p_max not in (None, '') else None
+                })
+
+        # 3. Baseline metrics across all candidates
+        tot_cand = len(candidates)
+        all_peaks = [float(x.get('peak_mult_1h') or 1.0) for x in candidates]
+        baseline_win_2x = round((sum(1 for p in all_peaks if p >= 2.0) / tot_cand) * 100.0, 1) if tot_cand else 0.0
+        baseline_avg_1h = round(sum(all_peaks) / tot_cand, 2) if tot_cand else 1.0
+
+        # 4. Filter candidates
+        matched = []
+        for t in candidates:
+            if token_matches_workflow_rules(t, rules):
+                matched.append(t)
+
+        matched_count = len(matched)
+        peaks_1h = [float(x.get('peak_mult_1h') or 1.0) for x in matched]
+        peaks_4h = [float(x.get('peak_mult_4h') or x.get('peak_mult_1h') or 1.0) for x in matched]
+        drawdowns = [float(x.get('pre_peak_dd_1h_pct') or 0.0) for x in matched]
+
+        wins_1_5x = sum(1 for p in peaks_1h if p >= 1.5)
+        wins_2x = sum(1 for p in peaks_1h if p >= 2.0)
+        wins_3x = sum(1 for p in peaks_1h if p >= 3.0)
+        wins_5x = sum(1 for p in peaks_1h if p >= 5.0)
+
+        tot_peaks = len(peaks_1h) or 1
+        avg_1h = sum(peaks_1h) / tot_peaks if peaks_1h else 1.0
+        avg_4h = sum(peaks_4h) / tot_peaks if peaks_4h else 1.0
+        avg_dd = sum(drawdowns) / tot_peaks if drawdowns else 0.0
+        worst_dd = min(drawdowns) if drawdowns else 0.0
+
+        # Performance Tier Distribution (<1x slate grey, 1x-1.5x amber, 1.5x-2x cyan, 2x-3x emerald, 3x-5x purple, 5x+ gold)
+        t_lt_1x = sum(1 for p in peaks_1h if p < 1.05)
+        t_1x_1_5x = sum(1 for p in peaks_1h if 1.05 <= p < 1.5)
+        t_1_5x_2x = sum(1 for p in peaks_1h if 1.5 <= p < 2.0)
+        t_2x_3x = sum(1 for p in peaks_1h if 2.0 <= p < 3.0)
+        t_3x_5x = sum(1 for p in peaks_1h if 3.0 <= p < 5.0)
+        t_5x_plus = sum(1 for p in peaks_1h if p >= 5.0)
+
+        tier_stats = {
+            'lt_1x': t_lt_1x,
+            'lt_1x_pct': round((t_lt_1x / tot_peaks) * 100.0, 1),
+            '1x_1_5x': t_1x_1_5x,
+            '1x_1_5x_pct': round((t_1x_1_5x / tot_peaks) * 100.0, 1),
+            '1_5x_2x': t_1_5x_2x,
+            '1_5x_2x_pct': round((t_1_5x_2x / tot_peaks) * 100.0, 1),
+            '2x_3x': t_2x_3x,
+            '2x_3x_pct': round((t_2x_3x / tot_peaks) * 100.0, 1),
+            '3x_5x': t_3x_5x,
+            '3x_5x_pct': round((t_3x_5x / tot_peaks) * 100.0, 1),
+            '5x_plus': t_5x_plus,
+            '5x_plus_pct': round((t_5x_plus / tot_peaks) * 100.0, 1),
+        }
+
+        # Trajectory Breakdown
+        paths = [str(x.get('path_1h') or 'UNKNOWN').upper() for x in matched]
+        tot_paths = len(paths) or 1
+        trajectories = {
+            'direct_pump': paths.count('DIRECT_PUMP'),
+            'direct_pump_pct': round((paths.count('DIRECT_PUMP') / tot_paths) * 100.0, 1),
+            'dip_then_pump': paths.count('DIP_THEN_PUMP'),
+            'dip_then_pump_pct': round((paths.count('DIP_THEN_PUMP') / tot_paths) * 100.0, 1),
+            'straight_dump': paths.count('STRAIGHT_DUMP'),
+            'straight_dump_pct': round((paths.count('STRAIGHT_DUMP') / tot_paths) * 100.0, 1),
+            'pump_then_dump': paths.count('PUMP_THEN_DUMP'),
+            'pump_then_dump_pct': round((paths.count('PUMP_THEN_DUMP') / tot_paths) * 100.0, 1),
+        }
+
+        # Sort matched tokens by peak multiplier descending
+        matched_sorted = sorted(matched, key=lambda x: float(x.get('peak_mult_1h') or 1.0), reverse=True)
+        best_token = matched_sorted[0] if matched_sorted else {}
+
+        tokens_data = []
+        for t in matched_sorted:
+            ca = t.get('ca') or ''
+            tokens_data.append({
+                'id': t.get('id'),
+                'name': t.get('name') or t.get('token_name') or 'Unknown',
+                'ca': ca,
+                'platform': t.get('platform') or '',
+                'market_cap': t.get('market_cap') or '',
+                'age': t.get('age') or '',
+                'liquidity_usd': t.get('liquidity_usd'),
+                'volume_24h': t.get('volume_24h'),
+                'signal_type': t.get('signal_type') or 'dex',
+                'source_system': t.get('source_system') or 'validated',
+                'peak_mult_1h': round(float(t.get('peak_mult_1h') or 1.0), 2),
+                'peak_mult_4h': round(float(t.get('peak_mult_4h') or t.get('peak_mult_1h') or 1.0), 2),
+                'pre_peak_dd_1h_pct': round(float(t.get('pre_peak_dd_1h_pct') or 0.0), 1),
+                'path_1h': str(t.get('path_1h') or 'UNKNOWN').upper(),
+                'dex_url': t.get('dex_url') or (f"https://dexscreener.com/solana/{ca}" if ca else ''),
+                'event_ts': t.get('event_ts')
+            })
+
+        return jsonify({
+            'success': True,
+            'workflow': workflow_meta,
+            'active_rules': rules,
+            'rules_count': len(rules),
+            'total_candidates': tot_cand,
+            'matched_count': matched_count,
+            'match_rate_pct': round((matched_count / tot_cand) * 100.0, 1) if tot_cand else 0.0,
+            'win_rate_1_5x': round((wins_1_5x / matched_count) * 100.0, 1) if matched_count else 0.0,
+            'win_rate_2x': round((wins_2x / matched_count) * 100.0, 1) if matched_count else 0.0,
+            'win_rate_3x': round((wins_3x / matched_count) * 100.0, 1) if matched_count else 0.0,
+            'win_rate_5x': round((wins_5x / matched_count) * 100.0, 1) if matched_count else 0.0,
+            'avg_peak_1h': round(avg_1h, 2),
+            'avg_peak_4h': round(avg_4h, 2),
+            'avg_pre_peak_dd_pct': round(avg_dd, 1),
+            'worst_dd_pct': round(worst_dd, 1),
+            'best_token_name': best_token.get('name') or 'None',
+            'best_token_ca': best_token.get('ca') or '',
+            'best_token_peak': round(float(best_token.get('peak_mult_1h') or 1.0), 2) if best_token else 1.0,
+            'tier_stats': tier_stats,
+            'trajectories': trajectories,
+            'baseline': {
+                'total_candidates': tot_cand,
+                'win_rate_2x': baseline_win_2x,
+                'avg_peak_1h': baseline_avg_1h
+            },
+            'tokens': tokens_data
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 def run_flask_app():
     port = int(os.environ.get("PORT", 5000))

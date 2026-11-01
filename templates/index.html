@@ -408,6 +408,19 @@
                     </div>
                 </div>
 
+                <!-- Outcomes Strategy Lab -->
+                <a href="/outcomes" class="akoue-nav-item" id="rail-nav-outcomes" onclick="return navigateSidebarTab(event, 'outcomes')" title="Outcomes &amp; Strategy Backtesting Lab">
+                    <svg class="akoue-nav-icon" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M10 2v7.31"></path>
+                        <path d="M14 9.3V1.99"></path>
+                        <path d="M8.5 2h7"></path>
+                        <path d="M14 9.3a6.5 6.5 0 1 1-4 0"></path>
+                        <path d="M5.52 16h12.96"></path>
+                    </svg>
+                    <span class="akoue-nav-text">Outcomes Lab</span>
+                    <span class="akoue-nav-tag" style="color:#fbbf24;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.25);">TEST</span>
+                </a>
+
                 <!-- DEX Paid Section -->
                 <div class="akoue-nav-section">
                     <div class="akoue-nav-section-label">
@@ -843,6 +856,279 @@
                 </div>
                 <div class="workflows-grid" id="workflows-grid">
                     <!-- Workflows populated by JS -->
+                </div>
+            </div>
+
+            <!-- Outcomes Strategy Lab Page -->
+            <div id="tab-outcomes" class="hidden">
+                <div class="header">
+                    <div class="header-title">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <h1 style="background: linear-gradient(135deg, #ffffff 0%, #a78bfa 50%, #38bdf8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Outcomes Strategy Lab</h1>
+                            <span class="status-badge" style="background: rgba(168, 85, 247, 0.15); border-color: rgba(168, 85, 247, 0.35); color: #c084fc;">
+                                🧪 Backtest Studio
+                            </span>
+                        </div>
+                        <p>Simulate workflow rules &amp; custom criteria against real historical tokens to evaluate win rates, peak multipliers, and post-signal trajectories</p>
+                    </div>
+                    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                        <button type="button" class="btn-primary" onclick="resetOutcomesFilters()" style="background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-main); box-shadow: none; display: inline-flex; align-items: center; gap: 6px;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                            <span>Reset Filters</span>
+                        </button>
+                        <button type="button" class="btn-primary" onclick="exportOutcomesCSV()" style="background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); color: var(--text-main); box-shadow: none; display: inline-flex; align-items: center; gap: 6px;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            <span>Export CSV</span>
+                        </button>
+                        <button id="outcomes-run-btn" type="button" class="btn-primary" onclick="runOutcomesSimulation()" style="background: linear-gradient(135deg, #7c3aed, #2563eb); border: 1px solid rgba(168, 85, 247, 0.4); color: #fff; box-shadow: 0 0 15px rgba(124, 58, 237, 0.35); display: inline-flex; align-items: center; gap: 8px; font-weight: 600;">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                            <span>Run Backtest</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Simulation Configuration & Filter Panel -->
+                <div class="workflow-card" style="padding: 1.25rem; margin-bottom: 1.5rem; background: linear-gradient(135deg, rgba(30, 41, 59, 0.4), rgba(15, 23, 42, 0.6)); border: 1px solid rgba(148, 163, 184, 0.15);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 10px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 1.1rem;">⚡</span>
+                            <span style="font-size: 0.85rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-main);">Strategy Configuration &amp; Rule Filters</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="font-size: 0.78rem; color: var(--text-muted);">Source:</span>
+                                <div style="display: inline-flex; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 2px;">
+                                    <button type="button" id="outcomes-sys-validated" class="filter-pill active" onclick="setOutcomesSystem('validated')" style="border-radius: 6px; padding: 4px 10px; font-size: 0.76rem; border: none; cursor: pointer;">Validated</button>
+                                    <button type="button" id="outcomes-sys-paid" class="filter-pill" onclick="setOutcomesSystem('paid')" style="border-radius: 6px; padding: 4px 10px; font-size: 0.76rem; border: none; cursor: pointer;">Paid</button>
+                                    <button type="button" id="outcomes-sys-all" class="filter-pill" onclick="setOutcomesSystem('all')" style="border-radius: 6px; padding: 4px 10px; font-size: 0.76rem; border: none; cursor: pointer;">Combined All</button>
+                                </div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="font-size: 0.78rem; color: var(--text-muted);">Timeframe:</span>
+                                <div style="display: inline-flex; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 2px;">
+                                    <button type="button" id="outcomes-tf-day" class="filter-pill" onclick="setOutcomesTimeframe('day')" style="border-radius: 6px; padding: 4px 10px; font-size: 0.76rem; border: none; cursor: pointer;">24h</button>
+                                    <button type="button" id="outcomes-tf-week" class="filter-pill active" onclick="setOutcomesTimeframe('week')" style="border-radius: 6px; padding: 4px 10px; font-size: 0.76rem; border: none; cursor: pointer;">7d</button>
+                                    <button type="button" id="outcomes-tf-month" class="filter-pill" onclick="setOutcomesTimeframe('month')" style="border-radius: 6px; padding: 4px 10px; font-size: 0.76rem; border: none; cursor: pointer;">30d</button>
+                                    <button type="button" id="outcomes-tf-all" class="filter-pill" onclick="setOutcomesTimeframe('all')" style="border-radius: 6px; padding: 4px 10px; font-size: 0.76rem; border: none; cursor: pointer;">All</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Workflow Preset Picker & Quick Info -->
+                    <div style="display: grid; grid-template-columns: 1fr auto; gap: 12px; margin-bottom: 1.25rem; align-items: center;">
+                        <div style="position: relative;">
+                            <select id="outcomes-workflow-select" class="form-input" onchange="handleOutcomesWorkflowSelect(this.value)" style="width: 100%; background: rgba(15, 23, 42, 0.8); border-color: rgba(148, 163, 184, 0.3); padding-left: 2.2rem; font-weight: 500;">
+                                <option value="">-- Or choose an active workflow preset to auto-load rules --</option>
+                            </select>
+                            <span style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 1rem; pointer-events: none;">📂</span>
+                        </div>
+                        <div id="outcomes-active-filter-summary" style="font-size: 0.76rem; color: #94a3b8; display: flex; align-items: center; gap: 6px;">
+                            <span>Custom Filters Active</span>
+                        </div>
+                    </div>
+
+                    <!-- Filter Criteria Inputs Grid -->
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+                        <div>
+                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Market Cap Min ($)</label>
+                            <input type="number" id="outcomes-filter-min-mc" class="form-input" placeholder="e.g. 10000" style="width: 100%;">
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Market Cap Max ($)</label>
+                            <input type="number" id="outcomes-filter-max-mc" class="form-input" placeholder="e.g. 500000" style="width: 100%;">
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Token Age Min</label>
+                            <input type="text" id="outcomes-filter-min-age" class="form-input" placeholder="e.g. 5m, 1h, 2d" style="width: 100%;">
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Token Age Max</label>
+                            <input type="text" id="outcomes-filter-max-age" class="form-input" placeholder="e.g. 24h, 7d" style="width: 100%;">
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Age Kind</label>
+                            <select id="outcomes-filter-age-kind" class="form-input" style="width: 100%;">
+                                <option value="creation">Creation Age</option>
+                                <option value="migration">Migration Age</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Min Liquidity ($)</label>
+                            <input type="number" id="outcomes-filter-min-liq" class="form-input" placeholder="e.g. 5000" style="width: 100%;">
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Min 24h Volume ($)</label>
+                            <input type="number" id="outcomes-filter-min-vol" class="form-input" placeholder="e.g. 10000" style="width: 100%;">
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Migration Status</label>
+                            <select id="outcomes-filter-migrated" class="form-input" style="width: 100%;">
+                                <option value="all">Any Status</option>
+                                <option value="migrated">Migrated Only (Pump/Moonshot)</option>
+                                <option value="unmigrated">Unmigrated Bonding Curve</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Platform</label>
+                            <select id="outcomes-filter-platform" class="form-input" style="width: 100%;">
+                                <option value="all">Any Platform</option>
+                                <option value="raydium">Raydium</option>
+                                <option value="pumpfun">Pump.fun</option>
+                                <option value="moonshot">Moonshot</option>
+                                <option value="meteora">Meteora</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Exclude Platform</label>
+                            <select id="outcomes-filter-exclude-platform" class="form-input" style="width: 100%;">
+                                <option value="">None</option>
+                                <option value="pumpfun">Exclude Pump.fun</option>
+                                <option value="moonshot">Exclude Moonshot</option>
+                                <option value="raydium">Exclude Raydium</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Category</label>
+                            <select id="outcomes-filter-category" class="form-input" style="width: 100%;">
+                                <option value="all">Any Category</option>
+                                <option value="cto">Community Takeover (CTO)</option>
+                                <option value="boost">Boost</option>
+                                <option value="profile">Profile Update</option>
+                                <option value="ad">Ad Campaign</option>
+                                <option value="dex_paid">DEX Paid</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Name / Symbol Keywords</label>
+                            <input type="text" id="outcomes-filter-keywords" class="form-input" placeholder="e.g. trump, doge, pepe" style="width: 100%;">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Simulation Results Container -->
+                <div id="outcomes-results-container">
+                    <!-- KPI Banner Cards -->
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 1.5rem;">
+                        <div class="workflow-card" style="padding: 14px 16px;">
+                            <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Matched Signals</div>
+                            <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 4px;">
+                                <strong id="outcomes-kpi-matched-count" style="font-size: 1.4rem; color: #fff;">0</strong>
+                                <span id="outcomes-kpi-matched-rate" style="font-size: 0.75rem; color: #94a3b8;">(0% of 0)</span>
+                            </div>
+                        </div>
+                        <div class="workflow-card" style="padding: 14px 16px; border-color: rgba(16, 185, 129, 0.3); background: linear-gradient(135deg, rgba(16, 185, 129, 0.05), rgba(0,0,0,0.2));">
+                            <div style="font-size: 0.7rem; color: #34d399; text-transform: uppercase; letter-spacing: 0.05em;">Win Rate (≥ 2.0x)</div>
+                            <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 4px;">
+                                <strong id="outcomes-kpi-win-rate-2x" style="font-size: 1.4rem; color: #10b981;">0.0%</strong>
+                                <span id="outcomes-kpi-win-diff" style="font-size: 0.72rem; color: #6ee7b7;">—</span>
+                            </div>
+                        </div>
+                        <div class="workflow-card" style="padding: 14px 16px;">
+                            <div style="font-size: 0.7rem; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.05em;">Modest Win (≥ 1.5x)</div>
+                            <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 4px;">
+                                <strong id="outcomes-kpi-win-rate-15x" style="font-size: 1.4rem; color: #38bdf8;">0.0%</strong>
+                            </div>
+                        </div>
+                        <div class="workflow-card" style="padding: 14px 16px;">
+                            <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Avg 1h Peak</div>
+                            <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 4px;">
+                                <strong id="outcomes-kpi-avg-1h" style="font-size: 1.4rem; color: #f1f5f9;">0.00x</strong>
+                            </div>
+                        </div>
+                        <div class="workflow-card" style="padding: 14px 16px;">
+                            <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Avg Peak (Overall)</div>
+                            <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 4px;">
+                                <strong id="outcomes-kpi-avg-peak" style="font-size: 1.4rem; color: #a78bfa;">0.00x</strong>
+                            </div>
+                        </div>
+                        <div class="workflow-card" style="padding: 14px 16px;">
+                            <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Avg Drawdown</div>
+                            <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 4px;">
+                                <strong id="outcomes-kpi-drawdown" style="font-size: 1.4rem; color: #f87171;">-0.0%</strong>
+                            </div>
+                        </div>
+                        <div class="workflow-card" style="padding: 14px 16px; border-color: rgba(251, 191, 36, 0.3); background: linear-gradient(135deg, rgba(251, 191, 36, 0.05), rgba(0,0,0,0.2));">
+                            <div style="font-size: 0.7rem; color: #fbbf24; text-transform: uppercase; letter-spacing: 0.05em;">Top Moonshot</div>
+                            <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 4px;">
+                                <strong id="outcomes-kpi-top-moonshot" style="font-size: 1.4rem; color: #fbbf24;">—</strong>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Breakdown Columns: Donut Distribution + Trajectory Analysis -->
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; margin-bottom: 1.5rem;">
+                        <!-- Left: Peak Multiplier Tier Distribution -->
+                        <div class="workflow-card" style="padding: 1.25rem;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                                <div>
+                                    <h3 style="font-size: 0.95rem; font-weight: 700; margin: 0; color: var(--text-main);">Peak Multiplier Tiers</h3>
+                                    <p style="font-size: 0.72rem; color: var(--text-muted); margin: 2px 0 0;">Highest post-signal multiplier achieved within 4-hour window</p>
+                                </div>
+                                <span style="font-size: 0.74rem; color: var(--text-muted);">Tiers Distribution</span>
+                            </div>
+                            <div id="outcomes-tiers-container" style="display: flex; flex-direction: column; gap: 8px;">
+                                <!-- Dynamic tier rows inserted by JS -->
+                            </div>
+                        </div>
+
+                        <!-- Right: Post-Signal Trajectory Patterns -->
+                        <div class="workflow-card" style="padding: 1.25rem;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                                <div>
+                                    <h3 style="font-size: 0.95rem; font-weight: 700; margin: 0; color: var(--text-main);">Signal Trajectory Patterns</h3>
+                                    <p style="font-size: 0.72rem; color: var(--text-muted); margin: 2px 0 0;">How tokens behave immediately after workflow triggers</p>
+                                </div>
+                                <span style="font-size: 0.74rem; color: var(--text-muted);">Price Action Profile</span>
+                            </div>
+                            <div id="outcomes-trajectories-container" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                                <!-- Dynamic trajectory cards inserted by JS -->
+                            </div>
+                            <div id="outcomes-baseline-box" style="margin-top: 14px; padding: 10px 14px; border-radius: 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); font-size: 0.76rem; color: var(--text-muted); display: flex; align-items: center; justify-content: space-between;">
+                                <span>Filter Alpha vs Raw Universe:</span>
+                                <strong id="outcomes-baseline-text" style="color: #34d399;">+0.0% Win Rate Edge</strong>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Matched Signals Table Card -->
+                    <div class="workflow-card" style="padding: 1.25rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 10px;">
+                            <div>
+                                <h3 style="font-size: 0.95rem; font-weight: 700; margin: 0; color: var(--text-main);">Historical Matched Signals Roster</h3>
+                                <p style="font-size: 0.72rem; color: var(--text-muted); margin: 2px 0 0;">Inspect token details, exact peak prices, timing, and drawdowns</p>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <input type="text" id="outcomes-table-search" placeholder="Search token name or address…" class="form-input" oninput="filterOutcomesTable(this.value)" style="font-size: 0.78rem; padding: 5px 12px; width: 220px;">
+                                <span id="outcomes-table-count" class="status-badge" style="font-size: 0.72rem;">0 signals</span>
+                            </div>
+                        </div>
+
+                        <div class="table-container" style="overflow-x: auto;">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem;">
+                                <thead>
+                                    <tr style="border-bottom: 1px solid var(--border-color); text-align: left; color: var(--text-muted);">
+                                        <th style="padding: 10px 12px; font-weight: 600;">TOKEN</th>
+                                        <th style="padding: 10px 12px; font-weight: 600;">SIGNAL TIME</th>
+                                        <th style="padding: 10px 12px; font-weight: 600;">ENTRY MC</th>
+                                        <th style="padding: 10px 12px; font-weight: 600;">LIQUIDITY</th>
+                                        <th style="padding: 10px 12px; font-weight: 600;">1H PEAK</th>
+                                        <th style="padding: 10px 12px; font-weight: 600;">BEST PEAK</th>
+                                        <th style="padding: 10px 12px; font-weight: 600;">DRAWDOWN</th>
+                                        <th style="padding: 10px 12px; font-weight: 600;">TRAJECTORY</th>
+                                        <th style="padding: 10px 12px; font-weight: 600; text-align: right;">ACTION</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="outcomes-table-body">
+                                    <tr>
+                                        <td colspan="9" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                                            Click "Run Backtest" above to simulate outcomes for selected criteria.
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
             </div>
 

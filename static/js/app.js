@@ -161,7 +161,7 @@ async function readJsonResponse(response, endpointName) {
     return response.json();
 }
 
-const VALID_PAGE_TABS = ['dashboard', 'workflows', 'dex-validated', 'dex-validated-data', 'settings', 'wallet-tracker', 'token-data'];
+const VALID_PAGE_TABS = ['dashboard', 'workflows', 'outcomes', 'dex-validated', 'dex-validated-data', 'settings', 'wallet-tracker', 'token-data'];
 
 function getTabFromPathname(pathname) {
     const clean = String(pathname || '').replace(/^\/+|\/+$/g, '').toLowerCase();
@@ -213,6 +213,10 @@ function switchTab(tabId, options = {}) {
     if (tabId === 'workflows') {
         renderGrokFoldersTree();
         renderWorkflows();
+    }
+
+    if (tabId === 'outcomes') {
+        initOutcomesLabPage();
     }
 
     if (tabId === 'token-data') {
@@ -5875,6 +5879,585 @@ async function triggerManualOutcomeScan() {
     } catch (err) {
         alert(`Scan failed: ${err.message}`);
     }
+}
+
+/* ==========================================================================
+   OUTCOMES STRATEGY LAB (BACKTEST & HISTORICAL PEAKS)
+   ========================================================================== */
+
+let outcomesState = {
+    system: 'validated',
+    timeframe: 'week',
+    activeWorkflowId: null,
+    workflows: [],
+    lastResult: null,
+    tableSearch: '',
+    isLoading: false,
+    initialized: false
+};
+
+const OUTCOMES_TIER_CONFIG = {
+    '< 1.0x': { label: '< 1.0x (Loss / Dump)', color: '#64748b', bg: 'rgba(100, 116, 139, 0.15)', border: 'rgba(100, 116, 139, 0.3)' },
+    '1.0x - 1.5x': { label: '1.0x - 1.5x (Breakeven / Small)', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)', border: 'rgba(245, 158, 11, 0.3)' },
+    '1.5x - 2.0x': { label: '1.5x - 2.0x (Solid Win)', color: '#06b6d4', bg: 'rgba(6, 182, 212, 0.15)', border: 'rgba(6, 182, 212, 0.3)' },
+    '2.0x - 3.0x': { label: '2.0x - 3.0x (Double+)', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)', border: 'rgba(16, 185, 129, 0.3)' },
+    '3.0x - 5.0x': { label: '3.0x - 5.0x (Runner)', color: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.15)', border: 'rgba(139, 92, 246, 0.3)' },
+    '≥ 5.0x': { label: '≥ 5.0x (Moonshot)', color: '#fbbf24', bg: 'rgba(251, 191, 36, 0.18)', border: 'rgba(251, 191, 36, 0.4)' }
+};
+
+const OUTCOMES_TRAJECTORY_CONFIG = {
+    'direct_pump': { label: 'Direct Pump', icon: '🚀', desc: 'Surged immediately without major pullback', color: '#10b981' },
+    'dip_then_pump': { label: 'Dip then Pump', icon: '📈', desc: 'Experienced early shakeout before running to peak', color: '#f59e0b' },
+    'pump_then_dump': { label: 'Pump then Dump', icon: '📉', desc: 'Short initial spike followed by severe dump', color: '#f97316' },
+    'straight_dump': { label: 'Straight Dump', icon: '💀', desc: 'Immediate sell-off right after signal', color: '#64748b' }
+};
+
+async function initOutcomesLabPage() {
+    if (!outcomesState.initialized) {
+        outcomesState.initialized = true;
+        await loadOutcomesWorkflows();
+        await runOutcomesSimulation();
+    } else if (!outcomesState.lastResult) {
+        await runOutcomesSimulation();
+    }
+}
+
+async function loadOutcomesWorkflows() {
+    try {
+        const res = await fetch('/api/outcomes/workflows');
+        const data = await res.json();
+        if (data.success && Array.isArray(data.workflows)) {
+            outcomesState.workflows = data.workflows;
+            const selectEl = document.getElementById('outcomes-workflow-select');
+            if (selectEl) {
+                let html = '<option value="">-- Or choose an active workflow preset to auto-load rules --</option>';
+                data.workflows.forEach(wf => {
+                    const statusTag = wf.is_active ? '' : ' (Paused)';
+                    const sysTag = wf.system ? ` [${wf.system.toUpperCase()}]` : '';
+                    html += `<option value="${wf.id}">${escapeHtml(wf.name)}${sysTag}${statusTag}</option>`;
+                });
+                selectEl.innerHTML = html;
+            }
+        }
+    } catch (err) {
+        console.warn('Failed to load workflows for Outcomes Lab:', err);
+    }
+}
+
+function setOutcomesSystem(sys, triggerSim = true) {
+    outcomesState.system = sys;
+    ['validated', 'paid', 'all'].forEach(s => {
+        const el = document.getElementById(`outcomes-sys-${s}`);
+        if (el) {
+            if (s === sys) el.classList.add('active');
+            else el.classList.remove('active');
+        }
+    });
+    if (triggerSim) runOutcomesSimulation();
+}
+
+function setOutcomesTimeframe(tf, triggerSim = true) {
+    outcomesState.timeframe = tf;
+    ['day', 'week', 'month', 'all'].forEach(t => {
+        const el = document.getElementById(`outcomes-tf-${t}`);
+        if (el) {
+            if (t === tf) el.classList.add('active');
+            else el.classList.remove('active');
+        }
+    });
+    if (triggerSim) runOutcomesSimulation();
+}
+
+function handleOutcomesWorkflowSelect(wfId) {
+    outcomesState.activeWorkflowId = wfId || null;
+    const summaryEl = document.getElementById('outcomes-active-filter-summary');
+
+    if (!wfId) {
+        if (summaryEl) summaryEl.innerHTML = '<span>Custom Filters Active</span>';
+        runOutcomesSimulation();
+        return;
+    }
+
+    const wf = outcomesState.workflows.find(w => String(w.id) === String(wfId));
+    if (!wf) return;
+
+    if (wf.system && ['validated', 'paid', 'all'].includes(wf.system)) {
+        setOutcomesSystem(wf.system, false);
+    }
+
+    const rules = wf.rules || {};
+    const minMcEl = document.getElementById('outcomes-filter-min-mc');
+    const maxMcEl = document.getElementById('outcomes-filter-max-mc');
+    const minAgeEl = document.getElementById('outcomes-filter-min-age');
+    const maxAgeEl = document.getElementById('outcomes-filter-max-age');
+    const ageKindEl = document.getElementById('outcomes-filter-age-kind');
+    const minLiqEl = document.getElementById('outcomes-filter-min-liq');
+    const minVolEl = document.getElementById('outcomes-filter-min-vol');
+    const migratedEl = document.getElementById('outcomes-filter-migrated');
+    const platformEl = document.getElementById('outcomes-filter-platform');
+    const exclPlatformEl = document.getElementById('outcomes-filter-exclude-platform');
+    const categoryEl = document.getElementById('outcomes-filter-category');
+    const keywordsEl = document.getElementById('outcomes-filter-keywords');
+
+    if (minMcEl) minMcEl.value = rules.min_market_cap !== undefined ? rules.min_market_cap : '';
+    if (maxMcEl) maxMcEl.value = rules.max_market_cap !== undefined ? rules.max_market_cap : '';
+    if (minAgeEl) minAgeEl.value = rules.min_age || '';
+    if (maxAgeEl) maxAgeEl.value = rules.max_age || '';
+    if (ageKindEl) ageKindEl.value = rules.age_kind || 'creation';
+    if (minLiqEl) minLiqEl.value = rules.min_liquidity !== undefined ? rules.min_liquidity : '';
+    if (minVolEl) minVolEl.value = rules.min_volume !== undefined ? rules.min_volume : '';
+    if (categoryEl) categoryEl.value = rules.category || 'all';
+    if (keywordsEl) keywordsEl.value = rules.name_regex || rules.keywords || '';
+
+    if (migratedEl) {
+        if (rules.migrated === true) migratedEl.value = 'migrated';
+        else if (rules.migrated === false) migratedEl.value = 'unmigrated';
+        else migratedEl.value = 'all';
+    }
+
+    if (platformEl) platformEl.value = rules.platform || 'all';
+    if (exclPlatformEl) exclPlatformEl.value = rules.exclude_platform || '';
+
+    if (summaryEl) {
+        summaryEl.innerHTML = `<span style="color: #c084fc; font-weight: 600;">✓ Auto-loaded rules from "${escapeHtml(wf.name)}"</span>`;
+    }
+
+    runOutcomesSimulation();
+}
+
+function resetOutcomesFilters() {
+    outcomesState.activeWorkflowId = null;
+    const wfSelect = document.getElementById('outcomes-workflow-select');
+    if (wfSelect) wfSelect.value = '';
+
+    const ids = [
+        'outcomes-filter-min-mc', 'outcomes-filter-max-mc',
+        'outcomes-filter-min-age', 'outcomes-filter-max-age',
+        'outcomes-filter-min-liq', 'outcomes-filter-min-vol',
+        'outcomes-filter-keywords'
+    ];
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+
+    const selects = {
+        'outcomes-filter-age-kind': 'creation',
+        'outcomes-filter-migrated': 'all',
+        'outcomes-filter-platform': 'all',
+        'outcomes-filter-exclude-platform': '',
+        'outcomes-filter-category': 'all'
+    };
+    Object.entries(selects).forEach(([id, val]) => {
+        const el = document.getElementById(id);
+        if (el) el.value = val;
+    });
+
+    const summaryEl = document.getElementById('outcomes-active-filter-summary');
+    if (summaryEl) summaryEl.innerHTML = '<span>All filters cleared</span>';
+
+    runOutcomesSimulation();
+}
+
+async function runOutcomesSimulation() {
+    if (outcomesState.isLoading) return;
+    outcomesState.isLoading = true;
+
+    const runBtn = document.getElementById('outcomes-run-btn');
+    if (runBtn) {
+        runBtn.disabled = true;
+        runBtn.innerHTML = `
+            <svg class="animate-spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation: spin 1s linear infinite;">
+                <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
+                <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="0.85"></path>
+            </svg>
+            <span>Simulating...</span>
+        `;
+    }
+
+    try {
+        const minMc = parseFloat(document.getElementById('outcomes-filter-min-mc')?.value);
+        const maxMc = parseFloat(document.getElementById('outcomes-filter-max-mc')?.value);
+        const minAge = document.getElementById('outcomes-filter-min-age')?.value?.trim();
+        const maxAge = document.getElementById('outcomes-filter-max-age')?.value?.trim();
+        const ageKind = document.getElementById('outcomes-filter-age-kind')?.value;
+        const minLiq = parseFloat(document.getElementById('outcomes-filter-min-liq')?.value);
+        const minVol = parseFloat(document.getElementById('outcomes-filter-min-vol')?.value);
+        const migratedVal = document.getElementById('outcomes-filter-migrated')?.value;
+        const platform = document.getElementById('outcomes-filter-platform')?.value;
+        const excludePlatform = document.getElementById('outcomes-filter-exclude-platform')?.value;
+        const category = document.getElementById('outcomes-filter-category')?.value;
+        const keywords = document.getElementById('outcomes-filter-keywords')?.value?.trim();
+
+        const customFilters = {};
+        if (!isNaN(minMc) && minMc > 0) customFilters.min_market_cap = minMc;
+        if (!isNaN(maxMc) && maxMc > 0) customFilters.max_market_cap = maxMc;
+        if (minAge) customFilters.min_age = minAge;
+        if (maxAge) customFilters.max_age = maxAge;
+        if (ageKind) customFilters.age_kind = ageKind;
+        if (!isNaN(minLiq) && minLiq > 0) customFilters.min_liquidity = minLiq;
+        if (!isNaN(minVol) && minVol > 0) customFilters.min_volume = minVol;
+        if (migratedVal === 'migrated') customFilters.migrated = true;
+        else if (migratedVal === 'unmigrated') customFilters.migrated = false;
+        if (platform && platform !== 'all') customFilters.platform = platform;
+        if (excludePlatform) customFilters.exclude_platform = excludePlatform;
+        if (category && category !== 'all') customFilters.category = category;
+        if (keywords) customFilters.keywords = keywords;
+
+        const payload = {
+            system: outcomesState.system,
+            timeframe: outcomesState.timeframe,
+            workflow_id: outcomesState.activeWorkflowId || null,
+            custom_filters: customFilters
+        };
+
+        const res = await fetch('/api/outcomes/simulate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (data.success) {
+            outcomesState.lastResult = data;
+            renderOutcomesSimulationResults(data);
+        } else {
+            console.error('Simulation error:', data.error);
+            if (typeof showAppToast === 'function') {
+                showAppToast(data.error || 'Simulation failed', 'error');
+            }
+        }
+    } catch (err) {
+        console.error('Error running outcome simulation:', err);
+    } finally {
+        outcomesState.isLoading = false;
+        if (runBtn) {
+            runBtn.disabled = false;
+            runBtn.innerHTML = `
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                <span>Run Backtest</span>
+            `;
+        }
+    }
+}
+
+function renderOutcomesSimulationResults(data) {
+    if (!data) return;
+
+    const matchedCount = data.matched_count ?? data.matched_signals ?? 0;
+    const totalCandidates = data.total_candidates ?? data.total_candidates_tested ?? 0;
+    const matchRate = data.match_rate_pct ?? (totalCandidates > 0 ? (matchedCount / totalCandidates) * 100 : 0);
+    const win2x = data.win_rate_2x ?? 0;
+    const win15x = data.win_rate_1_5x ?? 0;
+    const avg1h = data.avg_peak_1h ?? data.avg_peak_multiplier_1h ?? 1.0;
+    const avgPeak = data.avg_peak_4h ?? data.avg_peak_multiplier ?? 1.0;
+    const avgDd = data.avg_pre_peak_dd_pct ?? data.avg_drawdown_pct ?? 0.0;
+
+    // 1. KPI Cards
+    const kpiMatched = document.getElementById('outcomes-kpi-matched-count');
+    const kpiRate = document.getElementById('outcomes-kpi-matched-rate');
+    const kpiWin2x = document.getElementById('outcomes-kpi-win-rate-2x');
+    const kpiWinDiff = document.getElementById('outcomes-kpi-win-diff');
+    const kpiWin15x = document.getElementById('outcomes-kpi-win-rate-15x');
+    const kpi1h = document.getElementById('outcomes-kpi-avg-1h');
+    const kpiPeak = document.getElementById('outcomes-kpi-avg-peak');
+    const kpiDd = document.getElementById('outcomes-kpi-drawdown');
+    const kpiMoonshot = document.getElementById('outcomes-kpi-top-moonshot');
+
+    if (kpiMatched) kpiMatched.textContent = matchedCount.toLocaleString();
+    if (kpiRate) kpiRate.textContent = `(${matchRate.toFixed(1)}% of ${totalCandidates.toLocaleString()})`;
+    if (kpiWin2x) kpiWin2x.textContent = `${win2x.toFixed(1)}%`;
+
+    const rawWin = data.baseline?.win_rate_2x ?? win2x;
+    const edge = Number(win2x - rawWin);
+    if (kpiWinDiff) {
+        const sign = edge >= 0 ? '+' : '';
+        kpiWinDiff.textContent = `${sign}${edge.toFixed(1)}% vs raw`;
+        kpiWinDiff.style.color = edge >= 0 ? '#34d399' : '#f87171';
+    }
+
+    if (kpiWin15x) kpiWin15x.textContent = `${win15x.toFixed(1)}%`;
+    if (kpi1h) kpi1h.textContent = `${avg1h.toFixed(2)}x`;
+    if (kpiPeak) kpiPeak.textContent = `${avgPeak.toFixed(2)}x`;
+    if (kpiDd) kpiDd.textContent = `${avgDd.toFixed(1)}%`;
+
+    if (kpiMoonshot) {
+        const bestName = data.best_token_name || data.top_moonshot?.symbol || data.top_moonshot?.name;
+        const bestPeak = data.best_token_peak ?? data.top_moonshot?.peak_multiplier;
+        if (bestName && bestName !== 'None') {
+            const sym = escapeHtml(bestName);
+            const mult = Number(bestPeak || 1.0).toFixed(1);
+            kpiMoonshot.innerHTML = `<span style="font-size: 1.1rem; color: #fbbf24;" title="${sym}">${sym}</span> <span style="font-size: 0.85rem; color: #fde68a;">${mult}x</span>`;
+        } else {
+            kpiMoonshot.textContent = '—';
+        }
+    }
+
+    // 2. Multiplier Tiers Container
+    const tiersContainer = document.getElementById('outcomes-tiers-container');
+    if (tiersContainer) {
+        const rawTiers = data.tier_stats || data.tiers || {};
+        // Standardize tiers list
+        const tiersList = [
+            { key: '< 1.0x', count: rawTiers.lt_1x ?? rawTiers['< 1.0x']?.count ?? 0, pct: rawTiers.lt_1x_pct ?? rawTiers['< 1.0x']?.pct ?? 0 },
+            { key: '1.0x - 1.5x', count: rawTiers['1x_1_5x'] ?? rawTiers['1.0x - 1.5x']?.count ?? 0, pct: rawTiers['1x_1_5x_pct'] ?? rawTiers['1.0x - 1.5x']?.pct ?? 0 },
+            { key: '1.5x - 2.0x', count: rawTiers['1_5x_2x'] ?? rawTiers['1.5x - 2.0x']?.count ?? 0, pct: rawTiers['1_5x_2x_pct'] ?? rawTiers['1.5x - 2.0x']?.pct ?? 0 },
+            { key: '2.0x - 3.0x', count: rawTiers['2x_3x'] ?? rawTiers['2.0x - 3.0x']?.count ?? 0, pct: rawTiers['2x_3x_pct'] ?? rawTiers['2.0x - 3.0x']?.pct ?? 0 },
+            { key: '3.0x - 5.0x', count: rawTiers['3x_5x'] ?? rawTiers['3.0x - 5.0x']?.count ?? 0, pct: rawTiers['3x_5x_pct'] ?? rawTiers['3.0x - 5.0x']?.pct ?? 0 },
+            { key: '≥ 5.0x', count: rawTiers.5x_plus ?? rawTiers['≥ 5.0x']?.count ?? 0, pct: rawTiers.5x_plus_pct ?? rawTiers['≥ 5.0x']?.pct ?? 0 }
+        ];
+
+        let tiersHtml = '';
+        tiersList.forEach(tier => {
+            const cfg = OUTCOMES_TIER_CONFIG[tier.key] || { label: tier.key, color: '#94a3b8' };
+            const pct = Number(tier.pct || 0);
+            const count = Number(tier.count || 0);
+
+            tiersHtml += `
+                <div style="background: rgba(15, 23, 42, 0.5); border: 1px solid var(--border-color); border-radius: 8px; padding: 9px 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: ${cfg.color};"></span>
+                            <span style="font-size: 0.78rem; font-weight: 600; color: #f1f5f9;">${cfg.label}</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 0.8rem; font-weight: 700; color: ${cfg.color};">${count}</span>
+                            <span style="font-size: 0.72rem; color: var(--text-muted); min-width: 42px; text-align: right;">(${pct.toFixed(1)}%)</span>
+                        </div>
+                    </div>
+                    <div style="width: 100%; height: 6px; background: rgba(255, 255, 255, 0.06); border-radius: 3px; overflow: hidden;">
+                        <div style="width: ${Math.min(100, Math.max(0, pct))}%; height: 100%; background: ${cfg.color}; border-radius: 3px; transition: width 0.4s ease;"></div>
+                    </div>
+                </div>
+            `;
+        });
+        tiersContainer.innerHTML = tiersHtml;
+    }
+
+    // 3. Trajectory Breakdown
+    const trajContainer = document.getElementById('outcomes-trajectories-container');
+    if (trajContainer) {
+        const rawTraj = data.trajectories || {};
+        const trajList = [
+            { key: 'direct_pump', count: rawTraj.direct_pump?.count ?? rawTraj.direct_pump ?? 0, pct: rawTraj.direct_pump?.pct ?? rawTraj.direct_pump_pct ?? 0 },
+            { key: 'dip_then_pump', count: rawTraj.dip_then_pump?.count ?? rawTraj.dip_then_pump ?? 0, pct: rawTraj.dip_then_pump?.pct ?? rawTraj.dip_then_pump_pct ?? 0 },
+            { key: 'pump_then_dump', count: rawTraj.pump_then_dump?.count ?? rawTraj.pump_then_dump ?? 0, pct: rawTraj.pump_then_dump?.pct ?? rawTraj.pump_then_dump_pct ?? 0 },
+            { key: 'straight_dump', count: rawTraj.straight_dump?.count ?? rawTraj.straight_dump ?? 0, pct: rawTraj.straight_dump?.pct ?? rawTraj.straight_dump_pct ?? 0 }
+        ];
+
+        let trajHtml = '';
+        trajList.forEach(traj => {
+            const cfg = OUTCOMES_TRAJECTORY_CONFIG[traj.key] || { label: traj.key, icon: '📊', desc: '', color: '#94a3b8' };
+            const count = Number(traj.count || 0);
+            const pct = Number(traj.pct || 0);
+
+            trajHtml += `
+                <div style="background: rgba(15, 23, 42, 0.5); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; justify-content: space-between;">
+                    <div>
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                            <span style="font-size: 0.82rem; font-weight: 600; color: #f1f5f9; display: flex; align-items: center; gap: 6px;">
+                                <span>${cfg.icon}</span> ${cfg.label}
+                            </span>
+                            <strong style="font-size: 0.85rem; color: ${cfg.color};">${count} (${pct.toFixed(0)}%)</strong>
+                        </div>
+                        <p style="font-size: 0.7rem; color: var(--text-muted); margin: 0; line-height: 1.3;">${cfg.desc}</p>
+                    </div>
+                </div>
+            `;
+        });
+        trajContainer.innerHTML = trajHtml;
+    }
+
+    // Baseline text
+    const baselineText = document.getElementById('outcomes-baseline-text');
+    if (baselineText) {
+        const sign = edge >= 0 ? '+' : '';
+        baselineText.textContent = `${sign}${edge.toFixed(1)}% Win Rate Edge (Filters: ${win2x.toFixed(1)}% vs Universe: ${rawWin.toFixed(1)}%)`;
+        baselineText.style.color = edge >= 0 ? '#34d399' : '#f87171';
+    }
+
+    // 4. Matched Signals Table
+    renderOutcomesTable(data.tokens || data.matched_tokens || []);
+}
+
+function filterOutcomesTable(term) {
+    outcomesState.tableSearch = (term || '').toLowerCase().trim();
+    const tokenList = outcomesState.lastResult?.tokens || outcomesState.lastResult?.matched_tokens || [];
+    renderOutcomesTable(tokenList);
+}
+
+function renderOutcomesTable(tokens) {
+    const tbody = document.getElementById('outcomes-table-body');
+    const countBadge = document.getElementById('outcomes-table-count');
+    if (!tbody) return;
+
+    let filtered = tokens;
+    if (outcomesState.tableSearch) {
+        const q = outcomesState.tableSearch;
+        filtered = tokens.filter(t => 
+            ((t.symbol || t.name || '').toLowerCase().includes(q)) ||
+            ((t.ca || t.token_address || '').toLowerCase().includes(q)) ||
+            ((t.platform || '').toLowerCase().includes(q))
+        );
+    }
+
+    if (countBadge) {
+        countBadge.textContent = `${filtered.length} of ${tokens.length} signals`;
+    }
+
+    if (!filtered || filtered.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="9" style="text-align: center; padding: 2.5rem; color: var(--text-muted);">
+                    ${tokens.length === 0 ? 'No historical signals matched your selected filters.' : 'No tokens matched the search query.'}
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    let rowsHtml = '';
+    filtered.forEach(t => {
+        const sym = escapeHtml(t.symbol || t.name || 'TOKEN');
+        const name = escapeHtml(t.name || t.symbol || '');
+        const addr = escapeHtml(t.ca || t.token_address || '');
+        const shortAddr = addr ? `${addr.slice(0, 4)}...${addr.slice(-4)}` : '';
+        const platform = escapeHtml(t.platform || 'solana');
+        const eventType = escapeHtml(t.signal_type || t.event_type || t.source_system || '');
+
+        const entryMcFormatted = formatCompactMc(t.market_cap || t.entry_mc);
+        const liqFormatted = formatCompactMc(t.liquidity_usd || t.liquidity);
+        
+        // 1h peak badge
+        const mult1h = Number(t.peak_mult_1h || 1.0);
+        let badge1hColor = '#94a3b8';
+        let badge1hBg = 'rgba(148, 163, 184, 0.12)';
+        if (mult1h >= 2.0) { badge1hColor = '#10b981'; badge1hBg = 'rgba(16, 185, 129, 0.16)'; }
+        else if (mult1h >= 1.5) { badge1hColor = '#06b6d4'; badge1hBg = 'rgba(6, 182, 212, 0.16)'; }
+        else if (mult1h >= 1.05) { badge1hColor = '#f59e0b'; badge1hBg = 'rgba(245, 158, 11, 0.16)'; }
+        else { badge1hColor = '#64748b'; badge1hBg = 'rgba(100, 116, 139, 0.16)'; }
+
+        // Best peak badge (4h or best)
+        const bestMult = Number(t.peak_mult_4h || t.best_peak_multiplier || mult1h);
+        let bestColor = '#94a3b8';
+        let bestBg = 'rgba(148, 163, 184, 0.12)';
+        if (bestMult >= 5.0) { bestColor = '#fbbf24'; bestBg = 'rgba(251, 191, 36, 0.18)'; }
+        else if (bestMult >= 3.0) { bestColor = '#8b5cf6'; bestBg = 'rgba(139, 92, 246, 0.16)'; }
+        else if (bestMult >= 2.0) { bestColor = '#10b981'; bestBg = 'rgba(16, 185, 129, 0.16)'; }
+        else if (bestMult >= 1.5) { bestColor = '#06b6d4'; bestBg = 'rgba(6, 182, 212, 0.16)'; }
+        else if (bestMult >= 1.05) { bestColor = '#f59e0b'; bestBg = 'rgba(245, 158, 11, 0.16)'; }
+        else { bestColor = '#64748b'; bestBg = 'rgba(100, 116, 139, 0.16)'; }
+
+        // Drawdown
+        const ddNum = Number(t.pre_peak_dd_1h_pct ?? t.min_drawdown_pct ?? 0);
+        const ddColor = ddNum < -50 ? '#ef4444' : (ddNum < -20 ? '#fb923c' : '#94a3b8');
+
+        // Trajectory
+        const trajCode = String(t.path_1h || t.trajectory || '').toLowerCase();
+        const trajCfg = OUTCOMES_TRAJECTORY_CONFIG[trajCode] || { label: trajCode || 'Flat', icon: '•', color: '#94a3b8' };
+
+        // Signal time
+        const eventSec = t.event_epoch_seconds || (t.event_ts ? Math.floor(new Date(t.event_ts).getTime() / 1000) : (t.timestamp ? Math.floor(new Date(t.timestamp).getTime() / 1000) : 0));
+        const relTime = eventSec ? formatRelativeTime(eventSec) : (t.age || '—');
+
+        rowsHtml += `
+            <tr style="border-bottom: 1px solid var(--border-color); transition: background 0.15s ease;" onmouseover="this.style.background='rgba(255,255,255,0.02)'" onmouseout="this.style.background='transparent'">
+                <td style="padding: 10px 12px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <div>
+                            <div style="font-weight: 700; color: #f1f5f9; display: flex; align-items: center; gap: 6px;">
+                                <span>${sym}</span>
+                                <span style="font-size: 0.68rem; color: #67e8f9; background: rgba(6,182,212,0.12); padding: 1px 5px; border-radius: 4px;">${platform}</span>
+                            </div>
+                            <div style="font-size: 0.72rem; color: var(--text-muted); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${name}">${name}</div>
+                            ${shortAddr ? `<div style="font-size: 0.68rem; color: #64748b; font-family: monospace; cursor: pointer;" onclick="copyToClipboard('${addr}')" title="Click to copy">${shortAddr} 📋</div>` : ''}
+                        </div>
+                    </div>
+                </td>
+                <td style="padding: 10px 12px; white-space: nowrap;">
+                    <div style="color: #cbd5e1; font-weight: 500;">${relTime}</div>
+                    <div style="font-size: 0.7rem; color: var(--text-muted);">${eventType}</div>
+                </td>
+                <td style="padding: 10px 12px; font-weight: 600; color: #e2e8f0;">
+                    ${entryMcFormatted}
+                </td>
+                <td style="padding: 10px 12px; color: var(--text-muted);">
+                    ${liqFormatted}
+                </td>
+                <td style="padding: 10px 12px;">
+                    <div style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 5px; background: ${badge1hBg}; color: ${badge1hColor}; font-weight: 700;">
+                        <span>${mult1h > 0 ? mult1h.toFixed(2) + 'x' : '—'}</span>
+                    </div>
+                </td>
+                <td style="padding: 10px 12px;">
+                    <div style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 5px; background: ${bestBg}; color: ${bestColor}; font-weight: 700;">
+                        <span>${bestMult > 0 ? bestMult.toFixed(2) + 'x' : '—'}</span>
+                    </div>
+                </td>
+                <td style="padding: 10px 12px; font-weight: 600; color: ${ddColor};">
+                    ${ddNum !== 0 ? ddNum.toFixed(1) + '%' : '0.0%'}
+                </td>
+                <td style="padding: 10px 12px;">
+                    <span style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.72rem; color: ${trajCfg.color}; font-weight: 600;">
+                        <span>${trajCfg.icon}</span>
+                        <span>${trajCfg.label}</span>
+                    </span>
+                </td>
+                <td style="padding: 10px 12px; text-align: right;">
+                    ${addr ? `
+                        <button type="button" class="btn-primary" onclick="window.open('https://dexscreener.com/solana/${addr}', '_blank')" style="padding: 3px 8px; font-size: 0.72rem; background: rgba(6,182,212,0.12); border: 1px solid rgba(6,182,212,0.3); color: #67e8f9; box-shadow: none;">
+                            DexScreener ↗
+                        </button>
+                    ` : '—'}
+                </td>
+            </tr>
+        `;
+    });
+
+    tbody.innerHTML = rowsHtml;
+}
+
+function exportOutcomesCSV() {
+    const tokens = outcomesState.lastResult?.tokens || outcomesState.lastResult?.matched_tokens;
+    if (!tokens || !Array.isArray(tokens) || tokens.length === 0) {
+        if (typeof showAppToast === 'function') {
+            showAppToast('No simulation outcome data available to export.', 'warning');
+        } else {
+            alert('No simulation outcome data available to export.');
+        }
+        return;
+    }
+
+    const headers = [
+        'Symbol', 'Name', 'Address', 'Platform', 'Signal Type', 'Timestamp',
+        'Entry MC', 'Liquidity', 'Volume 24h', '1h Peak Mult', '4h Peak Mult',
+        'Pre Peak DD %', 'Trajectory'
+    ];
+
+    const rows = tokens.map(t => [
+        `"${(t.symbol || t.name || '').replace(/"/g, '""')}"`,
+        `"${(t.name || '').replace(/"/g, '""')}"`,
+        `"${t.ca || t.token_address || ''}"`,
+        `"${t.platform || ''}"`,
+        `"${t.signal_type || t.event_type || ''}"`,
+        `"${t.event_ts || t.timestamp || ''}"`,
+        t.market_cap || t.entry_mc || 0,
+        t.liquidity_usd || t.liquidity || 0,
+        t.volume_24h || 0,
+        t.peak_mult_1h || 1.0,
+        t.peak_mult_4h || 1.0,
+        t.pre_peak_dd_1h_pct ?? t.min_drawdown_pct ?? 0,
+        `"${t.path_1h || t.trajectory || ''}"`
+    ]);
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `outcomes_simulation_${outcomesState.system}_${outcomesState.timeframe}_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }
 
 loadPerformanceScannerStatus();
