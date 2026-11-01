@@ -6327,6 +6327,58 @@ def _fetch_dexscreener_pools_batch_sync(ca_list):
     return result_map
 
 
+def _fetch_geckoterminal_pool_direct_sync(ca):
+    """Fallback: Fetch primary pool and meta directly from GeckoTerminal token pools endpoint."""
+    if not ca:
+        return None
+    cache_key = f"pool_{ca}"
+    cached = _cache_ohlcv_get(cache_key)
+    if cached is not None:
+        return cached if cached != 'NONE' else None
+
+    url = f"https://api.geckoterminal.com/api/v2/networks/solana/tokens/{ca}/pools"
+    headers = {'Accept': 'application/json;version=20230302'}
+    try:
+        res = requests.get(url, headers=headers, timeout=12)
+        if res.status_code == 429:
+            time.sleep(6.0)
+            res = requests.get(url, headers=headers, timeout=12)
+        if res.status_code == 404:
+            _cache_ohlcv_set(cache_key, 'NONE')
+            return None
+        if res.status_code != 200:
+            return None
+        data = res.json().get('data') or []
+        if not data:
+            _cache_ohlcv_set(cache_key, 'NONE')
+            return None
+
+        pools = []
+        for p in data[:3]:
+            pid = str(p.get('id') or '').replace('solana_', '')
+            if pid and pid not in pools:
+                pools.append(pid)
+
+        top = data[0].get('attributes') or {}
+        price_now = float(top.get('base_token_price_usd') or 0.0)
+        fdv_usd = float(top.get('fdv_usd') or 0.0)
+        reserve_usd = float(top.get('reserve_in_usd') or 0.0)
+        mc_now = fdv_usd if fdv_usd > 0 else (reserve_usd * 2.0 if reserve_usd > 0 else 0.0)
+        supply = (mc_now / price_now) if (mc_now > 0 and price_now > 0) else 1_000_000_000.0
+
+        meta = {
+            'pools': pools,
+            'mc_now': mc_now,
+            'price_now': price_now,
+            'supply': supply
+        }
+        _cache_ohlcv_set(cache_key, meta)
+        return meta
+    except Exception as e:
+        debug_log(f"[PERF SCANNER] GeckoTerminal direct pool lookup error for {ca}: {e}")
+        return None
+
+
 async def _fetch_geckoterminal_ohlcv(pool_address, t0, now_ts):
     """Fetch chronological 1m OHLCV candles from GeckoTerminal free v2 API covering [t0, t0 + 4h] (with 5m/15m/1h fallback for older tokens)."""
     if not pool_address:
@@ -6339,17 +6391,12 @@ async def _fetch_geckoterminal_ohlcv(pool_address, t0, now_ts):
         return cached
 
     headers = {'Accept': 'application/json;version=20230302'}
-    age_days = (now_ts - t0) / 86400.0
-    endpoints = []
-    # Primary: 1-minute candles (limit=300 covers 300 minutes = 5 hours in a single call, capturing the exact signal minute)
-    if age_days <= 5.0:
-        endpoints.append(f"https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool_address}/ohlcv/minute?aggregate=1&before_timestamp={before_ts}&limit=300")
-    elif age_days <= 12.0:
-        endpoints.append(f"https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool_address}/ohlcv/minute?aggregate=5&before_timestamp={before_ts + 600}&limit=100")
-    elif age_days <= 25.0:
-        endpoints.append(f"https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool_address}/ohlcv/minute?aggregate=15&before_timestamp={before_ts + 900}&limit=100")
-    else:
-        endpoints.append(f"https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool_address}/ohlcv/hour?aggregate=1&before_timestamp={before_ts + 3600}&limit=100")
+    endpoints = [
+        f"https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool_address}/ohlcv/minute?aggregate=1&before_timestamp={before_ts}&limit=300",
+        f"https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool_address}/ohlcv/minute?aggregate=5&before_timestamp={before_ts + 600}&limit=100",
+        f"https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool_address}/ohlcv/minute?aggregate=15&before_timestamp={before_ts + 900}&limit=100",
+        f"https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool_address}/ohlcv/hour?aggregate=1&before_timestamp={before_ts + 3600}&limit=100"
+    ]
 
     t0_min = (int(t0) // 60) * 60
     for url in endpoints:
@@ -6571,6 +6618,7 @@ async def scan_post_signal_performance_batch(max_rows_per_table=60):
                   AND (
                       (COALESCE(perf_checked_stage, 0) = 0 AND ({now_ts} - {dv_ts_expr}) >= 3600)
                       OR (COALESCE(perf_checked_stage, 0) = 1 AND ({now_ts} - {dv_ts_expr}) >= 14400)
+                      OR (COALESCE(perf_checked_stage, 0) = 2 AND (min_mc_1h IS NULL OR COALESCE(min_mc_1h, 0) = 0))
                   )
                 ORDER BY id DESC
                 LIMIT ?
@@ -6600,6 +6648,7 @@ async def scan_post_signal_performance_batch(max_rows_per_table=60):
                   AND (
                       (COALESCE(perf_checked_stage, 0) = 0 AND ({now_ts} - {wp_ts_expr}) >= 3600)
                       OR (COALESCE(perf_checked_stage, 0) = 1 AND ({now_ts} - {wp_ts_expr}) >= 14400)
+                      OR (COALESCE(perf_checked_stage, 0) = 2 AND (min_mc_1h IS NULL OR COALESCE(min_mc_1h, 0) = 0))
                   )
                 ORDER BY id DESC
                 LIMIT ?
@@ -6622,6 +6671,43 @@ async def scan_post_signal_performance_batch(max_rows_per_table=60):
             elif perf_scanner_runtime.get('backfill_wallet_payments', False):
                 due_items.extend(wp_list)
 
+        # Fallback to Supabase for older wallet_payments rows not loaded in SQLite
+        if not due_items and supabase_client and perf_scanner_runtime.get('backfill_wallet_payments', False):
+            try:
+                res_sb = supabase_client.table('wallet_payments').select(
+                    'id, ca, market_cap, signature, timestamp, created_at, perf_checked_stage, max_mc_1h, peak_mult_1h, min_mc_1h, min_dd_1h_pct, pre_peak_low_mc_1h, pre_peak_dd_1h_pct, path_1h'
+                ).eq('perf_checked_stage', 2).eq('min_mc_1h', 0).order('id', desc=True).limit(max_rows_per_table).execute()
+                if not res_sb.data:
+                    res_sb = supabase_client.table('wallet_payments').select(
+                        'id, ca, market_cap, signature, timestamp, created_at, perf_checked_stage, max_mc_1h, peak_mult_1h, min_mc_1h, min_dd_1h_pct, pre_peak_low_mc_1h, pre_peak_dd_1h_pct, path_1h'
+                    ).lt('perf_checked_stage', 2).order('id', desc=True).limit(max_rows_per_table).execute()
+                for r in (res_sb.data or []):
+                    ts = r.get('timestamp') or 0
+                    if ts > 1000000000000:
+                        ev_ts = ts / 1000
+                    elif ts > 0:
+                        ev_ts = ts
+                    else:
+                        ev_ts = 0
+                    due_items.append({
+                        'id': r['id'],
+                        'ca': r.get('ca'),
+                        'market_cap': r.get('market_cap'),
+                        'signature': r.get('signature'),
+                        'event_ts': ev_ts,
+                        'stage': r.get('perf_checked_stage', 2),
+                        'max_mc_1h': r.get('max_mc_1h'),
+                        'peak_mult_1h': r.get('peak_mult_1h'),
+                        'min_mc_1h': r.get('min_mc_1h'),
+                        'min_dd_1h_pct': r.get('min_dd_1h_pct'),
+                        'pre_peak_low_mc_1h': r.get('pre_peak_low_mc_1h'),
+                        'pre_peak_dd_1h_pct': r.get('pre_peak_dd_1h_pct'),
+                        'path_1h': r.get('path_1h'),
+                        'table': 'wallet_payments'
+                    })
+            except Exception as sb_err:
+                debug_log(f"[PERF] Supabase fallback due_items query error: {sb_err}")
+
         if not due_items:
             with perf_scanner_lock:
                 perf_scanner_runtime['last_run_at'] = datetime.now(timezone.utc).isoformat()
@@ -6636,7 +6722,7 @@ async def scan_post_signal_performance_batch(max_rows_per_table=60):
             entry_mc = parse_mc_usd(item.get('market_cap'))
             t0 = int(item.get('event_ts') or 0)
             if entry_mc <= 0 or t0 <= 0:
-                _persist_row_perf_metrics(item['table'], item, {'perf_checked_stage': 2})
+                _persist_row_perf_metrics(item['table'], item, {'perf_checked_stage': 3})
                 continue
 
             age_sec = now_ts - t0
@@ -6645,6 +6731,16 @@ async def scan_post_signal_performance_batch(max_rows_per_table=60):
             supply = token_meta.get('supply') or 1_000_000_000.0
             mc_now = token_meta.get('mc_now') or 0.0
 
+            # Fallback directly to CoinGecko/GeckoTerminal pool lookup if DexScreener returned no pool
+            if not pools:
+                gecko_meta = await asyncio.to_thread(_fetch_geckoterminal_pool_direct_sync, ca)
+                if gecko_meta and gecko_meta.get('pools'):
+                    token_meta = gecko_meta
+                    pools = token_meta.get('pools') or []
+                    supply = token_meta.get('supply') or supply
+                    mc_now = token_meta.get('mc_now') or mc_now
+                    pool_map[ca] = token_meta
+
             candles = []
             for pool_addr in pools[:1]:
                 candles = await _fetch_geckoterminal_ohlcv(pool_addr, t0, now_ts)
@@ -6652,8 +6748,9 @@ async def scan_post_signal_performance_batch(max_rows_per_table=60):
                     break
 
             payload = {}
-            # Compute 1h metrics if not computed yet
-            if item.get('stage', 0) == 0 or item.get('max_mc_1h') is None:
+            is_rescan = (item.get('stage', 0) == 2 and (item.get('min_mc_1h') is None or float(item.get('min_mc_1h') or 0.0) == 0.0))
+            # Compute 1h metrics if not computed yet or if rescanning a zero-stage record
+            if item.get('stage', 0) == 0 or item.get('max_mc_1h') is None or is_rescan:
                 m1 = compute_window_peak_and_trajectory(entry_mc, t0, 3600, candles, supply, mc_now=mc_now, age_sec=age_sec)
                 if m1:
                     payload.update({
@@ -6698,8 +6795,10 @@ async def scan_post_signal_performance_batch(max_rows_per_table=60):
                         'pre_peak_low_mc_4h': m4['pre_peak_low_mc'],
                         'pre_peak_dd_4h_pct': m4['pre_peak_dd_pct'],
                         'path_4h': m4['path'],
-                        'perf_checked_stage': 2,
+                        'perf_checked_stage': 3,
                     })
+                else:
+                    payload['perf_checked_stage'] = 3
             else:
                 payload['perf_checked_stage'] = 1
 
@@ -6748,12 +6847,17 @@ async def post_signal_perf_loop():
                     await asyncio.sleep(5)
                 continue
 
-            res = await scan_post_signal_performance_batch(max_rows_per_table=100)
+            res = await scan_post_signal_performance_batch(max_rows_per_table=40)
             updated = int(res.get('updated') or 0)
 
-            # If backfill is enabled and there are rows being updated, loop quickly (5s)
+            # If backfill is enabled and rows were updated, loop quickly (3s)
             if updated > 0 and backfill_on:
-                wait_seconds = 5
+                wait_seconds = 3
+            elif backfill_on and res.get('status') == 'up_to_date':
+                print("[PERF SCANNER] All paid transactions fully backfilled! Turning off backfill mode.", flush=True)
+                with perf_scanner_lock:
+                    perf_scanner_runtime['backfill_wallet_payments'] = False
+                wait_seconds = int(max(10, interval_min * 60)) if interval_min > 0 else 60
             else:
                 wait_seconds = int(max(10, interval_min * 60)) if interval_min > 0 else 60
 
@@ -6802,6 +6906,17 @@ def get_performance_scanner_status():
         rt['wallet_payments_checked'] = wp_done
         rt['dex_validated_total'] = dv_total
         rt['wallet_payments_total'] = wp_total
+
+        if supabase_client:
+            try:
+                cnt_done = supabase_client.table('wallet_payments').select('id', count='exact').neq('min_mc_1h', 0).not_.is_('min_mc_1h', 'null').limit(1).execute()
+                cnt_total = supabase_client.table('wallet_payments').select('id', count='exact').limit(1).execute()
+                if cnt_total.count:
+                    rt['wallet_payments_total'] = cnt_total.count
+                if cnt_done.count is not None:
+                    rt['wallet_payments_checked'] = cnt_done.count
+            except Exception:
+                pass
     except Exception:
         pass
     return jsonify({'success': True, 'status': rt})
@@ -6887,12 +7002,24 @@ def token_matches_workflow_rules(token, rules):
     age_m = float(parse_age_minutes(token.get('age')) or 0.0)
     mig_age_m = float(parse_migration_age_minutes(token.get('migration_age'), token.get('formatted_message')) or 0.0)
     liq = float(token.get('liquidity_usd') or 0.0)
-    plat = str(token.get('platform') or '').lower()
-    migrated_status = str(token.get('migration_status') or '').lower()
-    is_migrated = ('migrated' in migrated_status) or ('raydium' in plat) or ('migrated: yes' in str(token.get('formatted_message') or '').lower())
     
-    sig_type = str(token.get('signal_type') or token.get('category') or '').lower()
-    cat = 'boost' if 'boost' in sig_type else ('cto' if ('takeover' in sig_type or sig_type == 'cto') else 'dex')
+    ca_str = str(token.get('ca') or '').strip().lower()
+    plat_str = f"{token.get('platform', '')} {token.get('dex_url', '')} {token.get('formatted_message', '')} {'pumpfun' if ca_str.endswith('pump') else ''}".lower()
+    plat = plat_str
+    
+    migrated_status = str(token.get('migration_status') or '').strip().lower()
+    raw_msg_lower = str(token.get('formatted_message') or '').lower()
+    if migrated_status in ('not migrated', 'unmigrated', 'no', 'false', '0') or 'migrated: no' in raw_msg_lower or 'still on pump.fun' in raw_msg_lower:
+        is_migrated = False
+    elif migrated_status in ('migrated', 'yes', 'true', '1') or 'raydium' in plat_str or 'migrated: yes' in raw_msg_lower:
+        is_migrated = True
+    elif ca_str.endswith('pump'):
+        is_migrated = False
+    else:
+        is_migrated = ('migrated' in migrated_status and 'not' not in migrated_status and 'un' not in migrated_status)
+    
+    sig_type = str(token.get('signal_type') or token.get('category') or token.get('reason') or '').lower()
+    cat = 'boost' if 'boost' in sig_type else ('cto' if ('takeover' in sig_type or 'cto' in sig_type) else ('paid' if 'paid' in sig_type else 'dex'))
 
     for r in rules:
         rtype = r.get('rule_type')
@@ -6956,8 +7083,19 @@ def token_matches_workflow_rules(token, rules):
 
         elif rtype == 'category':
             req_cat = str(stext or '').lower().strip()
-            if req_cat and req_cat not in ('all', 'any') and req_cat != cat:
-                return False
+            if req_cat and req_cat not in ('all', 'any'):
+                cat_corpus = f"{cat} {token.get('signal_type', '')} {token.get('reason', '')} {token.get('tracked_address', '')} {token.get('source_system', '')}".lower()
+                if req_cat in ('dex_paid', 'paid'):
+                    if 'paid' not in cat_corpus and 'dex' not in cat_corpus:
+                        return False
+                elif req_cat == 'cto':
+                    if 'cto' not in cat_corpus and 'takeover' not in cat_corpus:
+                        return False
+                elif req_cat == 'boost':
+                    if 'boost' not in cat_corpus:
+                        return False
+                elif req_cat not in cat_corpus:
+                    return False
 
         elif rtype == 'token_name':
             pattern = (stext or '').strip()
@@ -7013,17 +7151,21 @@ def token_matches_workflow_rules(token, rules):
                 return False
 
         elif rtype == 'dex_payment':
-            if token.get('source_system') == 'paid' and token.get('amount') is not None:
+            if token.get('source_system') == 'paid':
                 amt = float(token.get('amount') or 0.0)
-                usd_amt = (amt * 180.0) if amt < 25.0 else amt
+                usd_amt = (amt * 180.0) if (amt > 0 and amt < 25.0) else amt
                 if tmin is not None and usd_amt < tmin:
                     return False
                 if tmax is not None and usd_amt > tmax:
                     return False
                 if stext and str(stext).strip():
-                    sig_label = str(token.get('signal_type') or token.get('description') or '').lower()
-                    if str(stext).lower().strip() not in sig_label:
-                        return False
+                    corpus = f"{token.get('signal_type', '')} {token.get('reason', '')} {token.get('tracked_address', '')} {token.get('formatted_message', '')}".lower()
+                    stext_clean = str(stext).lower().strip()
+                    if stext_clean not in corpus:
+                        s_norm = re.sub(r'[\s_]+', '', stext_clean)
+                        c_norm = re.sub(r'[\s_]+', '', corpus)
+                        if s_norm not in c_norm:
+                            return False
 
     return True
 
@@ -7099,9 +7241,10 @@ def get_historical_candidate_tokens(system='validated', timeframe='day'):
             wp_query = f"""
                 SELECT id, token_name AS name, ca, platform, market_cap, age, perf_5m, perf_1h, perf_6h, perf_24h,
                        liquidity_usd, volume_5m, volume_1h, volume_6h, volume_24h, migration_status,
-                       'paid' AS signal_type, formatted_message, max_mc_1h, peak_mult_1h, min_mc_1h, min_dd_1h_pct,
+                       COALESCE(reason, 'paid') AS signal_type, formatted_message, max_mc_1h, peak_mult_1h, min_mc_1h, min_dd_1h_pct,
                        pre_peak_low_mc_1h, pre_peak_dd_1h_pct, path_1h, max_mc_4h, peak_mult_4h, min_mc_4h,
-                       min_dd_4h_pct, pre_peak_low_mc_4h, pre_peak_dd_4h_pct, path_4h, {ts_wp_expr} AS event_ts
+                       min_dd_4h_pct, pre_peak_low_mc_4h, pre_peak_dd_4h_pct, path_4h, {ts_wp_expr} AS event_ts,
+                       amount, reason, dex_url, tracked_address
                 FROM wallet_payments
                 WHERE {' AND '.join(where_wp)}
                 ORDER BY id DESC
@@ -7118,7 +7261,8 @@ def get_historical_candidate_tokens(system='validated', timeframe='day'):
                         'pre_peak_dd_1h_pct': row[23], 'path_1h': row[24], 'max_mc_4h': row[25],
                         'peak_mult_4h': row[26], 'min_mc_4h': row[27], 'min_dd_4h_pct': row[28],
                         'pre_peak_low_mc_4h': row[29], 'pre_peak_dd_4h_pct': row[30], 'path_4h': row[31],
-                        'event_ts': row[32], 'source_system': 'paid'
+                        'event_ts': row[32], 'amount': row[33], 'reason': row[34], 'dex_url': row[35],
+                        'tracked_address': row[36], 'source_system': 'paid'
                     }
                     candidate_tokens.append(d)
             except Exception as e:
@@ -7139,13 +7283,13 @@ def get_historical_candidate_tokens(system='validated', timeframe='day'):
 
             if system in ('paid', 'all'):
                 q_sb_wp = supabase_client.table('wallet_payments').select(
-                    'id,token_name,ca,platform,market_cap,age,perf_5m,perf_1h,perf_6h,perf_24h,liquidity_usd,volume_5m,volume_1h,volume_6h,volume_24h,migration_status,formatted_message,max_mc_1h,peak_mult_1h,min_mc_1h,min_dd_1h_pct,pre_peak_low_mc_1h,pre_peak_dd_1h_pct,path_1h,max_mc_4h,peak_mult_4h,min_mc_4h,min_dd_4h_pct,pre_peak_low_mc_4h,pre_peak_dd_4h_pct,path_4h,timestamp,created_at'
+                    'id,token_name,ca,platform,market_cap,age,perf_5m,perf_1h,perf_6h,perf_24h,liquidity_usd,volume_5m,volume_1h,volume_6h,volume_24h,migration_status,formatted_message,max_mc_1h,peak_mult_1h,min_mc_1h,min_dd_1h_pct,pre_peak_low_mc_1h,pre_peak_dd_1h_pct,path_1h,max_mc_4h,peak_mult_4h,min_mc_4h,min_dd_4h_pct,pre_peak_low_mc_4h,pre_peak_dd_4h_pct,path_4h,timestamp,created_at,amount,reason,dex_url,tracked_address'
                 ).not_.is_('peak_mult_1h', 'null').limit(1000)
                 if tf_seconds:
                     q_sb_wp = q_sb_wp.gte('timestamp', now_ts - tf_seconds)
                 for item in (q_sb_wp.execute().data or []):
                     item['name'] = item.get('token_name')
-                    item['signal_type'] = 'paid'
+                    item['signal_type'] = item.get('reason') or 'paid'
                     item['source_system'] = 'paid'
                     candidate_tokens.append(item)
         except Exception as sb_err:
@@ -7480,6 +7624,10 @@ def simulate_outcomes():
             except Exception as e:
                 debug_log(f"[OUTCOMES] Error fetching workflow {workflow_id}: {e}")
 
+        # If user explicitly selected a system ('paid' or 'validated'), don't let a conflicting workflow signal_type rule block candidate tokens
+        if system in ('paid', 'validated'):
+            rules = [r for r in rules if r.get('rule_type') != 'signal_type']
+
         # Process custom filters
         if custom_filters:
             # Market Cap ($)
@@ -7703,6 +7851,7 @@ def simulate_outcomes():
                 'ca': ca,
                 'platform': t.get('platform') or '',
                 'market_cap': t.get('market_cap') or '',
+                'entry_mc': parse_mc_usd(t.get('market_cap')),
                 'age': t.get('age') or '',
                 'liquidity_usd': t.get('liquidity_usd'),
                 'volume_24h': t.get('volume_24h'),
@@ -7713,7 +7862,7 @@ def simulate_outcomes():
                 'pre_peak_dd_1h_pct': round(float(t.get('pre_peak_dd_1h_pct') or 0.0), 1),
                 'path_1h': str(t.get('path_1h') or 'UNKNOWN').upper(),
                 'dex_url': t.get('dex_url') or (f"https://dexscreener.com/solana/{ca}" if ca else ''),
-                'event_ts': t.get('event_ts')
+                'event_ts': t.get('event_ts') or t.get('timestamp') or t.get('created_at') or t.get('fetched_at')
             })
 
         return jsonify({

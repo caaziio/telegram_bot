@@ -3661,10 +3661,32 @@ function getRowEventEpochSeconds(row) {
     return 0;
 }
 
+function parseCompactUsd(val) {
+    if (val === null || val === undefined || val === '') return null;
+    if (typeof val === 'number') return Number.isFinite(val) ? val : null;
+    const str = String(val).trim().toUpperCase();
+    if (!str || str === 'UNKNOWN' || str === '-') return null;
+    const clean = str.replace(/[$,\s]/g, '');
+    let mult = 1.0;
+    let numStr = clean;
+    if (clean.endsWith('B')) { mult = 1e9; numStr = clean.slice(0, -1); }
+    else if (clean.endsWith('M')) { mult = 1e6; numStr = clean.slice(0, -1); }
+    else if (clean.endsWith('K')) { mult = 1e3; numStr = clean.slice(0, -1); }
+    const num = parseFloat(numStr);
+    return Number.isFinite(num) ? num * mult : null;
+}
+
 function formatCompactMc(val) {
     if (val === null || val === undefined || val === '') return '-';
-    const num = Number(val);
-    if (!Number.isFinite(num) || num <= 0) return '$0';
+    let num = typeof val === 'number' ? val : null;
+    if (num === null) {
+        num = parseCompactUsd(val);
+    }
+    if (num === null || !Number.isFinite(num) || num <= 0) {
+        const s = String(val).trim();
+        if (s && s !== '$0' && s !== '0' && s !== '-') return s.startsWith('$') ? s : `$${s}`;
+        return '$0';
+    }
     if (num >= 1e9) return `$${(num / 1e9).toFixed(2)}B`;
     if (num >= 1e6) return `$${(num / 1e6).toFixed(2)}M`;
     if (num >= 1e3) return `$${(num / 1e3).toFixed(num >= 1e5 ? 0 : 1)}K`;
@@ -6096,6 +6118,20 @@ function updateOutcomesPillsUI() {
 
 function setOutcomesSystem(sys, triggerSim = true) {
     outcomesState.system = sys;
+    if (outcomesState.activeWorkflowId) {
+        const wf = (outcomesState.workflows || []).find(w => String(w.id) === String(outcomesState.activeWorkflowId));
+        if (wf) {
+            const sigRule = (wf.rules || []).find(r => r.rule_type === 'signal_type');
+            const reqSys = sigRule ? String(sigRule.search_text || '').toLowerCase() : (wf.system || '');
+            if (sys !== 'all' && reqSys && reqSys !== 'all' && reqSys !== sys && !(sys === 'paid' && (reqSys === 'dex_paid' || reqSys === 'paid'))) {
+                outcomesState.activeWorkflowId = null;
+                const wfSelect = document.getElementById('outcomes-workflow-select');
+                if (wfSelect) wfSelect.value = '';
+                const summaryEl = document.getElementById('outcomes-active-filter-summary');
+                if (summaryEl) summaryEl.innerHTML = '<span>Manual Custom Filters Active</span>';
+            }
+        }
+    }
     updateOutcomesPillsUI();
     if (triggerSim) runOutcomesSimulation();
 }
@@ -6568,7 +6604,7 @@ function renderOutcomesTable(tokens) {
         const platform = escapeHtml(t.platform || 'solana');
         const eventType = escapeHtml(t.signal_type || t.event_type || t.source_system || '');
 
-        const entryMcFormatted = formatCompactMc(t.market_cap || t.entry_mc);
+        const entryMcFormatted = formatCompactMc(t.entry_mc || t.market_cap);
         const liqFormatted = formatCompactMc(t.liquidity_usd || t.liquidity);
         
         // 1h peak badge
@@ -6599,9 +6635,21 @@ function renderOutcomesTable(tokens) {
         const trajCode = String(t.path_1h || t.trajectory || '').toLowerCase();
         const trajCfg = OUTCOMES_TRAJECTORY_CONFIG[trajCode] || { label: trajCode || 'Flat', icon: '•', color: '#94a3b8' };
 
-        // Signal time
-        const eventSec = t.event_epoch_seconds || (t.event_ts ? Math.floor(new Date(t.event_ts).getTime() / 1000) : (t.timestamp ? Math.floor(new Date(t.timestamp).getTime() / 1000) : 0));
-        const relTime = eventSec ? formatRelativeTime(eventSec) : (t.age || '—');
+        // Signal time (robust timestamp parsing for seconds, milliseconds, or ISO strings)
+        const rawTs = t.event_ts ?? t.timestamp ?? t.event_epoch_seconds ?? t.created_at ?? t.fetched_at;
+        const relTime = rawTs ? formatRelativeTime(rawTs) : (t.age || '—');
+        let exactDateStr = '';
+        if (rawTs) {
+            let d;
+            if (typeof rawTs === 'number') {
+                d = new Date(rawTs > 1e12 ? rawTs : rawTs * 1000);
+            } else {
+                d = new Date(String(rawTs).replace(' ', 'T'));
+            }
+            if (!isNaN(d.getTime())) {
+                exactDateStr = d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+            }
+        }
 
         rowsHtml += `
             <tr style="border-bottom: 1px solid var(--border-color); transition: background 0.15s ease;" onmouseover="this.style.background='rgba(255,255,255,0.02)'" onmouseout="this.style.background='transparent'">
@@ -6618,7 +6666,7 @@ function renderOutcomesTable(tokens) {
                     </div>
                 </td>
                 <td style="padding: 10px 12px; white-space: nowrap;">
-                    <div style="color: #cbd5e1; font-weight: 500;">${relTime}</div>
+                    <div style="color: #cbd5e1; font-weight: 500;" title="${exactDateStr}">${relTime}</div>
                     <div style="font-size: 0.7rem; color: var(--text-muted);">${eventType}</div>
                 </td>
                 <td style="padding: 10px 12px; font-weight: 600; color: #e2e8f0;">
