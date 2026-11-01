@@ -896,20 +896,20 @@
                         </div>
                         <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
                             <div style="display: flex; align-items: center; gap: 6px;">
-                                <span style="font-size: 0.78rem; color: var(--text-muted);">Source:</span>
-                                <div style="display: inline-flex; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 2px;">
-                                    <button type="button" id="outcomes-sys-validated" class="filter-pill active" onclick="setOutcomesSystem('validated')" style="border-radius: 6px; padding: 4px 10px; font-size: 0.76rem; border: none; cursor: pointer;">Validated</button>
-                                    <button type="button" id="outcomes-sys-paid" class="filter-pill" onclick="setOutcomesSystem('paid')" style="border-radius: 6px; padding: 4px 10px; font-size: 0.76rem; border: none; cursor: pointer;">Paid</button>
-                                    <button type="button" id="outcomes-sys-all" class="filter-pill" onclick="setOutcomesSystem('all')" style="border-radius: 6px; padding: 4px 10px; font-size: 0.76rem; border: none; cursor: pointer;">Combined All</button>
+                                <span style="font-size: 0.78rem; color: var(--text-muted); font-weight: 500;">Source:</span>
+                                <div class="segmented-pill-group">
+                                    <button type="button" id="outcomes-sys-validated" class="segmented-pill-btn active" onclick="setOutcomesSystem('validated')" style="padding: 4px 11px; font-size: 0.78rem; border-radius: 6px; border: none; background: #34d399; color: #022c22; font-weight: 700; cursor: pointer;">⚡ Validated</button>
+                                    <button type="button" id="outcomes-sys-paid" class="segmented-pill-btn" onclick="setOutcomesSystem('paid')" style="padding: 4px 11px; font-size: 0.78rem; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 500; cursor: pointer;">💎 Paid</button>
+                                    <button type="button" id="outcomes-sys-all" class="segmented-pill-btn" onclick="setOutcomesSystem('all')" style="padding: 4px 11px; font-size: 0.78rem; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 500; cursor: pointer;">🌐 Combined All</button>
                                 </div>
                             </div>
                             <div style="display: flex; align-items: center; gap: 6px;">
-                                <span style="font-size: 0.78rem; color: var(--text-muted);">Timeframe:</span>
-                                <div style="display: inline-flex; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 2px;">
-                                    <button type="button" id="outcomes-tf-day" class="filter-pill" onclick="setOutcomesTimeframe('day')" style="border-radius: 6px; padding: 4px 10px; font-size: 0.76rem; border: none; cursor: pointer;">24h</button>
-                                    <button type="button" id="outcomes-tf-week" class="filter-pill active" onclick="setOutcomesTimeframe('week')" style="border-radius: 6px; padding: 4px 10px; font-size: 0.76rem; border: none; cursor: pointer;">7d</button>
-                                    <button type="button" id="outcomes-tf-month" class="filter-pill" onclick="setOutcomesTimeframe('month')" style="border-radius: 6px; padding: 4px 10px; font-size: 0.76rem; border: none; cursor: pointer;">30d</button>
-                                    <button type="button" id="outcomes-tf-all" class="filter-pill" onclick="setOutcomesTimeframe('all')" style="border-radius: 6px; padding: 4px 10px; font-size: 0.76rem; border: none; cursor: pointer;">All</button>
+                                <span style="font-size: 0.78rem; color: var(--text-muted); font-weight: 500;">Timeframe:</span>
+                                <div class="segmented-pill-group">
+                                    <button type="button" id="outcomes-tf-day" class="segmented-pill-btn" onclick="setOutcomesTimeframe('day')" style="padding: 4px 11px; font-size: 0.78rem; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 500; cursor: pointer;">24h</button>
+                                    <button type="button" id="outcomes-tf-week" class="segmented-pill-btn active" onclick="setOutcomesTimeframe('week')" style="padding: 4px 11px; font-size: 0.78rem; border-radius: 6px; border: none; background: #38bdf8; color: #082f49; font-weight: 700; cursor: pointer;">7d</button>
+                                    <button type="button" id="outcomes-tf-month" class="segmented-pill-btn" onclick="setOutcomesTimeframe('month')" style="padding: 4px 11px; font-size: 0.78rem; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 500; cursor: pointer;">30d</button>
+                                    <button type="button" id="outcomes-tf-all" class="segmented-pill-btn" onclick="setOutcomesTimeframe('all')" style="padding: 4px 11px; font-size: 0.78rem; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 500; cursor: pointer;">All</button>
                                 </div>
                             </div>
                         </div>

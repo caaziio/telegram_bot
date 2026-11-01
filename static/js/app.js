@@ -5913,6 +5913,7 @@ const OUTCOMES_TRAJECTORY_CONFIG = {
 };
 
 async function initOutcomesLabPage() {
+    updateOutcomesPillsUI();
     if (!outcomesState.initialized) {
         outcomesState.initialized = true;
         await loadOutcomesWorkflows();
@@ -5944,27 +5945,57 @@ async function loadOutcomesWorkflows() {
     }
 }
 
-function setOutcomesSystem(sys, triggerSim = true) {
-    outcomesState.system = sys;
+function updateOutcomesPillsUI() {
+    const sysColors = {
+        'validated': { bg: '#34d399', text: '#022c22' },
+        'paid': { bg: '#22d3ee', text: '#083344' },
+        'all': { bg: '#a78bfa', text: '#1e1b4b' }
+    };
+
     ['validated', 'paid', 'all'].forEach(s => {
         const el = document.getElementById(`outcomes-sys-${s}`);
         if (el) {
-            if (s === sys) el.classList.add('active');
-            else el.classList.remove('active');
+            if (s === outcomesState.system) {
+                el.classList.add('active');
+                el.style.background = sysColors[s]?.bg || '#34d399';
+                el.style.color = sysColors[s]?.text || '#022c22';
+                el.style.fontWeight = '700';
+            } else {
+                el.classList.remove('active');
+                el.style.background = 'transparent';
+                el.style.color = 'var(--text-muted)';
+                el.style.fontWeight = '500';
+            }
         }
     });
+
+    ['day', 'week', 'month', 'all'].forEach(t => {
+        const el = document.getElementById(`outcomes-tf-${t}`);
+        if (el) {
+            if (t === outcomesState.timeframe) {
+                el.classList.add('active');
+                el.style.background = '#38bdf8';
+                el.style.color = '#082f49';
+                el.style.fontWeight = '700';
+            } else {
+                el.classList.remove('active');
+                el.style.background = 'transparent';
+                el.style.color = 'var(--text-muted)';
+                el.style.fontWeight = '500';
+            }
+        }
+    });
+}
+
+function setOutcomesSystem(sys, triggerSim = true) {
+    outcomesState.system = sys;
+    updateOutcomesPillsUI();
     if (triggerSim) runOutcomesSimulation();
 }
 
 function setOutcomesTimeframe(tf, triggerSim = true) {
     outcomesState.timeframe = tf;
-    ['day', 'week', 'month', 'all'].forEach(t => {
-        const el = document.getElementById(`outcomes-tf-${t}`);
-        if (el) {
-            if (t === tf) el.classList.add('active');
-            else el.classList.remove('active');
-        }
-    });
+    updateOutcomesPillsUI();
     if (triggerSim) runOutcomesSimulation();
 }
 

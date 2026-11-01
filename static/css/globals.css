@@ -2270,3 +2270,38 @@ body {
   overflow-y: auto;
 }
 
+/* Outcomes Lab Segmented Pill Controls */
+.segmented-pill-group {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  gap: 2px;
+}
+
+.segmented-pill-btn {
+  padding: 4px 11px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  outline: none;
+  white-space: nowrap;
+}
+
+.segmented-pill-btn:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.segmented-pill-btn.active {
+  font-weight: 700;
+}
+
+
