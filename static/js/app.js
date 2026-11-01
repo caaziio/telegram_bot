@@ -6204,7 +6204,7 @@ function renderOutcomesSimulationResults(data) {
             { key: '1.5x - 2.0x', count: rawTiers['1_5x_2x'] ?? rawTiers['1.5x - 2.0x']?.count ?? 0, pct: rawTiers['1_5x_2x_pct'] ?? rawTiers['1.5x - 2.0x']?.pct ?? 0 },
             { key: '2.0x - 3.0x', count: rawTiers['2x_3x'] ?? rawTiers['2.0x - 3.0x']?.count ?? 0, pct: rawTiers['2x_3x_pct'] ?? rawTiers['2.0x - 3.0x']?.pct ?? 0 },
             { key: '3.0x - 5.0x', count: rawTiers['3x_5x'] ?? rawTiers['3.0x - 5.0x']?.count ?? 0, pct: rawTiers['3x_5x_pct'] ?? rawTiers['3.0x - 5.0x']?.pct ?? 0 },
-            { key: '≥ 5.0x', count: rawTiers.5x_plus ?? rawTiers['≥ 5.0x']?.count ?? 0, pct: rawTiers.5x_plus_pct ?? rawTiers['≥ 5.0x']?.pct ?? 0 }
+            { key: '≥ 5.0x', count: rawTiers['5x_plus'] ?? rawTiers['≥ 5.0x']?.count ?? 0, pct: rawTiers['5x_plus_pct'] ?? rawTiers['≥ 5.0x']?.pct ?? 0 }
         ];
 
         let tiersHtml = '';
