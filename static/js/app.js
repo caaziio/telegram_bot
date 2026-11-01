@@ -6004,7 +6004,7 @@ function handleOutcomesWorkflowSelect(wfId) {
     const summaryEl = document.getElementById('outcomes-active-filter-summary');
 
     if (!wfId) {
-        if (summaryEl) summaryEl.innerHTML = '<span>Custom Filters Active</span>';
+        if (summaryEl) summaryEl.innerHTML = '<span>Manual Custom Filters Active</span>';
         runOutcomesSimulation();
         return;
     }
@@ -6016,41 +6016,83 @@ function handleOutcomesWorkflowSelect(wfId) {
         setOutcomesSystem(wf.system, false);
     }
 
-    const rules = wf.rules || {};
-    const minMcEl = document.getElementById('outcomes-filter-min-mc');
-    const maxMcEl = document.getElementById('outcomes-filter-max-mc');
-    const minAgeEl = document.getElementById('outcomes-filter-min-age');
-    const maxAgeEl = document.getElementById('outcomes-filter-max-age');
-    const ageKindEl = document.getElementById('outcomes-filter-age-kind');
-    const minLiqEl = document.getElementById('outcomes-filter-min-liq');
-    const minVolEl = document.getElementById('outcomes-filter-min-vol');
-    const migratedEl = document.getElementById('outcomes-filter-migrated');
-    const platformEl = document.getElementById('outcomes-filter-platform');
-    const exclPlatformEl = document.getElementById('outcomes-filter-exclude-platform');
-    const categoryEl = document.getElementById('outcomes-filter-category');
-    const keywordsEl = document.getElementById('outcomes-filter-keywords');
-
-    if (minMcEl) minMcEl.value = rules.min_market_cap !== undefined ? rules.min_market_cap : '';
-    if (maxMcEl) maxMcEl.value = rules.max_market_cap !== undefined ? rules.max_market_cap : '';
-    if (minAgeEl) minAgeEl.value = rules.min_age || '';
-    if (maxAgeEl) maxAgeEl.value = rules.max_age || '';
-    if (ageKindEl) ageKindEl.value = rules.age_kind || 'creation';
-    if (minLiqEl) minLiqEl.value = rules.min_liquidity !== undefined ? rules.min_liquidity : '';
-    if (minVolEl) minVolEl.value = rules.min_volume !== undefined ? rules.min_volume : '';
-    if (categoryEl) categoryEl.value = rules.category || 'all';
-    if (keywordsEl) keywordsEl.value = rules.name_regex || rules.keywords || '';
-
-    if (migratedEl) {
-        if (rules.migrated === true) migratedEl.value = 'migrated';
-        else if (rules.migrated === false) migratedEl.value = 'unmigrated';
-        else migratedEl.value = 'all';
+    // Extract parsed filters from backend or parse rules array directly
+    let pf = wf.parsed_filters;
+    if (!pf) {
+        pf = {};
+        const rules = Array.isArray(wf.rules) ? wf.rules : [];
+        rules.forEach(r => {
+            const rtype = r.rule_type;
+            const stext = r.search_text || '';
+            const rtext = r.replace_text || '';
+            const tmin = r.time_min;
+            const tmax = r.time_max;
+            if (rtype === 'market_cap') { pf.min_mc = tmin; pf.max_mc = tmax; }
+            else if (rtype === 'token_age') {
+                pf.min_age = tmin;
+                pf.max_age = tmax;
+                pf.age_kind = String(stext).includes('migration') ? 'migration' : 'creation';
+            }
+            else if (rtype === 'liquidity') { pf.min_liq = tmin; pf.max_liq = tmax; }
+            else if (rtype === 'volume') {
+                pf.min_vol = tmin; pf.max_vol = tmax;
+                if (stext) pf.volume_tf = String(stext).toLowerCase().replace('hr', 'h');
+            }
+            else if (rtype === 'performance') {
+                pf.min_perf = tmin; pf.max_perf = tmax;
+                if (stext) pf.perf_tf = String(stext).toLowerCase().replace('hr', 'h');
+            }
+            else if (rtype === 'platform') { pf.platform = stext; }
+            else if (rtype === 'exclude_platform') { pf.exclude_platform = stext; }
+            else if (rtype === 'migrated') {
+                pf.migrated = ['yes', 'migrated', 'true', '1'].includes(String(stext).toLowerCase()) ? 'migrated' : 'unmigrated';
+            }
+            else if (rtype === 'category') { pf.category = stext; }
+            else if (rtype === 'dex_payment') { pf.dex_payment_min = tmin; pf.dex_payment_max = tmax; pf.dex_payment_label = stext; }
+            else if (rtype === 'token_name') { pf.name_mode = rtext || 'include'; pf.name_filter = stext; }
+            else if (rtype === 'filter') { pf.word_mode = rtext || 'include'; pf.word_filter = stext; }
+            else if (rtype === 'extract_ca') { pf.extract_ca = 'yes'; }
+        });
     }
 
-    if (platformEl) platformEl.value = rules.platform || 'all';
-    if (exclPlatformEl) exclPlatformEl.value = rules.exclude_platform || '';
+    // Set all inputs
+    const setVal = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.value = (val !== undefined && val !== null) ? val : '';
+    };
 
+    setVal('outcomes-filter-min-mc', pf.min_mc);
+    setVal('outcomes-filter-max-mc', pf.max_mc);
+    setVal('outcomes-filter-min-liq', pf.min_liq);
+    setVal('outcomes-filter-max-liq', pf.max_liq);
+    setVal('outcomes-filter-volume-tf', pf.volume_tf || '24h');
+    setVal('outcomes-filter-min-vol', pf.min_vol);
+    setVal('outcomes-filter-max-vol', pf.max_vol);
+
+    setVal('outcomes-filter-min-age', pf.min_age);
+    setVal('outcomes-filter-max-age', pf.max_age);
+    setVal('outcomes-filter-age-kind', pf.age_kind || 'creation');
+    setVal('outcomes-filter-perf-tf', pf.perf_tf || '5m');
+    setVal('outcomes-filter-min-perf', pf.min_perf);
+    setVal('outcomes-filter-max-perf', pf.max_perf);
+
+    setVal('outcomes-filter-platform', pf.platform || 'all');
+    setVal('outcomes-filter-exclude-platform', pf.exclude_platform);
+    setVal('outcomes-filter-migrated', pf.migrated || 'all');
+    setVal('outcomes-filter-category', pf.category || 'all');
+    setVal('outcomes-filter-min-payment', pf.dex_payment_min);
+    setVal('outcomes-filter-max-payment', pf.dex_payment_max);
+    setVal('outcomes-filter-payment-label', pf.dex_payment_label);
+
+    setVal('outcomes-filter-name-mode', pf.name_mode || 'include');
+    setVal('outcomes-filter-name', pf.name_filter);
+    setVal('outcomes-filter-word-mode', pf.word_mode || 'include');
+    setVal('outcomes-filter-word', pf.word_filter);
+    setVal('outcomes-filter-extract-ca', pf.extract_ca || 'all');
+
+    const ruleCount = Array.isArray(wf.rules) ? wf.rules.length : 0;
     if (summaryEl) {
-        summaryEl.innerHTML = `<span style="color: #c084fc; font-weight: 600;">✓ Auto-loaded rules from "${escapeHtml(wf.name)}"</span>`;
+        summaryEl.innerHTML = `<span style="color: #c084fc; font-weight: 700;">✓ Auto-populated ${ruleCount} rule(s) from "${escapeHtml(wf.name)}"</span>`;
     }
 
     runOutcomesSimulation();
@@ -6061,23 +6103,31 @@ function resetOutcomesFilters() {
     const wfSelect = document.getElementById('outcomes-workflow-select');
     if (wfSelect) wfSelect.value = '';
 
-    const ids = [
+    const textIds = [
         'outcomes-filter-min-mc', 'outcomes-filter-max-mc',
+        'outcomes-filter-min-liq', 'outcomes-filter-max-liq',
+        'outcomes-filter-min-vol', 'outcomes-filter-max-vol',
         'outcomes-filter-min-age', 'outcomes-filter-max-age',
-        'outcomes-filter-min-liq', 'outcomes-filter-min-vol',
-        'outcomes-filter-keywords'
+        'outcomes-filter-min-perf', 'outcomes-filter-max-perf',
+        'outcomes-filter-exclude-platform',
+        'outcomes-filter-min-payment', 'outcomes-filter-max-payment', 'outcomes-filter-payment-label',
+        'outcomes-filter-name', 'outcomes-filter-word'
     ];
-    ids.forEach(id => {
+    textIds.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
 
     const selects = {
+        'outcomes-filter-volume-tf': '24h',
         'outcomes-filter-age-kind': 'creation',
-        'outcomes-filter-migrated': 'all',
+        'outcomes-filter-perf-tf': '5m',
         'outcomes-filter-platform': 'all',
-        'outcomes-filter-exclude-platform': '',
-        'outcomes-filter-category': 'all'
+        'outcomes-filter-migrated': 'all',
+        'outcomes-filter-category': 'all',
+        'outcomes-filter-name-mode': 'include',
+        'outcomes-filter-word-mode': 'include',
+        'outcomes-filter-extract-ca': 'all'
     };
     Object.entries(selects).forEach(([id, val]) => {
         const el = document.getElementById(id);
@@ -6107,33 +6157,82 @@ async function runOutcomesSimulation() {
     }
 
     try {
-        const minMc = parseFloat(document.getElementById('outcomes-filter-min-mc')?.value);
-        const maxMc = parseFloat(document.getElementById('outcomes-filter-max-mc')?.value);
-        const minAge = document.getElementById('outcomes-filter-min-age')?.value?.trim();
-        const maxAge = document.getElementById('outcomes-filter-max-age')?.value?.trim();
-        const ageKind = document.getElementById('outcomes-filter-age-kind')?.value;
-        const minLiq = parseFloat(document.getElementById('outcomes-filter-min-liq')?.value);
-        const minVol = parseFloat(document.getElementById('outcomes-filter-min-vol')?.value);
-        const migratedVal = document.getElementById('outcomes-filter-migrated')?.value;
-        const platform = document.getElementById('outcomes-filter-platform')?.value;
-        const excludePlatform = document.getElementById('outcomes-filter-exclude-platform')?.value;
-        const category = document.getElementById('outcomes-filter-category')?.value;
-        const keywords = document.getElementById('outcomes-filter-keywords')?.value?.trim();
+        const getNum = id => {
+            const v = parseFloat(document.getElementById(id)?.value);
+            return (!isNaN(v) && isFinite(v)) ? v : null;
+        };
+        const getStr = id => {
+            const v = document.getElementById(id)?.value;
+            return v !== undefined && v !== null ? String(v).trim() : '';
+        };
 
         const customFilters = {};
-        if (!isNaN(minMc) && minMc > 0) customFilters.min_market_cap = minMc;
-        if (!isNaN(maxMc) && maxMc > 0) customFilters.max_market_cap = maxMc;
+        const minMc = getNum('outcomes-filter-min-mc');
+        const maxMc = getNum('outcomes-filter-max-mc');
+        if (minMc !== null) customFilters.min_mc = minMc;
+        if (maxMc !== null) customFilters.max_mc = maxMc;
+
+        const minLiq = getNum('outcomes-filter-min-liq');
+        const maxLiq = getNum('outcomes-filter-max-liq');
+        if (minLiq !== null) customFilters.min_liq = minLiq;
+        if (maxLiq !== null) customFilters.max_liq = maxLiq;
+
+        const volTf = getStr('outcomes-filter-volume-tf') || '24h';
+        const minVol = getNum('outcomes-filter-min-vol');
+        const maxVol = getNum('outcomes-filter-max-vol');
+        if (minVol !== null) customFilters.min_vol = minVol;
+        if (maxVol !== null) customFilters.max_vol = maxVol;
+        if (minVol !== null || maxVol !== null) customFilters.volume_tf = volTf;
+
+        const minAge = getStr('outcomes-filter-min-age');
+        const maxAge = getStr('outcomes-filter-max-age');
+        const ageKind = getStr('outcomes-filter-age-kind') || 'creation';
         if (minAge) customFilters.min_age = minAge;
         if (maxAge) customFilters.max_age = maxAge;
-        if (ageKind) customFilters.age_kind = ageKind;
-        if (!isNaN(minLiq) && minLiq > 0) customFilters.min_liquidity = minLiq;
-        if (!isNaN(minVol) && minVol > 0) customFilters.min_volume = minVol;
-        if (migratedVal === 'migrated') customFilters.migrated = true;
-        else if (migratedVal === 'unmigrated') customFilters.migrated = false;
-        if (platform && platform !== 'all') customFilters.platform = platform;
-        if (excludePlatform) customFilters.exclude_platform = excludePlatform;
-        if (category && category !== 'all') customFilters.category = category;
-        if (keywords) customFilters.keywords = keywords;
+        if (minAge || maxAge) customFilters.age_kind = ageKind;
+
+        const perfTf = getStr('outcomes-filter-perf-tf') || '5m';
+        const minPerf = getNum('outcomes-filter-min-perf');
+        const maxPerf = getNum('outcomes-filter-max-perf');
+        if (minPerf !== null) customFilters.min_perf = minPerf;
+        if (maxPerf !== null) customFilters.max_perf = maxPerf;
+        if (minPerf !== null || maxPerf !== null) customFilters.perf_tf = perfTf;
+
+        const plat = getStr('outcomes-filter-platform');
+        if (plat && plat !== 'all') customFilters.platform = plat;
+
+        const exclPlat = getStr('outcomes-filter-exclude-platform');
+        if (exclPlat) customFilters.exclude_platform = exclPlat;
+
+        const mig = getStr('outcomes-filter-migrated');
+        if (mig && mig !== 'all') customFilters.migrated = mig;
+
+        const cat = getStr('outcomes-filter-category');
+        if (cat && cat !== 'all') customFilters.category = cat;
+
+        const pMin = getNum('outcomes-filter-min-payment');
+        const pMax = getNum('outcomes-filter-max-payment');
+        const pLabel = getStr('outcomes-filter-payment-label');
+        if (pMin !== null) customFilters.dex_payment_min = pMin;
+        if (pMax !== null) customFilters.dex_payment_max = pMax;
+        if (pLabel) customFilters.dex_payment_label = pLabel;
+
+        const nameFilter = getStr('outcomes-filter-name');
+        const nameMode = getStr('outcomes-filter-name-mode') || 'include';
+        if (nameFilter) {
+            customFilters.name_filter = nameFilter;
+            customFilters.name_mode = nameMode;
+        }
+
+        const wordFilter = getStr('outcomes-filter-word');
+        const wordMode = getStr('outcomes-filter-word-mode') || 'include';
+        if (wordFilter) {
+            customFilters.word_filter = wordFilter;
+            customFilters.word_mode = wordMode;
+        }
+
+        const extractCa = getStr('outcomes-filter-extract-ca');
+        if (extractCa === 'yes') customFilters.extract_ca = 'yes';
 
         const payload = {
             system: outcomesState.system,

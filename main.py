@@ -6929,9 +6929,14 @@ def token_matches_workflow_rules(token, rules):
 
         elif rtype == 'migrated':
             req = str(stext or 'yes').lower().strip()
-            if req == 'yes' and not is_migrated:
+            if req in ('yes', 'migrated', 'true', '1') and not is_migrated:
                 return False
-            if req == 'no' and is_migrated:
+            if req in ('no', 'unmigrated', 'false', '0') and is_migrated:
+                return False
+
+        elif rtype == 'platform':
+            req_plat = str(stext or '').lower().strip()
+            if req_plat and req_plat not in ('all', 'any') and req_plat not in plat:
                 return False
 
         elif rtype == 'exclude_platform':
@@ -6941,7 +6946,7 @@ def token_matches_workflow_rules(token, rules):
 
         elif rtype == 'category':
             req_cat = str(stext or '').lower().strip()
-            if req_cat and req_cat != 'all' and req_cat != cat:
+            if req_cat and req_cat not in ('all', 'any') and req_cat != cat:
                 return False
 
         elif rtype == 'token_name':
@@ -6969,6 +6974,26 @@ def token_matches_workflow_rules(token, rules):
             if mode != 'exclude' and not is_match:
                 return False
 
+        elif rtype == 'filter':
+            # Word / Regex message filter
+            mode = (rtext or 'include').strip().lower()
+            corpus = f"{name} {token.get('symbol', '')} {token.get('ca', '')}".lower()
+            if stext and str(stext).strip():
+                try:
+                    m = bool(re.search(str(stext).strip(), corpus, re.IGNORECASE))
+                except re.error:
+                    m = str(stext).strip().lower() in corpus
+                if mode == 'exclude' and m:
+                    return False
+                if mode != 'exclude' and not m:
+                    return False
+
+        elif rtype == 'extract_ca':
+            req_ca = str(stext or 'yes').lower().strip()
+            ca_val = str(token.get('ca') or token.get('token_address') or '').strip()
+            if req_ca in ('yes', 'true', '1') and not ca_val:
+                return False
+
         elif rtype == 'dex_payment':
             if token.get('source_system') == 'paid' and token.get('amount') is not None:
                 amt = float(token.get('amount') or 0.0)
@@ -6977,6 +7002,10 @@ def token_matches_workflow_rules(token, rules):
                     return False
                 if tmax is not None and usd_amt > tmax:
                     return False
+                if stext and str(stext).strip():
+                    sig_label = str(token.get('signal_type') or token.get('description') or '').lower()
+                    if str(stext).lower().strip() not in sig_label:
+                        return False
 
     return True
 
@@ -7284,13 +7313,97 @@ def get_outcomes_workflows():
                 'id': w['id'],
                 'name': w['name'],
                 'is_active': bool(w.get('is_active', True)),
-                'rules': []
+                'source_channel': w.get('source_channel') or '',
+                'rules': [],
+                'parsed_filters': {}
             }
 
         for r in rule_rows:
             wid = r.get('workflow_id')
             if wid in wf_map:
                 wf_map[wid]['rules'].append(r)
+
+        for wid, wf_data in wf_map.items():
+            src = str(wf_data.get('source_channel') or '').lower()
+            system_hint = 'paid' if any(k in src for k in ('paid', 'wallet', 'helius')) else 'validated'
+            wf_data['system'] = system_hint
+
+            pf = {
+                'min_mc': '',
+                'max_mc': '',
+                'min_age': '',
+                'max_age': '',
+                'age_kind': 'creation',
+                'min_liq': '',
+                'max_liq': '',
+                'volume_tf': '24h',
+                'min_vol': '',
+                'max_vol': '',
+                'perf_tf': '5m',
+                'min_perf': '',
+                'max_perf': '',
+                'platform': 'all',
+                'exclude_platform': '',
+                'migrated': 'all',
+                'category': 'all',
+                'dex_payment_min': '',
+                'dex_payment_max': '',
+                'dex_payment_label': '',
+                'name_mode': 'include',
+                'name_filter': '',
+                'word_mode': 'include',
+                'word_filter': '',
+                'extract_ca': 'all'
+            }
+            for r in wf_data['rules']:
+                rtype = r.get('rule_type')
+                stext = r.get('search_text') or ''
+                rtext = r.get('replace_text') or ''
+                tmin = r.get('time_min')
+                tmax = r.get('time_max')
+
+                if rtype == 'market_cap':
+                    pf['min_mc'] = tmin if tmin is not None else ''
+                    pf['max_mc'] = tmax if tmax is not None else ''
+                elif rtype == 'token_age':
+                    pf['min_age'] = tmin if tmin is not None else ''
+                    pf['max_age'] = tmax if tmax is not None else ''
+                    pf['age_kind'] = 'migration' if 'migration' in str(stext).lower() else 'creation'
+                elif rtype == 'liquidity':
+                    pf['min_liq'] = tmin if tmin is not None else ''
+                    pf['max_liq'] = tmax if tmax is not None else ''
+                elif rtype == 'volume':
+                    pf['min_vol'] = tmin if tmin is not None else ''
+                    pf['max_vol'] = tmax if tmax is not None else ''
+                    if stext:
+                        pf['volume_tf'] = str(stext).lower().replace('hr', 'h')
+                elif rtype == 'performance':
+                    pf['min_perf'] = tmin if tmin is not None else ''
+                    pf['max_perf'] = tmax if tmax is not None else ''
+                    if stext:
+                        pf['perf_tf'] = str(stext).lower().replace('hr', 'h')
+                elif rtype == 'platform':
+                    pf['platform'] = str(stext).lower().strip() or 'all'
+                elif rtype == 'exclude_platform':
+                    pf['exclude_platform'] = str(stext).strip()
+                elif rtype == 'migrated':
+                    s = str(stext).lower().strip()
+                    pf['migrated'] = 'migrated' if s in ('yes', 'migrated', 'true', '1') else ('unmigrated' if s in ('no', 'unmigrated', 'false', '0') else 'all')
+                elif rtype == 'category':
+                    pf['category'] = str(stext).lower().strip() or 'all'
+                elif rtype == 'dex_payment':
+                    pf['dex_payment_min'] = tmin if tmin is not None else ''
+                    pf['dex_payment_max'] = tmax if tmax is not None else ''
+                    pf['dex_payment_label'] = str(stext).strip()
+                elif rtype == 'token_name':
+                    pf['name_mode'] = str(rtext).lower().strip() if rtext in ('include', 'exclude') else 'include'
+                    pf['name_filter'] = str(stext).strip()
+                elif rtype == 'filter':
+                    pf['word_mode'] = str(rtext).lower().strip() if rtext in ('include', 'exclude') else 'include'
+                    pf['word_filter'] = str(stext).strip()
+                elif rtype == 'extract_ca':
+                    pf['extract_ca'] = 'yes'
+            wf_data['parsed_filters'] = pf
 
         result_list = list(wf_map.values())
         result_list.sort(key=lambda x: x['name'].lower())
@@ -7307,7 +7420,21 @@ def simulate_outcomes():
         system = str(req_data.get('system') or 'validated').lower().strip()
         timeframe = str(req_data.get('timeframe') or 'all').lower().strip()
         workflow_id = req_data.get('workflow_id')
-        custom_filters = req_data.get('filters') or {}
+        custom_filters = req_data.get('custom_filters') or req_data.get('filters') or {}
+
+        def parse_filter_minutes(val):
+            if val is None or str(val).strip() == '':
+                return None
+            s = str(val).lower().strip()
+            try:
+                return float(s)
+            except ValueError:
+                pass
+            d = int(re.search(r'(\d+)\s*(?:d|day)', s).group(1)) if re.search(r'(\d+)\s*(?:d|day)', s) else 0
+            h = int(re.search(r'(\d+)\s*(?:h|hr|hour)', s).group(1)) if re.search(r'(\d+)\s*(?:h|hr|hour)', s) else 0
+            m = int(re.search(r'(\d+)\s*(?:m|min|minute)', s).group(1)) if re.search(r'(\d+)\s*(?:m|min|minute)', s) else 0
+            total = (d * 1440) + (h * 60) + m
+            return float(total) if (d or h or m or '0' in s) else None
 
         # 1. Fetch historical candidate tokens
         candidates = get_historical_candidate_tokens(system, timeframe)
@@ -7331,8 +7458,8 @@ def simulate_outcomes():
         # Process custom filters
         if custom_filters:
             # Market Cap ($)
-            min_mc = custom_filters.get('min_mc')
-            max_mc = custom_filters.get('max_mc')
+            min_mc = custom_filters.get('min_mc') if custom_filters.get('min_mc') is not None else custom_filters.get('min_market_cap')
+            max_mc = custom_filters.get('max_mc') if custom_filters.get('max_mc') is not None else custom_filters.get('max_market_cap')
             if min_mc not in (None, '') or max_mc not in (None, ''):
                 rules = [r for r in rules if r.get('rule_type') != 'market_cap']
                 rules.append({
@@ -7342,21 +7469,23 @@ def simulate_outcomes():
                 })
 
             # Token Age (Minutes)
-            min_age = custom_filters.get('min_age')
-            max_age = custom_filters.get('max_age')
+            min_age_raw = custom_filters.get('min_age')
+            max_age_raw = custom_filters.get('max_age')
+            parsed_min_age = parse_filter_minutes(min_age_raw)
+            parsed_max_age = parse_filter_minutes(max_age_raw)
             age_kind = (custom_filters.get('age_kind') or 'creation').lower().strip()
-            if min_age not in (None, '') or max_age not in (None, ''):
+            if parsed_min_age is not None or parsed_max_age is not None:
                 rules = [r for r in rules if r.get('rule_type') != 'token_age']
                 rules.append({
                     'rule_type': 'token_age',
-                    'time_min': float(min_age) if min_age not in (None, '') else None,
-                    'time_max': float(max_age) if max_age not in (None, '') else None,
+                    'time_min': parsed_min_age,
+                    'time_max': parsed_max_age,
                     'search_text': age_kind
                 })
 
             # Liquidity ($)
-            min_liq = custom_filters.get('min_liq')
-            max_liq = custom_filters.get('max_liq')
+            min_liq = custom_filters.get('min_liq') if custom_filters.get('min_liq') is not None else custom_filters.get('min_liquidity')
+            max_liq = custom_filters.get('max_liq') if custom_filters.get('max_liq') is not None else custom_filters.get('max_liquidity')
             if min_liq not in (None, '') or max_liq not in (None, ''):
                 rules = [r for r in rules if r.get('rule_type') != 'liquidity']
                 rules.append({
@@ -7366,8 +7495,8 @@ def simulate_outcomes():
                 })
 
             # Volume ($)
-            min_vol = custom_filters.get('min_vol')
-            max_vol = custom_filters.get('max_vol')
+            min_vol = custom_filters.get('min_vol') if custom_filters.get('min_vol') is not None else custom_filters.get('min_volume')
+            max_vol = custom_filters.get('max_vol') if custom_filters.get('max_vol') is not None else custom_filters.get('max_volume')
             vol_tf = custom_filters.get('volume_tf') or '24h'
             if min_vol not in (None, '') or max_vol not in (None, ''):
                 rules = [r for r in rules if r.get('rule_type') != 'volume']
@@ -7376,6 +7505,19 @@ def simulate_outcomes():
                     'time_min': float(min_vol) if min_vol not in (None, '') else None,
                     'time_max': float(max_vol) if max_vol not in (None, '') else None,
                     'search_text': vol_tf
+                })
+
+            # Pre-signal Performance (% change)
+            min_perf = custom_filters.get('min_perf')
+            max_perf = custom_filters.get('max_perf')
+            perf_tf = custom_filters.get('perf_tf') or '5m'
+            if min_perf not in (None, '') or max_perf not in (None, ''):
+                rules = [r for r in rules if r.get('rule_type') != 'performance']
+                rules.append({
+                    'rule_type': 'performance',
+                    'time_min': float(min_perf) if min_perf not in (None, '') else None,
+                    'time_max': float(max_perf) if max_perf not in (None, '') else None,
+                    'search_text': perf_tf
                 })
 
             # Category (boost, cto, ads, etc.)
@@ -7414,24 +7556,48 @@ def simulate_outcomes():
                     'search_text': str(ex_plat).strip()
                 })
 
-            # Token Name / Symbol Filter (substring or regex)
-            name_flt = custom_filters.get('name_filter')
+            # Token Name / Symbol Filter (substring, exact, or regex)
+            name_flt = custom_filters.get('name_filter') if custom_filters.get('name_filter') is not None else custom_filters.get('keywords')
+            name_mode = custom_filters.get('name_mode') or 'include'
             if name_flt and str(name_flt).strip():
                 rules = [r for r in rules if r.get('rule_type') != 'token_name']
                 rules.append({
                     'rule_type': 'token_name',
-                    'search_text': str(name_flt).strip()
+                    'search_text': str(name_flt).strip(),
+                    'replace_text': name_mode
+                })
+
+            # Message / Word Filter
+            word_flt = custom_filters.get('word_filter')
+            word_mode = custom_filters.get('word_mode') or 'include'
+            if word_flt and str(word_flt).strip():
+                rules = [r for r in rules if r.get('rule_type') != 'filter']
+                rules.append({
+                    'rule_type': 'filter',
+                    'search_text': str(word_flt).strip(),
+                    'replace_text': word_mode
+                })
+
+            # Extract CA Requirement
+            extract_ca = custom_filters.get('extract_ca')
+            if extract_ca and str(extract_ca).lower() in ('yes', 'true', '1'):
+                rules = [r for r in rules if r.get('rule_type') != 'extract_ca']
+                rules.append({
+                    'rule_type': 'extract_ca',
+                    'search_text': 'yes'
                 })
 
             # DEX Payment ($)
             p_min = custom_filters.get('dex_payment_min')
             p_max = custom_filters.get('dex_payment_max')
-            if p_min not in (None, '') or p_max not in (None, ''):
+            p_label = custom_filters.get('dex_payment_label')
+            if p_min not in (None, '') or p_max not in (None, '') or (p_label and str(p_label).strip()):
                 rules = [r for r in rules if r.get('rule_type') != 'dex_payment']
                 rules.append({
                     'rule_type': 'dex_payment',
                     'time_min': float(p_min) if p_min not in (None, '') else None,
-                    'time_max': float(p_max) if p_max not in (None, '') else None
+                    'time_max': float(p_max) if p_max not in (None, '') else None,
+                    'search_text': str(p_label).strip() if p_label else ''
                 })
 
         # 3. Baseline metrics across all candidates

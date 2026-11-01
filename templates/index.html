@@ -888,13 +888,14 @@
                 </div>
 
                 <!-- Simulation Configuration & Filter Panel -->
-                <div class="workflow-card" style="padding: 1.25rem; margin-bottom: 1.5rem; background: linear-gradient(135deg, rgba(30, 41, 59, 0.4), rgba(15, 23, 42, 0.6)); border: 1px solid rgba(148, 163, 184, 0.15);">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 10px;">
+                <div class="workflow-card" style="padding: 1.25rem; margin-bottom: 1.5rem; background: linear-gradient(135deg, rgba(30, 41, 59, 0.45), rgba(15, 23, 42, 0.65)); border: 1px solid rgba(148, 163, 184, 0.15);">
+                    <!-- Header with System & Timeframe Segmented Controls -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.1rem; flex-wrap: wrap; gap: 10px;">
                         <div style="display: flex; align-items: center; gap: 8px;">
-                            <span style="font-size: 1.1rem;">⚡</span>
-                            <span style="font-size: 0.85rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-main);">Strategy Configuration &amp; Rule Filters</span>
+                            <span style="font-size: 1.15rem;">⚡</span>
+                            <span style="font-size: 0.88rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-main);">Strategy Configuration &amp; Rule Filters</span>
                         </div>
-                        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
                             <div style="display: flex; align-items: center; gap: 6px;">
                                 <span style="font-size: 0.78rem; color: var(--text-muted); font-weight: 500;">Source:</span>
                                 <div class="segmented-pill-group">
@@ -916,93 +917,212 @@
                     </div>
 
                     <!-- Workflow Preset Picker & Quick Info -->
-                    <div style="display: grid; grid-template-columns: 1fr auto; gap: 12px; margin-bottom: 1.25rem; align-items: center;">
-                        <div style="position: relative;">
-                            <select id="outcomes-workflow-select" class="form-input" onchange="handleOutcomesWorkflowSelect(this.value)" style="width: 100%; background: rgba(15, 23, 42, 0.8); border-color: rgba(148, 163, 184, 0.3); padding-left: 2.2rem; font-weight: 500;">
-                                <option value="">-- Or choose an active workflow preset to auto-load rules --</option>
-                            </select>
-                            <span style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 1rem; pointer-events: none;">📂</span>
+                    <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 10px; padding: 12px 14px; margin-bottom: 1.25rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 8px;">
+                            <label style="font-size: 0.78rem; font-weight: 700; color: #cbd5e1; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 6px;">
+                                <span>📂</span> Load Predefined Workflow (Auto-Populate All Rules):
+                            </label>
+                            <div id="outcomes-active-filter-summary" style="font-size: 0.76rem; color: #94a3b8; display: flex; align-items: center; gap: 6px;">
+                                <span>Manual Filters Active</span>
+                            </div>
                         </div>
-                        <div id="outcomes-active-filter-summary" style="font-size: 0.76rem; color: #94a3b8; display: flex; align-items: center; gap: 6px;">
-                            <span>Custom Filters Active</span>
+                        <div style="position: relative;">
+                            <select id="outcomes-workflow-select" class="form-input" onchange="handleOutcomesWorkflowSelect(this.value)" style="width: 100%; background: rgba(15, 23, 42, 0.9); border-color: rgba(148, 163, 184, 0.35); padding: 8px 12px; font-weight: 600; color: #f1f5f9; cursor: pointer;">
+                                <option value="">-- Select a predefined workflow to auto-fill all its filters below --</option>
+                            </select>
                         </div>
                     </div>
 
-                    <!-- Filter Criteria Inputs Grid -->
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
-                        <div>
-                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Market Cap Min ($)</label>
-                            <input type="number" id="outcomes-filter-min-mc" class="form-input" placeholder="e.g. 10000" style="width: 100%;">
+                    <!-- Full Filter Criteria Sections Grid -->
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px;">
+                        
+                        <!-- Card 1: Valuation & Liquidity -->
+                        <div style="background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(148, 163, 184, 0.12); border-radius: 10px; padding: 12px;">
+                            <div style="font-size: 0.74rem; font-weight: 700; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+                                <span>💰</span> Valuation &amp; Liquidity
+                            </div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">MC Min ($)</label>
+                                    <input type="number" id="outcomes-filter-min-mc" class="form-input" placeholder="e.g. 10000" style="width: 100%;">
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">MC Max ($)</label>
+                                    <input type="number" id="outcomes-filter-max-mc" class="form-input" placeholder="e.g. 500000" style="width: 100%;">
+                                </div>
+                            </div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Liquidity Min ($)</label>
+                                    <input type="number" id="outcomes-filter-min-liq" class="form-input" placeholder="e.g. 5000" style="width: 100%;">
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Liquidity Max ($)</label>
+                                    <input type="number" id="outcomes-filter-max-liq" class="form-input" placeholder="e.g. 100000" style="width: 100%;">
+                                </div>
+                            </div>
+                            <div style="display: grid; grid-template-columns: 80px 1fr 1fr; gap: 8px;">
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Vol Window</label>
+                                    <select id="outcomes-filter-volume-tf" class="form-input" style="width: 100%;">
+                                        <option value="5m">5m</option>
+                                        <option value="1h">1h</option>
+                                        <option value="6h">6h</option>
+                                        <option value="24h" selected>24h</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Vol Min ($)</label>
+                                    <input type="number" id="outcomes-filter-min-vol" class="form-input" placeholder="0" style="width: 100%;">
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Vol Max ($)</label>
+                                    <input type="number" id="outcomes-filter-max-vol" class="form-input" placeholder="∞" style="width: 100%;">
+                                </div>
+                            </div>
                         </div>
-                        <div>
-                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Market Cap Max ($)</label>
-                            <input type="number" id="outcomes-filter-max-mc" class="form-input" placeholder="e.g. 500000" style="width: 100%;">
+
+                        <!-- Card 2: Timing, Age & Pre-Signal Momentum -->
+                        <div style="background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(148, 163, 184, 0.12); border-radius: 10px; padding: 12px;">
+                            <div style="font-size: 0.74rem; font-weight: 700; color: #a78bfa; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+                                <span>⏱️</span> Timing &amp; Momentum
+                            </div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Token Age Min</label>
+                                    <input type="text" id="outcomes-filter-min-age" class="form-input" placeholder="e.g. 5m, 1h, 2d" style="width: 100%;">
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Token Age Max</label>
+                                    <input type="text" id="outcomes-filter-max-age" class="form-input" placeholder="e.g. 24h, 7d" style="width: 100%;">
+                                </div>
+                            </div>
+                            <div style="margin-bottom: 8px;">
+                                <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Age Mode</label>
+                                <select id="outcomes-filter-age-kind" class="form-input" style="width: 100%;">
+                                    <option value="creation">Creation Age (Time since creation)</option>
+                                    <option value="migration">Migration Age (Time since DEX migration)</option>
+                                </select>
+                            </div>
+                            <div style="display: grid; grid-template-columns: 80px 1fr 1fr; gap: 8px;">
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Perf TF</label>
+                                    <select id="outcomes-filter-perf-tf" class="form-input" style="width: 100%;">
+                                        <option value="5m" selected>5m</option>
+                                        <option value="1h">1h</option>
+                                        <option value="6h">6h</option>
+                                        <option value="24h">24h</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Min %</label>
+                                    <input type="number" id="outcomes-filter-min-perf" class="form-input" placeholder="-∞" style="width: 100%;">
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Max %</label>
+                                    <input type="number" id="outcomes-filter-max-perf" class="form-input" placeholder="∞" style="width: 100%;">
+                                </div>
+                            </div>
                         </div>
-                        <div>
-                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Token Age Min</label>
-                            <input type="text" id="outcomes-filter-min-age" class="form-input" placeholder="e.g. 5m, 1h, 2d" style="width: 100%;">
+
+                        <!-- Card 3: Platform, Migration & DEX Payment -->
+                        <div style="background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(148, 163, 184, 0.12); border-radius: 10px; padding: 12px;">
+                            <div style="font-size: 0.74rem; font-weight: 700; color: #34d399; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+                                <span>🌐</span> Platform &amp; Classification
+                            </div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Platform</label>
+                                    <select id="outcomes-filter-platform" class="form-input" style="width: 100%;">
+                                        <option value="all">Any Platform</option>
+                                        <option value="raydium">Raydium</option>
+                                        <option value="pumpfun">Pump.fun</option>
+                                        <option value="moonshot">Moonshot</option>
+                                        <option value="meteora">Meteora</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Exclude Platform</label>
+                                    <input type="text" id="outcomes-filter-exclude-platform" class="form-input" placeholder="e.g. pumpfun|raydium" style="width: 100%;">
+                                </div>
+                            </div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Migration Status</label>
+                                    <select id="outcomes-filter-migrated" class="form-input" style="width: 100%;">
+                                        <option value="all">Any Status</option>
+                                        <option value="migrated">Migrated Only (Yes)</option>
+                                        <option value="unmigrated">Unmigrated Bonding (No)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Signal Category</label>
+                                    <select id="outcomes-filter-category" class="form-input" style="width: 100%;">
+                                        <option value="all">Any Category</option>
+                                        <option value="cto">Community Takeover (CTO)</option>
+                                        <option value="boost">Boost</option>
+                                        <option value="profile">Profile Update</option>
+                                        <option value="ad">Ad Campaign</option>
+                                        <option value="dex_paid">DEX Paid</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Payment Min ($)</label>
+                                    <input type="number" id="outcomes-filter-min-payment" class="form-input" placeholder="0" style="width: 100%;">
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Payment Max ($)</label>
+                                    <input type="number" id="outcomes-filter-max-payment" class="form-input" placeholder="∞" style="width: 100%;">
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Payment Label</label>
+                                    <input type="text" id="outcomes-filter-payment-label" class="form-input" placeholder="e.g. CTO" style="width: 100%;">
+                                </div>
+                            </div>
                         </div>
-                        <div>
-                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Token Age Max</label>
-                            <input type="text" id="outcomes-filter-max-age" class="form-input" placeholder="e.g. 24h, 7d" style="width: 100%;">
+
+                        <!-- Card 4: Names, Word Filtering & Contract Rules -->
+                        <div style="background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(148, 163, 184, 0.12); border-radius: 10px; padding: 12px;">
+                            <div style="font-size: 0.74rem; font-weight: 700; color: #fbbf24; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+                                <span>📝</span> Names, Text &amp; Contract Rules
+                            </div>
+                            <div style="display: grid; grid-template-columns: 110px 1fr; gap: 8px; margin-bottom: 8px;">
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Name Mode</label>
+                                    <select id="outcomes-filter-name-mode" class="form-input" style="width: 100%;">
+                                        <option value="include">Allow</option>
+                                        <option value="exclude">Block</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Token Name / Symbol</label>
+                                    <input type="text" id="outcomes-filter-name" class="form-input" placeholder="e.g. trump, doge, pepe" style="width: 100%;">
+                                </div>
+                            </div>
+                            <div style="display: grid; grid-template-columns: 110px 1fr; gap: 8px; margin-bottom: 8px;">
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Word Mode</label>
+                                    <select id="outcomes-filter-word-mode" class="form-input" style="width: 100%;">
+                                        <option value="include">Require</option>
+                                        <option value="exclude">Block</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Word Regex / Pattern</label>
+                                    <input type="text" id="outcomes-filter-word" class="form-input" placeholder="e.g. scam|dump|presale" style="width: 100%;">
+                                </div>
+                            </div>
+                            <div>
+                                <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Contract Address Requirement</label>
+                                <select id="outcomes-filter-extract-ca" class="form-input" style="width: 100%;">
+                                    <option value="all">Any (Optional CA)</option>
+                                    <option value="yes">Require Valid Contract Address (Extract CA)</option>
+                                </select>
+                            </div>
                         </div>
-                        <div>
-                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Age Kind</label>
-                            <select id="outcomes-filter-age-kind" class="form-input" style="width: 100%;">
-                                <option value="creation">Creation Age</option>
-                                <option value="migration">Migration Age</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Min Liquidity ($)</label>
-                            <input type="number" id="outcomes-filter-min-liq" class="form-input" placeholder="e.g. 5000" style="width: 100%;">
-                        </div>
-                        <div>
-                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Min 24h Volume ($)</label>
-                            <input type="number" id="outcomes-filter-min-vol" class="form-input" placeholder="e.g. 10000" style="width: 100%;">
-                        </div>
-                        <div>
-                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Migration Status</label>
-                            <select id="outcomes-filter-migrated" class="form-input" style="width: 100%;">
-                                <option value="all">Any Status</option>
-                                <option value="migrated">Migrated Only (Pump/Moonshot)</option>
-                                <option value="unmigrated">Unmigrated Bonding Curve</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Platform</label>
-                            <select id="outcomes-filter-platform" class="form-input" style="width: 100%;">
-                                <option value="all">Any Platform</option>
-                                <option value="raydium">Raydium</option>
-                                <option value="pumpfun">Pump.fun</option>
-                                <option value="moonshot">Moonshot</option>
-                                <option value="meteora">Meteora</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Exclude Platform</label>
-                            <select id="outcomes-filter-exclude-platform" class="form-input" style="width: 100%;">
-                                <option value="">None</option>
-                                <option value="pumpfun">Exclude Pump.fun</option>
-                                <option value="moonshot">Exclude Moonshot</option>
-                                <option value="raydium">Exclude Raydium</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Category</label>
-                            <select id="outcomes-filter-category" class="form-input" style="width: 100%;">
-                                <option value="all">Any Category</option>
-                                <option value="cto">Community Takeover (CTO)</option>
-                                <option value="boost">Boost</option>
-                                <option value="profile">Profile Update</option>
-                                <option value="ad">Ad Campaign</option>
-                                <option value="dex_paid">DEX Paid</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label style="display: block; font-size: 0.74rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase;">Name / Symbol Keywords</label>
-                            <input type="text" id="outcomes-filter-keywords" class="form-input" placeholder="e.g. trump, doge, pepe" style="width: 100%;">
-                        </div>
+
                     </div>
                 </div>
 
