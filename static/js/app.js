@@ -1412,23 +1412,43 @@ function renderRules() {
         const div = document.createElement('div');
         div.className = `rule-row${rule.rule_type === 'token_name' ? ' token-name-rule-row' : ''}`;
         
-        let badgeColor = 'var(--accent-color)';
-        if (rule.rule_type === 'token_age') badgeColor = '#3b82f6';
-        else if (rule.rule_type === 'market_cap') badgeColor = '#10b981';
-        else if (rule.rule_type === 'dex_payment') badgeColor = '#06b6d4';
-        else if (rule.rule_type === 'category') badgeColor = '#8b5cf6';
-        else if (rule.rule_type === 'migrated') badgeColor = '#06b6d4';
-        else if (rule.rule_type === 'performance') badgeColor = '#f59e0b';
-        else if (rule.rule_type === 'liquidity') badgeColor = '#14b8a6';
-        else if (rule.rule_type === 'volume') badgeColor = '#0ea5e9';
-        else if (rule.rule_type === 'show_wallet') badgeColor = '#0ea5e9';
-        else if (rule.rule_type === 'exclude_platform') badgeColor = '#ef4444';
-        else if (rule.rule_type === 'token_name') badgeColor = '#ec4899';
-        else if (rule.rule_type === 'filter') badgeColor = '#f43f5e';
+        let badgeColor = '#06b6d4';
+        let badgeBg = 'rgba(6, 182, 212, 0.1)';
+        let badgeBorder = 'rgba(6, 182, 212, 0.22)';
+        
+        if (rule.rule_type === 'token_age') {
+            badgeColor = '#60a5fa'; badgeBg = 'rgba(96, 165, 250, 0.1)'; badgeBorder = 'rgba(96, 165, 250, 0.22)';
+        } else if (rule.rule_type === 'market_cap') {
+            badgeColor = '#34d399'; badgeBg = 'rgba(52, 211, 153, 0.1)'; badgeBorder = 'rgba(52, 211, 153, 0.22)';
+        } else if (rule.rule_type === 'dex_payment') {
+            badgeColor = '#22d3ee'; badgeBg = 'rgba(34, 211, 238, 0.1)'; badgeBorder = 'rgba(34, 211, 238, 0.22)';
+        } else if (rule.rule_type === 'category') {
+            badgeColor = '#a78bfa'; badgeBg = 'rgba(167, 139, 250, 0.1)'; badgeBorder = 'rgba(167, 139, 250, 0.22)';
+        } else if (rule.rule_type === 'boost_count') {
+            badgeColor = '#f472b6'; badgeBg = 'rgba(244, 114, 182, 0.1)'; badgeBorder = 'rgba(244, 114, 182, 0.22)';
+        } else if (rule.rule_type === 'migrated') {
+            badgeColor = '#2dd4bf'; badgeBg = 'rgba(45, 212, 191, 0.1)'; badgeBorder = 'rgba(45, 212, 191, 0.22)';
+        } else if (rule.rule_type === 'performance') {
+            badgeColor = '#fbbf24'; badgeBg = 'rgba(251, 191, 36, 0.1)'; badgeBorder = 'rgba(251, 191, 36, 0.22)';
+        } else if (rule.rule_type === 'liquidity') {
+            badgeColor = '#2dd4bf'; badgeBg = 'rgba(45, 212, 191, 0.1)'; badgeBorder = 'rgba(45, 212, 191, 0.22)';
+        } else if (rule.rule_type === 'volume') {
+            badgeColor = '#38bdf8'; badgeBg = 'rgba(56, 189, 248, 0.1)'; badgeBorder = 'rgba(56, 189, 248, 0.22)';
+        } else if (rule.rule_type === 'show_wallet') {
+            badgeColor = '#38bdf8'; badgeBg = 'rgba(56, 189, 248, 0.1)'; badgeBorder = 'rgba(56, 189, 248, 0.22)';
+        } else if (rule.rule_type === 'exclude_platform') {
+            badgeColor = '#f87171'; badgeBg = 'rgba(248, 113, 113, 0.1)'; badgeBorder = 'rgba(248, 113, 113, 0.22)';
+        } else if (rule.rule_type === 'token_name') {
+            badgeColor = '#f472b6'; badgeBg = 'rgba(244, 114, 182, 0.1)'; badgeBorder = 'rgba(244, 114, 182, 0.22)';
+        } else if (rule.rule_type === 'indicator') {
+            badgeColor = '#818cf8'; badgeBg = 'rgba(129, 140, 248, 0.1)'; badgeBorder = 'rgba(129, 140, 248, 0.22)';
+        } else if (rule.rule_type === 'filter') {
+            badgeColor = '#fb7185'; badgeBg = 'rgba(251, 113, 133, 0.1)'; badgeBorder = 'rgba(251, 113, 133, 0.22)';
+        }
         
         const ruleLabel = rule.rule_type === 'token_name' ? 'TOKEN NAME FILTER' : rule.rule_type.replaceAll('_', ' ').toUpperCase();
         let badgeHtml = `<div class="rule-row__badge" style="display: flex; align-items: center;">
-            <span class="status-badge" style="background: ${badgeColor}; color: white; width: auto; min-width: 120px; padding: 6px 12px; text-align: center; justify-content: center; display: inline-flex;">${ruleLabel}</span>
+            <span class="status-badge" style="background: ${badgeBg}; color: ${badgeColor}; border: 1px solid ${badgeBorder}; width: auto; min-width: 120px; padding: 4px 10px; font-weight: 600; font-size: 0.72rem; letter-spacing: 0.03em; text-align: center; justify-content: center; display: inline-flex; border-radius: 6px;">${ruleLabel}</span>
         </div>`;
         
         let fieldsHtml = `<div class="rule-row__fields${rule.rule_type === 'token_name' ? ' token-name-rule-fields' : ''}" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; flex: 1;">`;
@@ -1506,6 +1526,39 @@ function renderRules() {
                     <option value="dex_ad" ${category === 'dex_ad' ? 'selected' : ''}>DEX Ad</option>
                 </select>
             `;
+        } else if (rule.rule_type === 'boost_count') {
+            fieldsHtml += `
+                <label style="font-size:0.85rem; color:var(--text-muted)">Min Boosts:</label>
+                <input type="number" class="form-input" style="width:85px" placeholder="0" value="${(rule.time_min !== undefined && rule.time_min !== null) ? rule.time_min : ''}" oninput="updateRule(${index}, 'time_min', this.value)">
+                <label style="font-size:0.85rem; color:var(--text-muted)">Max Boosts:</label>
+                <input type="number" class="form-input" style="width:85px" placeholder="∞" value="${(rule.time_max !== undefined && rule.time_max !== null) ? rule.time_max : ''}" oninput="updateRule(${index}, 'time_max', this.value)">
+            `;
+        } else if (rule.rule_type === 'indicator') {
+            const indKey = rule.search_text || 'net_buy_pressure';
+            const indOptions = [
+                { key: 'net_buy_pressure', label: '1. Net Buy Pressure ($)', minLabel: 'Min ($):', maxLabel: 'Max ($):', ph: '0' },
+                { key: 'buy_dominance_pct', label: 'Buy Dominance (%)', minLabel: 'Min (%):', maxLabel: 'Max (%):', ph: '50' },
+                { key: 'buy_pressure_accel', label: '2. Buy Pressure Accel (%)', minLabel: 'Min (%):', maxLabel: 'Max (%):', ph: '0' },
+                { key: 'buy_vol_accel', label: '3. Buy Vol Accel (x)', minLabel: 'Min (x):', maxLabel: 'Max (x):', ph: '1.0' },
+                { key: 'sell_vol_accel', label: '4. Sell Vol Accel (x)', minLabel: 'Min (x):', maxLabel: 'Max (x):', ph: '1.0' },
+                { key: 'net_buy_to_liq', label: '5. Net Buy / Liq (%)', minLabel: 'Min (%):', maxLabel: 'Max (%):', ph: '0' },
+                { key: 'vol_to_mc', label: '6. Volume / MC (x)', minLabel: 'Min (x):', maxLabel: 'Max (x):', ph: '0.5' },
+                { key: 'vol_to_liq', label: '7. Volume / Liq (x)', minLabel: 'Min (x):', maxLabel: 'Max (x):', ph: '1.0' },
+                { key: 'buyer_seller_ratio', label: '8. Buyer / Seller Ratio', minLabel: 'Min (ratio):', maxLabel: 'Max (ratio):', ph: '1.0' },
+                { key: 'holder_concentration', label: '9. Top 10 Holders (%)', minLabel: 'Min (%):', maxLabel: 'Max (%):', ph: '0' },
+                { key: 'round_trip_cost', label: '10. Round-Trip Cost (%)', minLabel: 'Min (%):', maxLabel: 'Max (%):', ph: '0' }
+            ];
+            const currentInd = indOptions.find(o => o.key === indKey) || indOptions[0];
+            fieldsHtml += `
+                <label style="font-size:0.85rem; color:var(--text-muted)">Indicator:</label>
+                <select class="form-input" style="width:190px" onchange="updateRule(${index}, 'search_text', this.value); renderRules();">
+                    ${indOptions.map(o => `<option value="${o.key}" ${indKey === o.key ? 'selected' : ''}>${o.label}</option>`).join('')}
+                </select>
+                <label style="font-size:0.85rem; color:var(--text-muted)">${currentInd.minLabel}</label>
+                <input type="number" step="any" class="form-input" style="width:85px" placeholder="${currentInd.ph}" value="${(rule.time_min !== undefined && rule.time_min !== null) ? rule.time_min : ''}" oninput="updateRule(${index}, 'time_min', this.value)">
+                <label style="font-size:0.85rem; color:var(--text-muted)">${currentInd.maxLabel}</label>
+                <input type="number" step="any" class="form-input" style="width:85px" placeholder="∞" value="${(rule.time_max !== undefined && rule.time_max !== null) ? rule.time_max : ''}" oninput="updateRule(${index}, 'time_max', this.value)">
+            `;
         } else if (rule.rule_type === 'migrated') {
             const isMigrated = rule.search_text || 'yes';
             fieldsHtml += `
@@ -1576,26 +1629,99 @@ function renderRules() {
     });
 }
 
-function addRule(type) {
+function switchRuleCategory(catId, btnEl = null) {
+    const wrapper = document.querySelector('.workflow-rule-categories-wrapper');
+    if (!wrapper) return;
+    
+    if (btnEl) {
+        wrapper.querySelectorAll('.rule-cat-pill').forEach(b => b.classList.remove('active'));
+        btnEl.classList.add('active');
+    }
+    
+    const panels = wrapper.querySelectorAll('.rule-cat-panel');
+    panels.forEach(p => {
+        if (catId === 'all') {
+            p.classList.remove('hidden');
+            p.style.display = 'grid';
+        } else if (p.id === `rule-cat-panel-${catId}`) {
+            p.classList.remove('hidden');
+            p.style.display = 'grid';
+        } else {
+            p.classList.add('hidden');
+            p.style.display = 'none';
+        }
+    });
+}
+
+function addRule(type, subtype = null, defaults = {}) {
     const newRule = { rule_type: type };
     if (type === 'token_age') {
-        newRule.search_text = 'creation';
+        newRule.search_text = subtype || 'creation';
+        newRule.time_min = defaults.min !== undefined ? defaults.min : '';
+        newRule.time_max = defaults.max !== undefined ? defaults.max : '';
+    } else if (type === 'performance') {
+        newRule.search_text = subtype || '5m';
+        newRule.time_min = defaults.min !== undefined ? defaults.min : '';
+        newRule.time_max = defaults.max !== undefined ? defaults.max : '';
+    } else if (type === 'volume') {
+        newRule.search_text = subtype || '24h';
+        newRule.time_min = defaults.min !== undefined ? defaults.min : '';
+        newRule.time_max = defaults.max !== undefined ? defaults.max : '';
+    } else if (type === 'liquidity') {
+        newRule.time_min = defaults.min !== undefined ? defaults.min : '';
+        newRule.time_max = defaults.max !== undefined ? defaults.max : '';
+    } else if (type === 'market_cap') {
+        newRule.time_min = defaults.min !== undefined ? defaults.min : '';
+        newRule.time_max = defaults.max !== undefined ? defaults.max : '';
+    } else if (type === 'dex_payment') {
+        newRule.search_text = subtype || '';
+        newRule.time_min = defaults.min !== undefined ? defaults.min : '';
+        newRule.time_max = defaults.max !== undefined ? defaults.max : '';
+    } else if (type === 'category') {
+        newRule.search_text = subtype || 'boost';
+    } else if (type === 'boost_count') {
+        newRule.time_min = defaults.min !== undefined ? defaults.min : 10;
+        newRule.time_max = defaults.max !== undefined ? defaults.max : '';
+    } else if (type === 'migrated') {
+        newRule.search_text = subtype || 'yes';
     } else if (type === 'show_wallet') {
-        newRule.search_text = 'yes';
+        newRule.search_text = subtype || 'yes';
+    } else if (type === 'exclude_platform') {
+        newRule.search_text = subtype || 'pump\\.fun';
     } else if (type === 'token_name') {
         newRule.search_text = encodeTokenNameFilter({ exact: [], contains: [] });
         newRule.replace_text = 'include';
     } else if (type === 'filter') {
-        newRule.search_text = '';
+        newRule.search_text = subtype || '';
         newRule.replace_text = 'include';
-    } else if (type === 'volume') {
-        newRule.search_text = '24h';
-    } else if (type === 'category') {
-        newRule.search_text = 'boost';
+    } else if (type === 'indicator') {
+        newRule.search_text = subtype || 'net_buy_pressure';
+        if (defaults.min !== undefined) newRule.time_min = defaults.min;
+        else if (newRule.search_text === 'net_buy_pressure') newRule.time_min = 0;
+        else if (newRule.search_text === 'buy_dominance_pct') newRule.time_min = 60;
+        else if (newRule.search_text === 'buyer_seller_ratio') newRule.time_min = 1.2;
+        else if (newRule.search_text === 'round_trip_cost') {
+            newRule.time_min = '';
+            newRule.time_max = defaults.max !== undefined ? defaults.max : 5.0;
+        } else if (newRule.search_text === 'holder_concentration') {
+            newRule.time_min = '';
+            newRule.time_max = defaults.max !== undefined ? defaults.max : 30.0;
+        } else {
+            newRule.time_min = '';
+            newRule.time_max = '';
+        }
     }
     currentRules.push(newRule);
     renderRules();
     if (type === 'token_name') openTokenNameFilterModal(currentRules.length - 1);
+    
+    // Smooth scroll to the newly added rule
+    setTimeout(() => {
+        const container = document.getElementById('rules-container');
+        if (container && container.lastElementChild) {
+            container.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    }, 50);
 }
 
 function openTokenNameFilterModal(index) {
@@ -2099,6 +2225,12 @@ document.getElementById('setting-api-hash').value = settings.api_hash || '';
 document.getElementById('setting-phone').value = settings.phone || '';
 if (document.getElementById('setting-helius-key')) {
     document.getElementById('setting-helius-key').value = settings.helius_api_key || '';
+}
+if (document.getElementById('setting-helius-key-2')) {
+    document.getElementById('setting-helius-key-2').value = settings.helius_api_key_2 || '';
+}
+if (document.getElementById('setting-helius-key-3')) {
+    document.getElementById('setting-helius-key-3').value = settings.helius_api_key_3 || '';
 }
 if (document.getElementById('setting-cto-dex-payment-address')) {
     document.getElementById('setting-cto-dex-payment-address').value = settings.cto_dex_payment_address || '';
@@ -2610,6 +2742,8 @@ function initializeDexValidated() {
 async function saveHeliusSettings(e) {
     if (e) e.preventDefault();
     const heliusKey = document.getElementById('setting-helius-key').value.trim();
+    const heliusKey2 = document.getElementById('setting-helius-key-2') ? document.getElementById('setting-helius-key-2').value.trim() : '';
+    const heliusKey3 = document.getElementById('setting-helius-key-3') ? document.getElementById('setting-helius-key-3').value.trim() : '';
     const paymentAddress = document.getElementById('setting-cto-dex-payment-address').value.trim();
     const walletPollEnabled = document.getElementById('setting-wallet-poll-enabled').value;
     const heliusPollEnabled = document.getElementById('setting-helius-poll-enabled').value;
@@ -2621,6 +2755,8 @@ async function saveHeliusSettings(e) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 helius_api_key: heliusKey,
+                helius_api_key_2: heliusKey2,
+                helius_api_key_3: heliusKey3,
                 cto_dex_payment_address: paymentAddress,
                 wallet_tracker_poll_enabled: walletPollEnabled,
                 helius_poll_enabled: heliusPollEnabled,
@@ -2630,6 +2766,8 @@ async function saveHeliusSettings(e) {
         const result = await res.json();
         if (result.success) {
             settings.helius_api_key = heliusKey;
+            settings.helius_api_key_2 = heliusKey2;
+            settings.helius_api_key_3 = heliusKey3;
             settings.cto_dex_payment_address = paymentAddress;
             settings.wallet_tracker_poll_enabled = walletPollEnabled;
             settings.helius_poll_enabled = heliusPollEnabled;
@@ -4188,19 +4326,387 @@ function renderTokenDataPagination(total, count, page, totalPages) {
     controlsEl.innerHTML = html;
 }
 
-function openTgMsgModal(encodedMsg, encodedTokenName) {
+function computeAkoueflowIndicatorsJs(metrics, row = {}) {
+    if (!metrics && !row) return null;
+    metrics = metrics || {};
+    
+    const buy5m = Number(metrics.volume_buy_5m_usd || 0);
+    const sell5m = Number(metrics.volume_sell_5m_usd || 0);
+    const tot5m = buy5m + sell5m;
+    const netBuy5m = buy5m - sell5m;
+    const buyDom5m = tot5m > 0 ? (buy5m / tot5m) * 100 : 50.0;
+
+    const buy1h = Number(metrics.volume_buy_1h_usd || 0);
+    const sell1h = Number(metrics.volume_sell_1h_usd || 0);
+    const tot1h = buy1h + sell1h;
+
+    const ratio5m = tot5m > 0 ? (buy5m / tot5m) : 0.5;
+    const ratio1h = tot1h > 0 ? (buy1h / tot1h) : 0.5;
+    const buyPressureAccel = (ratio5m - ratio1h) * 100.0;
+
+    const buyVolAccel = buy1h > 0 ? (buy5m * 12.0) / buy1h : (buy5m > 0 ? 12.0 : 1.0);
+    const sellVolAccel = sell1h > 0 ? (sell5m * 12.0) / sell1h : (sell5m > 0 ? 12.0 : 1.0);
+
+    const liq = Number(row.liquidity_usd || metrics.liquidity_usd || 0);
+    const v24 = Number(row.volume_24h || metrics.volume_24h || 0);
+    const rawMcStr = String(row.market_cap || metrics.market_cap || '');
+    let mc = 0;
+    if (rawMcStr.includes('M')) mc = parseFloat(rawMcStr.replace(/[^0-9.]/g, '')) * 1_000_000;
+    else if (rawMcStr.includes('K')) mc = parseFloat(rawMcStr.replace(/[^0-9.]/g, '')) * 1_000;
+    else mc = parseFloat(rawMcStr.replace(/[^0-9.]/g, '')) || 0;
+
+    const netBuyToLiq = liq > 0 ? (netBuy5m / liq) * 100.0 : 0.0;
+    const volToMc = mc > 0 ? (v24 / mc) : null;
+    const volToLiq = liq > 0 ? (v24 / liq) : null;
+
+    const ub = Number(metrics.unique_buyers || 0);
+    const us = Number(metrics.unique_sellers || 0);
+    const bsRatio = us > 0 ? (ub / us) : (ub > 0 ? ub : 1.0);
+
+    const hc = metrics.top10_concentration_pct != null ? Number(metrics.top10_concentration_pct) : null;
+
+    const slip = metrics.slippage || {};
+    const bSlip = slip.buy_slippage_pct != null ? Number(slip.buy_slippage_pct) : null;
+    const sSlip = slip.sell_slippage_pct != null ? Number(slip.sell_slippage_pct) : null;
+    const sellable = slip.sellable !== false;
+    let roundTripCost = null;
+    if (sellable && bSlip != null && sSlip != null) {
+        roundTripCost = bSlip + sSlip + 0.50;
+    } else if (sellable && bSlip != null) {
+        roundTripCost = bSlip * 2.0 + 0.50;
+    }
+
+    return {
+        net_buy_pressure: netBuy5m,
+        buy_dominance_pct: buyDom5m,
+        buy_pressure_accel: buyPressureAccel,
+        buy_vol_accel: buyVolAccel,
+        sell_vol_accel: sellVolAccel,
+        net_buy_to_liq: netBuyToLiq,
+        vol_to_mc: volToMc,
+        vol_to_liq: volToLiq,
+        buyer_seller_ratio: bsRatio,
+        holder_concentration: hc,
+        round_trip_cost: roundTripCost
+    };
+}
+
+function renderIndicatorsTableCell(r) {
+    let ind = r.metrics_data?.indicators;
+    if (!ind && r.metrics_data) {
+        ind = computeAkoueflowIndicatorsJs(r.metrics_data, r);
+    }
+    if (!ind) {
+        return `<td><span style="color: var(--text-muted); font-size: 0.75rem;">-</span></td>`;
+    }
+
+    const nb = Number(ind.net_buy_pressure || 0);
+    const nbSign = nb > 0 ? '+' : '';
+    const nbColor = nb > 0 ? '#34d399' : (nb < 0 ? '#f87171' : '#94a3b8');
+    const dom = Number(ind.buy_dominance_pct || 50).toFixed(0);
+    const rtc = ind.round_trip_cost != null ? `${Number(ind.round_trip_cost).toFixed(1)}%` : 'N/A';
+    const bsr = Number(ind.buyer_seller_ratio || 1).toFixed(1);
+    const top10 = ind.holder_concentration != null ? `${Number(ind.holder_concentration).toFixed(0)}%` : 'N/A';
+
+    return `
+        <td style="vertical-align: middle;">
+            <div style="display: flex; flex-direction: column; gap: 3px; font-size: 0.72rem;">
+                <div style="display: flex; gap: 4px; align-items: center; white-space: nowrap;">
+                    <span style="background: rgba(52,211,153,0.12); color: ${nbColor}; font-weight: 700; padding: 1px 5px; border-radius: 4px;" title="Net Buy Pressure (5m): ${nbSign}$${Math.abs(nb).toLocaleString()}">${nbSign}${formatUsdMetric(Math.abs(nb))}</span>
+                    <span style="background: rgba(99,102,241,0.15); color: #a5b4fc; font-weight: 600; padding: 1px 5px; border-radius: 4px;" title="5m Buy Dominance">${dom}% Buy</span>
+                </div>
+                <div style="display: flex; gap: 4px; align-items: center; color: var(--text-muted); font-size: 0.68rem; white-space: nowrap;">
+                    <span title="Round-Trip Cost (Buy + Sell Slippage + DEX Fee)">RT: <strong style="color: ${ind.round_trip_cost > 6 ? '#ef4444' : '#e2e8f0'}">${rtc}</strong></span>
+                    <span>·</span>
+                    <span title="Unique Buyer / Seller Ratio">B/S: <strong style="color: ${bsr >= 1.5 ? '#34d399' : '#e2e8f0'}">${bsr}x</strong></span>
+                    <span>·</span>
+                    <span title="Top 10 Holder Concentration">Top10: <strong style="color: ${top10 > 30 ? '#ef4444' : '#e2e8f0'}">${top10}</strong></span>
+                </div>
+            </div>
+        </td>
+    `;
+}
+
+function renderVisualMetricsCards(metrics) {
+    if (!metrics || typeof metrics !== 'object') return '';
+
+    const auth = metrics.authorities || {};
+    const mintRenounced = auth.is_mint_renounced === true || auth.mint_authority === null;
+    const freezeRenounced = auth.is_freeze_renounced === true || auth.freeze_authority === null;
+
+    const slip = metrics.slippage || {};
+    const buySlip = slip.buy_slippage_pct != null ? `${slip.buy_slippage_pct}%` : 'N/A';
+    const sellSlip = slip.sell_slippage_pct != null ? `${slip.sell_slippage_pct}%` : 'N/A';
+    const sellable = slip.sellable !== false;
+
+    const bc = metrics.bonding_curve;
+    const isPump = bc && bc.is_pump;
+    const pumpProg = isPump ? (bc.progress_pct != null ? `${bc.progress_pct}%` : '0%') : null;
+    const realSol = isPump && bc.real_sol_reserves != null ? `${bc.real_sol_reserves} SOL` : null;
+
+    const top10 = metrics.top10_concentration_pct != null ? `${metrics.top10_concentration_pct}%` : 'N/A';
+    const creator = metrics.creator_wallet;
+    const creatorShort = creator ? `${creator.slice(0, 4)}...${creator.slice(-4)}` : 'Unknown';
+    const creatorTokens = metrics.creator_wallet_history ? (metrics.creator_wallet_history.total_created || 0) : 0;
+
+    const formatUsd = (val) => {
+        val = Number(val || 0);
+        if (val >= 1000000) return `$${(val / 1000000).toFixed(2)}M`;
+        if (val >= 1000) return `$${(val / 1000).toFixed(1)}K`;
+        return `$${val.toFixed(2)}`;
+    };
+
+    const vBuy5m = formatUsd(metrics.volume_buy_5m_usd);
+    const vSell5m = formatUsd(metrics.volume_sell_5m_usd);
+    const vBuy1h = formatUsd(metrics.volume_buy_1h_usd);
+    const vSell1h = formatUsd(metrics.volume_sell_1h_usd);
+    const uBuyers = Number(metrics.unique_buyers || 0).toLocaleString();
+    const uSellers = Number(metrics.unique_sellers || 0).toLocaleString();
+
+    const ind = metrics.indicators || computeAkoueflowIndicatorsJs(metrics) || {};
+    const nbVal = Number(ind.net_buy_pressure || 0);
+    const nbSign = nbVal > 0 ? '+' : '';
+    const nbColor = nbVal > 0 ? '#34d399' : (nbVal < 0 ? '#f87171' : '#94a3b8');
+    const domVal = Number(ind.buy_dominance_pct || 50).toFixed(1);
+
+    const bpaVal = Number(ind.buy_pressure_accel || 0);
+    const bpaSign = bpaVal > 0 ? '+' : '';
+    const bpaColor = bpaVal > 0 ? '#34d399' : (bpaVal < 0 ? '#f87171' : '#94a3b8');
+
+    const bvaVal = Number(ind.buy_vol_accel || 1).toFixed(2);
+    const svaVal = Number(ind.sell_vol_accel || 1).toFixed(2);
+
+    const nblVal = Number(ind.net_buy_to_liq || 0);
+    const nblSign = nblVal > 0 ? '+' : '';
+
+    const vmcVal = ind.vol_to_mc != null ? `${Number(ind.vol_to_mc).toFixed(2)}x` : 'N/A';
+    const vliqVal = ind.vol_to_liq != null ? `${Number(ind.vol_to_liq).toFixed(2)}x` : 'N/A';
+
+    const bsrVal = Number(ind.buyer_seller_ratio || 1).toFixed(2);
+    const hcVal = ind.holder_concentration != null ? `${Number(ind.holder_concentration).toFixed(1)}%` : 'N/A';
+    const rtcVal = ind.round_trip_cost != null ? `${Number(ind.round_trip_cost).toFixed(2)}%` : 'Unsellable / High Risk';
+    const rtcColor = ind.round_trip_cost != null ? (ind.round_trip_cost <= 5 ? '#34d399' : (ind.round_trip_cost <= 10 ? '#fbbf24' : '#ef4444')) : '#ef4444';
+
+    return `
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px;">
+            <!-- Authorities Card -->
+            <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 10px 12px;">
+                <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-bottom: 6px;">Authorities</div>
+                <div style="display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="color:var(--text-muted);">Mint:</span>
+                        <span style="color:${mintRenounced ? '#34d399' : '#f87171'}; font-weight:600; background:${mintRenounced ? 'rgba(52,211,153,0.1)' : 'rgba(248,113,113,0.1)'}; padding:1px 6px; border-radius:4px;">
+                            ${mintRenounced ? '✅ Revoked' : '⚠️ Active'}
+                        </span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="color:var(--text-muted);">Freeze:</span>
+                        <span style="color:${freezeRenounced ? '#34d399' : '#ef4444'}; font-weight:600; background:${freezeRenounced ? 'rgba(52,211,153,0.1)' : 'rgba(239,68,68,0.1)'}; padding:1px 6px; border-radius:4px;">
+                            ${freezeRenounced ? '✅ Revoked' : '🚨 Active'}
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 1 SOL Slippage & Honeypot -->
+            <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 10px 12px;">
+                <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-bottom: 6px;">1 SOL Slippage</div>
+                <div style="display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem;">
+                    <div style="display:flex; justify-content:space-between;">
+                        <span style="color:var(--text-muted);">Buy / Sell:</span>
+                        <span style="font-weight:600; color:#e2e8f0;">${buySlip} / ${sellSlip}</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="color:var(--text-muted);">Sellable:</span>
+                        <span style="color:${sellable ? '#34d399' : '#ef4444'}; font-weight:600;">
+                            ${sellable ? '✅ Verified' : '❌ Honeypot'}
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Concentration & Creator -->
+            <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 10px 12px;">
+                <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-bottom: 6px;">Holders &amp; Creator</div>
+                <div style="display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem;">
+                    <div style="display:flex; justify-content:space-between;">
+                        <span style="color:var(--text-muted);">Top 10:</span>
+                        <span style="font-weight:600; color:#38bdf8;">${top10}</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between;">
+                        <span style="color:var(--text-muted);">Creator:</span>
+                        <span style="color:#a78bfa; font-weight:500;" title="${escapeHtml(creator || '')}">${creatorShort} (${creatorTokens})</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Volume & Unique Traders -->
+            <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 10px 12px;">
+                <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-bottom: 6px;">Volume &amp; Traders</div>
+                <div style="display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem;">
+                    <div style="display:flex; justify-content:space-between;">
+                        <span style="color:var(--text-muted);">5m B / S:</span>
+                        <span style="font-weight:600; color:#34d399;">${vBuy5m} <span style="color:var(--text-muted);">/</span> <span style="color:#f87171;">${vSell5m}</span></span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between;">
+                        <span style="color:var(--text-muted);">1h B / S:</span>
+                        <span style="font-weight:600; color:#34d399;">${vBuy1h} <span style="color:var(--text-muted);">/</span> <span style="color:#f87171;">${vSell1h}</span></span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between;">
+                        <span style="color:var(--text-muted);">Traders:</span>
+                        <span style="color:#fbbf24; font-weight:500;">${uBuyers} B / ${uSellers} S</span>
+                    </div>
+                </div>
+            </div>
+
+            ${isPump ? `
+                <!-- Pump Bonding Curve Progress -->
+                <div style="grid-column: 1 / -1; background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 8px; padding: 8px 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; margin-bottom: 4px;">
+                        <span style="color: #fbbf24; font-weight: 600;">🎯 Pump.fun Bonding Curve Progress</span>
+                        <span style="color: #fde68a; font-weight: 700;">${pumpProg} (${realSol || '0 SOL'} / ~85 SOL)</span>
+                    </div>
+                    <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden;">
+                        <div style="width: ${pumpProg}; height: 100%; background: linear-gradient(90deg, #f59e0b, #10b981); border-radius: 3px;"></div>
+                    </div>
+                </div>
+            ` : ''}
+
+            ${metrics.total_boosts ? `
+                <!-- Boosts Info -->
+                <div style="grid-column: 1 / -1; background: rgba(217, 70, 239, 0.08); border: 1px solid rgba(217, 70, 239, 0.25); border-radius: 8px; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
+                    <span style="color: #f0abfc; font-weight: 600; font-size: 0.82rem;">🚀 DexScreener Boosts</span>
+                    <span style="color: #ffffff; font-weight: 700; font-size: 0.88rem;">${Number(metrics.total_boosts).toLocaleString()} Boosts ${metrics.boost_amount ? `(+${metrics.boost_amount} this order)` : ''}</span>
+                </div>
+            ` : ''}
+
+            <!-- 10 Akoueflow Trading Indicators Section -->
+            <div style="grid-column: 1 / -1; margin-top: 6px;">
+                <div style="font-size: 0.74rem; color: #818cf8; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                    <span>📊 10 Akoueflow Trading Indicators</span>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px;">
+                    <!-- 1. Net Buy Pressure -->
+                    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 9px 11px;">
+                        <div style="font-size: 0.70rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-bottom: 4px;">1. Net Buy Pressure</div>
+                        <div style="font-size: 0.92rem; font-weight: 700; color: ${nbColor};">${nbSign}${formatUsd(Math.abs(nbVal))}</div>
+                        <div style="font-size: 0.72rem; color: #a5b4fc; margin-top: 2px;">${domVal}% Buy Dominance</div>
+                        <div style="font-size: 0.67rem; color: var(--text-muted); margin-top: 3px;">Directional trading imbalance</div>
+                    </div>
+
+                    <!-- 2. Buy Pressure Acceleration -->
+                    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 9px 11px;">
+                        <div style="font-size: 0.70rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-bottom: 4px;">2. Buy Press Accel</div>
+                        <div style="font-size: 0.92rem; font-weight: 700; color: ${bpaColor};">${bpaSign}${bpaVal.toFixed(1)}%</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">5m vs 1h buy share</div>
+                        <div style="font-size: 0.67rem; color: var(--text-muted); margin-top: 3px;">Changes in buying dominance</div>
+                    </div>
+
+                    <!-- 3. Buy Volume Acceleration -->
+                    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 9px 11px;">
+                        <div style="font-size: 0.70rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-bottom: 4px;">3. Buy Vol Accel</div>
+                        <div style="font-size: 0.92rem; font-weight: 700; color: ${bvaVal >= 1.5 ? '#34d399' : '#e2e8f0'};">${bvaVal}x</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">5m hourly pace vs 1h</div>
+                        <div style="font-size: 0.67rem; color: var(--text-muted); margin-top: 3px;">Growth in buying activity</div>
+                    </div>
+
+                    <!-- 4. Sell Volume Acceleration -->
+                    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 9px 11px;">
+                        <div style="font-size: 0.70rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-bottom: 4px;">4. Sell Vol Accel</div>
+                        <div style="font-size: 0.92rem; font-weight: 700; color: ${svaVal >= 1.5 ? '#f87171' : '#e2e8f0'};">${svaVal}x</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">5m hourly pace vs 1h</div>
+                        <div style="font-size: 0.67rem; color: var(--text-muted); margin-top: 3px;">Growth in selling activity</div>
+                    </div>
+
+                    <!-- 5. Net Buy / Liquidity -->
+                    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 9px 11px;">
+                        <div style="font-size: 0.70rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-bottom: 4px;">5. Net Buy / Liq</div>
+                        <div style="font-size: 0.92rem; font-weight: 700; color: ${nblVal > 0 ? '#34d399' : (nblVal < 0 ? '#f87171' : '#e2e8f0')};">${nblSign}${nblVal.toFixed(2)}%</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">Pool impact ratio</div>
+                        <div style="font-size: 0.67rem; color: var(--text-muted); margin-top: 3px;">Directional turnover / pool</div>
+                    </div>
+
+                    <!-- 6. Volume / Market Cap -->
+                    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 9px 11px;">
+                        <div style="font-size: 0.70rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-bottom: 4px;">6. Vol / Market Cap</div>
+                        <div style="font-size: 0.92rem; font-weight: 700; color: #38bdf8;">${vmcVal}</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">24h Turnover ratio</div>
+                        <div style="font-size: 0.67rem; color: var(--text-muted); margin-top: 3px;">Trading intensity / valuation</div>
+                    </div>
+
+                    <!-- 7. Volume / Liquidity -->
+                    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 9px 11px;">
+                        <div style="font-size: 0.70rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-bottom: 4px;">7. Vol / Liquidity</div>
+                        <div style="font-size: 0.92rem; font-weight: 700; color: #2dd4bf;">${vliqVal}</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">Pool churn multiplier</div>
+                        <div style="font-size: 0.67rem; color: var(--text-muted); margin-top: 3px;">Intensity / pool liquidity</div>
+                    </div>
+
+                    <!-- 8. Unique Buyer/Seller Ratio -->
+                    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 9px 11px;">
+                        <div style="font-size: 0.70rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-bottom: 4px;">8. Buyer / Seller</div>
+                        <div style="font-size: 0.92rem; font-weight: 700; color: ${bsrVal >= 1.2 ? '#34d399' : (bsrVal < 0.8 ? '#f87171' : '#e2e8f0')};">${bsrVal}</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">${uBuyers} B / ${uSellers} S</div>
+                        <div style="font-size: 0.67rem; color: var(--text-muted); margin-top: 3px;">Wallet participation breadth</div>
+                    </div>
+
+                    <!-- 9. Holder Concentration -->
+                    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 9px 11px;">
+                        <div style="font-size: 0.70rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-bottom: 4px;">9. Holder Concen.</div>
+                        <div style="font-size: 0.92rem; font-weight: 700; color: ${hcVal !== 'N/A' && Number(ind.holder_concentration) > 30 ? '#ef4444' : '#38bdf8'};">${hcVal}</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">Top 10 non-LP supply</div>
+                        <div style="font-size: 0.67rem; color: var(--text-muted); margin-top: 3px;">Supply concentration risk</div>
+                    </div>
+
+                    <!-- 10. Executable Round-Trip Cost -->
+                    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 9px 11px;">
+                        <div style="font-size: 0.70rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-bottom: 4px;">10. Round-Trip Cost</div>
+                        <div style="font-size: 0.92rem; font-weight: 700; color: ${rtcColor};">${rtcVal}</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">Slip + ~0.5% DEX fee</div>
+                        <div style="font-size: 0.67rem; color: var(--text-muted); margin-top: 3px;">Practical entry/exit feasibility</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function openTgMsgModal(encodedMsg, encodedTokenName, encodedMetricsData = '') {
     const rawMsg = decodeURIComponent(encodedMsg || '');
     const tokenName = decodeURIComponent(encodedTokenName || 'Token');
+    let metricsObj = null;
+    if (encodedMetricsData) {
+        try {
+            const rawMetrics = decodeURIComponent(encodedMetricsData);
+            if (rawMetrics && rawMetrics.trim()) {
+                metricsObj = JSON.parse(rawMetrics);
+            }
+        } catch (e) {
+            metricsObj = null;
+        }
+    }
     currentTgModalRawMessage = rawMsg;
 
     const modal = document.getElementById('tg-msg-modal');
     const title = document.getElementById('tg-msg-modal-title');
     const content = document.getElementById('tg-msg-content');
     const subtitle = document.getElementById('tg-msg-modal-subtitle');
+    const metricsContainer = document.getElementById('tg-metrics-container');
 
-    if (title) title.innerText = `Telegram Message: ${tokenName}`;
-    if (subtitle) subtitle.innerText = 'Exact message sent or formatted for Telegram';
+    if (title) title.innerText = `${tokenName} - Signal & Audit Details`;
+    if (subtitle) subtitle.innerText = metricsObj ? 'On-chain security audit, 1 SOL slippage & signal message' : 'Exact message sent or formatted for Telegram';
     if (content) content.innerText = rawMsg || '(No formatted message content available)';
+
+    if (metricsContainer) {
+        if (metricsObj && typeof metricsObj === 'object' && Object.keys(metricsObj).length > 0) {
+            metricsContainer.innerHTML = renderVisualMetricsCards(metricsObj);
+            metricsContainer.classList.remove('hidden');
+        } else {
+            metricsContainer.innerHTML = '';
+            metricsContainer.classList.add('hidden');
+        }
+    }
+
     if (modal) modal.classList.remove('hidden');
 }
 
@@ -4527,6 +5033,15 @@ function updateDexValidatedDataActiveFiltersCount() {
     const namePat = String(document.getElementById('dvd-token-name-pattern')?.value || '').trim();
     const wordFilter = String(document.getElementById('dvd-word-filter')?.value || '').trim();
     const preset = document.getElementById('dvd-workflow-preset')?.value;
+    const indPreset = document.getElementById('dvd-ind-preset')?.value;
+    const minNetBuy = String(document.getElementById('dvd-min-net-buy')?.value || '').trim();
+    const maxNetBuy = String(document.getElementById('dvd-max-net-buy')?.value || '').trim();
+    const minBuyDom = String(document.getElementById('dvd-min-buy-dom')?.value || '').trim();
+    const minBuyAccel = String(document.getElementById('dvd-min-buy-accel')?.value || '').trim();
+    const minBsRatio = String(document.getElementById('dvd-min-bs-ratio')?.value || '').trim();
+    const minBuyLiq = String(document.getElementById('dvd-min-buy-liq')?.value || '').trim();
+    const maxHolderConc = String(document.getElementById('dvd-max-holder-conc')?.value || '').trim();
+    const maxRoundTrip = String(document.getElementById('dvd-max-round-trip')?.value || '').trim();
 
     if (search) count++;
     if (category && category !== 'all') count++;
@@ -4550,6 +5065,15 @@ function updateDexValidatedDataActiveFiltersCount() {
     if (namePat && namePat !== '.*') count++;
     if (wordFilter) count++;
     if (preset) count++;
+    if (indPreset && indPreset !== 'all') count++;
+    if (minNetBuy) count++;
+    if (maxNetBuy) count++;
+    if (minBuyDom) count++;
+    if (minBuyAccel) count++;
+    if (minBsRatio) count++;
+    if (minBuyLiq) count++;
+    if (maxHolderConc) count++;
+    if (maxRoundTrip) count++;
 
     const badge = document.getElementById('dvd-active-filters-count');
     if (badge) {
@@ -4708,13 +5232,73 @@ function resetDexValidatedDataFilters() {
         'dvd-path-filter': 'all',
         'dvd-min-peak-1h': '',
         'dvd-min-peak-4h': '',
-        'dvd-max-pre-dd': ''
+        'dvd-max-pre-dd': '',
+        'dvd-net-buy-filter': 'all',
+        'dvd-ind-preset': 'all',
+        'dvd-min-net-buy': '',
+        'dvd-max-net-buy': '',
+        'dvd-min-buy-dom': '',
+        'dvd-min-buy-accel': '',
+        'dvd-min-bs-ratio': '',
+        'dvd-min-buy-liq': '',
+        'dvd-max-holder-conc': '',
+        'dvd-max-round-trip': ''
     };
     for (const [id, val] of Object.entries(els)) {
         const el = document.getElementById(id);
         if (el) el.value = val;
     }
     updateDexValidatedDataActiveFiltersCount();
+    loadDexValidatedTableData(1);
+}
+
+function onIndicatorInputChanged() {
+    const presetSelect = document.getElementById('dvd-ind-preset');
+    if (presetSelect && presetSelect.value !== 'all') {
+        presetSelect.value = 'all';
+    }
+    debounceDexValidatedDataSearch();
+}
+
+function applyIndicatorPreset(preset) {
+    const minNetBuy = document.getElementById('dvd-min-net-buy');
+    const maxNetBuy = document.getElementById('dvd-max-net-buy');
+    const minBuyDom = document.getElementById('dvd-min-buy-dom');
+    const minBuyAccel = document.getElementById('dvd-min-buy-accel');
+    const minBsRatio = document.getElementById('dvd-min-bs-ratio');
+    const minBuyLiq = document.getElementById('dvd-min-buy-liq');
+    const maxHolderConc = document.getElementById('dvd-max-holder-conc');
+    const maxRoundTrip = document.getElementById('dvd-max-round-trip');
+
+    if (minNetBuy) minNetBuy.value = '';
+    if (maxNetBuy) maxNetBuy.value = '';
+    if (minBuyDom) minBuyDom.value = '';
+    if (minBuyAccel) minBuyAccel.value = '';
+    if (minBsRatio) minBsRatio.value = '';
+    if (minBuyLiq) minBuyLiq.value = '';
+    if (maxHolderConc) maxHolderConc.value = '';
+    if (maxRoundTrip) maxRoundTrip.value = '';
+
+    if (preset === 'strong_bullish') {
+        if (minNetBuy) minNetBuy.value = '5000';
+        if (minBuyDom) minBuyDom.value = '60';
+        if (minBsRatio) minBsRatio.value = '1.2';
+    } else if (preset === 'buy_surge') {
+        if (minBuyDom) minBuyDom.value = '55';
+        if (minBuyAccel) minBuyAccel.value = '2.0';
+    } else if (preset === 'high_breadth') {
+        if (minBuyDom) minBuyDom.value = '50';
+        if (minBsRatio) minBsRatio.value = '1.5';
+    } else if (preset === 'heavy_turnover') {
+        if (minNetBuy) minNetBuy.value = '1000';
+        if (minBuyLiq) minBuyLiq.value = '5.0';
+    } else if (preset === 'low_risk') {
+        if (maxHolderConc) maxHolderConc.value = '35';
+        if (maxRoundTrip) maxRoundTrip.value = '6.0';
+    } else if (preset === 'heavy_selling') {
+        if (maxNetBuy) maxNetBuy.value = '0';
+    }
+
     loadDexValidatedTableData(1);
 }
 
@@ -4747,7 +5331,7 @@ async function loadDexValidatedTableData(page = 1, showLoading = false) {
     if (showLoading && tbody && !hasRows) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="15" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                <td colspan="18" style="text-align: center; padding: 3rem; color: var(--text-muted);">
                     <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite;"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                         <span>Loading enriched DEX Validated records...</span>
@@ -4788,6 +5372,16 @@ async function loadDexValidatedTableData(page = 1, showLoading = false) {
         const minPeak1h = String(document.getElementById('dvd-min-peak-1h')?.value || '').trim();
         const minPeak4h = String(document.getElementById('dvd-min-peak-4h')?.value || '').trim();
         const maxPreDd = String(document.getElementById('dvd-max-pre-dd')?.value || '').trim();
+        const netBuyFilter = document.getElementById('dvd-net-buy-filter')?.value || 'all';
+        const indPreset = document.getElementById('dvd-ind-preset')?.value || 'all';
+        const minNetBuy = String(document.getElementById('dvd-min-net-buy')?.value || '').trim();
+        const maxNetBuy = String(document.getElementById('dvd-max-net-buy')?.value || '').trim();
+        const minBuyDom = String(document.getElementById('dvd-min-buy-dom')?.value || '').trim();
+        const minBuyAccel = String(document.getElementById('dvd-min-buy-accel')?.value || '').trim();
+        const minBsRatio = String(document.getElementById('dvd-min-bs-ratio')?.value || '').trim();
+        const minBuyLiq = String(document.getElementById('dvd-min-buy-liq')?.value || '').trim();
+        const maxHolderConc = String(document.getElementById('dvd-max-holder-conc')?.value || '').trim();
+        const maxRoundTrip = String(document.getElementById('dvd-max-round-trip')?.value || '').trim();
         const limit = document.getElementById('dvd-limit')?.value || '100';
 
         const lastIdx = sortVal.lastIndexOf('_');
@@ -4832,6 +5426,16 @@ async function loadDexValidatedTableData(page = 1, showLoading = false) {
         if (minPeak1h) params.append('min_peak_1h', minPeak1h);
         if (minPeak4h) params.append('min_peak_4h', minPeak4h);
         if (maxPreDd) params.append('max_pre_dd', maxPreDd);
+        if (netBuyFilter && netBuyFilter !== 'all') params.append('net_buy_filter', netBuyFilter);
+        if (indPreset && indPreset !== 'all') params.append('ind_preset', indPreset);
+        if (minNetBuy) params.append('min_net_buy', minNetBuy);
+        if (maxNetBuy) params.append('max_net_buy', maxNetBuy);
+        if (minBuyDom) params.append('min_buy_dom', minBuyDom);
+        if (minBuyAccel) params.append('min_buy_accel', minBuyAccel);
+        if (minBsRatio) params.append('min_bs_ratio', minBsRatio);
+        if (minBuyLiq) params.append('min_buy_liq', minBuyLiq);
+        if (maxHolderConc) params.append('max_holder_conc', maxHolderConc);
+        if (maxRoundTrip) params.append('max_round_trip', maxRoundTrip);
 
         updateDexValidatedDataActiveFiltersCount();
 
@@ -4841,7 +5445,7 @@ async function loadDexValidatedTableData(page = 1, showLoading = false) {
         const badge = document.getElementById('dvd-sync-badge');
         if (!data.success) {
             if (tbody) {
-                tbody.innerHTML = `<tr><td colspan="15" style="text-align: center; color: #ef4444; padding: 2rem;">Error: ${escapeHtml(data.error || 'Failed to fetch data')}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="18" style="text-align: center; color: #ef4444; padding: 2rem;">Error: ${escapeHtml(data.error || 'Failed to fetch data')}</td></tr>`;
             }
             return;
         }
@@ -4874,7 +5478,7 @@ async function loadDexValidatedTableData(page = 1, showLoading = false) {
             if (tbody) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="15" style="text-align: center; padding: 3.5rem; color: var(--text-muted);">
+                        <td colspan="18" style="text-align: center; padding: 3.5rem; color: var(--text-muted);">
                             <div style="display:flex; justify-content:center; margin-bottom: 10px;">
                                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                             </div>
@@ -4896,7 +5500,7 @@ async function loadDexValidatedTableData(page = 1, showLoading = false) {
     } catch (err) {
         console.error('Failed to load DEX Validated table data:', err);
         if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="15" style="text-align: center; color: #ef4444; padding: 2rem;">Error loading data: ${escapeHtml(err.message)}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="18" style="text-align: center; color: #ef4444; padding: 2rem;">Error loading data: ${escapeHtml(err.message)}</td></tr>`;
         }
     }
 }
@@ -4952,6 +5556,8 @@ function renderDexValidatedDataRow(r) {
     const solscanUrl = ca ? `https://solscan.io/token/${ca}` : '';
     const encodedMsg = encodeURIComponent(r.formatted_message || '');
     const encodedTokenName = encodeURIComponent(tokenName);
+    const rawMetricsJson = r.metrics_data ? (typeof r.metrics_data === 'object' ? JSON.stringify(r.metrics_data) : String(r.metrics_data)) : '';
+    const encodedMetrics = encodeURIComponent(rawMetricsJson);
 
     return `
         <tr>
@@ -4995,10 +5601,11 @@ function renderDexValidatedDataRow(r) {
             <td>${perf24hBadge}</td>
             ${formatPeakPerformanceCell(r, '1h')}
             ${formatPeakPerformanceCell(r, '4h')}
+            ${renderIndicatorsTableCell(r)}
             <td>${statusPill}</td>
             ${formatForwardedFlowsCell(r.status, r.reason)}
             <td style="text-align: right; padding-right: 1.5rem; white-space: nowrap;">
-                <button type="button" class="btn-table-action" onclick="openTgMsgModal('${encodedMsg}', '${encodedTokenName}')" title="View Formatted Signal Details" style="margin-right: 6px; cursor: pointer;">
+                <button type="button" class="btn-table-action" onclick="openTgMsgModal('${encodedMsg}', '${encodedTokenName}', '${encodedMetrics}')" title="View Formatted Signal &amp; Audit Details" style="margin-right: 6px; cursor: pointer;">
                     Details
                 </button>
                 ${dexUrl ? `
@@ -6017,7 +6624,10 @@ let outcomesState = {
     lastResult: null,
     tableSearch: '',
     isLoading: false,
-    initialized: false
+    initialized: false,
+    reqSeq: 0,
+    abortController: null,
+    debounceTimer: null
 };
 
 const OUTCOMES_TIER_CONFIG = {
@@ -6201,6 +6811,23 @@ function handleOutcomesWorkflowSelect(wfId) {
             else if (rtype === 'token_name') { pf.name_mode = rtext || 'include'; pf.name_filter = stext; }
             else if (rtype === 'filter') { pf.word_mode = rtext || 'include'; pf.word_filter = stext; }
             else if (rtype === 'extract_ca') { pf.extract_ca = 'yes'; }
+            else if (rtype === 'indicator') {
+                const ikey = String(stext || '').toLowerCase().trim();
+                if (ikey === 'net_buy_pressure') { pf.min_net_buy = tmin; pf.max_net_buy = tmax; }
+                else if (ikey === 'buy_dominance_pct') { pf.min_buy_dom = tmin; }
+                else if (ikey === 'buy_vol_accel') { pf.min_buy_accel = tmin; }
+                else if (ikey === 'sell_vol_accel') { pf.max_sell_accel = tmax; }
+                else if (ikey === 'buy_pressure_accel') { pf.min_buy_press_accel = tmin; }
+                else if (ikey === 'net_buy_to_liq') { pf.min_buy_liq = tmin; }
+                else if (ikey === 'vol_to_mc') { pf.min_vol_mc = tmin; }
+                else if (ikey === 'vol_to_liq') { pf.min_vol_liq = tmin; }
+                else if (ikey === 'buyer_seller_ratio') { pf.min_bs_ratio = tmin; }
+                else if (ikey === 'holder_concentration') { pf.max_holder_conc = tmax; }
+                else if (ikey === 'round_trip_cost') { pf.max_round_trip = tmax; }
+            }
+            else if (rtype === 'indicator_preset') {
+                pf.ind_preset = String(stext || 'all').toLowerCase().trim();
+            }
         });
     }
 
@@ -6239,6 +6866,21 @@ function handleOutcomesWorkflowSelect(wfId) {
     setVal('outcomes-filter-word', pf.word_filter);
     setVal('outcomes-filter-extract-ca', pf.extract_ca || 'all');
 
+    // Akoueflow Indicators
+    setVal('outcomes-filter-ind-preset', pf.ind_preset || 'all');
+    setVal('outcomes-filter-min-net-buy', pf.min_net_buy);
+    setVal('outcomes-filter-max-net-buy', pf.max_net_buy);
+    setVal('outcomes-filter-min-buy-dom', pf.min_buy_dom);
+    setVal('outcomes-filter-min-buy-accel', pf.min_buy_accel);
+    setVal('outcomes-filter-max-sell-accel', pf.max_sell_accel);
+    setVal('outcomes-filter-min-buy-press-accel', pf.min_buy_press_accel);
+    setVal('outcomes-filter-min-bs-ratio', pf.min_bs_ratio);
+    setVal('outcomes-filter-min-buy-liq', pf.min_buy_liq);
+    setVal('outcomes-filter-min-vol-mc', pf.min_vol_mc);
+    setVal('outcomes-filter-min-vol-liq', pf.min_vol_liq);
+    setVal('outcomes-filter-max-holder-conc', pf.max_holder_conc);
+    setVal('outcomes-filter-max-round-trip', pf.max_round_trip);
+
     const ruleCount = Array.isArray(wf.rules) ? wf.rules.length : 0;
     if (summaryEl) {
         summaryEl.innerHTML = `<span style="color: #c084fc; font-weight: 700;">✓ Auto-populated ${ruleCount} rule(s) from "${escapeHtml(wf.name)}"</span>`;
@@ -6247,7 +6889,88 @@ function handleOutcomesWorkflowSelect(wfId) {
     runOutcomesSimulation();
 }
 
+function applyOutcomeIndicatorPreset(preset) {
+    const minNetBuy = document.getElementById('outcomes-filter-min-net-buy');
+    const maxNetBuy = document.getElementById('outcomes-filter-max-net-buy');
+    const minBuyDom = document.getElementById('outcomes-filter-min-buy-dom');
+    const minBuyAccel = document.getElementById('outcomes-filter-min-buy-accel');
+    const maxSellAccel = document.getElementById('outcomes-filter-max-sell-accel');
+    const minBuyPressAccel = document.getElementById('outcomes-filter-min-buy-press-accel');
+    const minBsRatio = document.getElementById('outcomes-filter-min-bs-ratio');
+    const minBuyLiq = document.getElementById('outcomes-filter-min-buy-liq');
+    const minVolMc = document.getElementById('outcomes-filter-min-vol-mc');
+    const minVolLiq = document.getElementById('outcomes-filter-min-vol-liq');
+    const maxHolderConc = document.getElementById('outcomes-filter-max-holder-conc');
+    const maxRoundTrip = document.getElementById('outcomes-filter-max-round-trip');
+
+    if (minNetBuy) minNetBuy.value = '';
+    if (maxNetBuy) maxNetBuy.value = '';
+    if (minBuyDom) minBuyDom.value = '';
+    if (minBuyAccel) minBuyAccel.value = '';
+    if (maxSellAccel) maxSellAccel.value = '';
+    if (minBuyPressAccel) minBuyPressAccel.value = '';
+    if (minBsRatio) minBsRatio.value = '';
+    if (minBuyLiq) minBuyLiq.value = '';
+    if (minVolMc) minVolMc.value = '';
+    if (minVolLiq) minVolLiq.value = '';
+    if (maxHolderConc) maxHolderConc.value = '';
+    if (maxRoundTrip) maxRoundTrip.value = '';
+
+    if (preset === 'strong_bullish') {
+        if (minNetBuy) minNetBuy.value = '5000';
+        if (minBuyDom) minBuyDom.value = '60';
+        if (minBsRatio) minBsRatio.value = '1.2';
+    } else if (preset === 'buy_surge') {
+        if (minBuyDom) minBuyDom.value = '55';
+        if (minBuyAccel) minBuyAccel.value = '2.0';
+    } else if (preset === 'high_breadth') {
+        if (minBuyDom) minBuyDom.value = '50';
+        if (minBsRatio) minBsRatio.value = '1.5';
+    } else if (preset === 'heavy_turnover') {
+        if (minNetBuy) minNetBuy.value = '1000';
+        if (minBuyLiq) minBuyLiq.value = '5.0';
+    } else if (preset === 'low_risk') {
+        if (maxHolderConc) maxHolderConc.value = '35';
+        if (maxRoundTrip) maxRoundTrip.value = '6.0';
+    } else if (preset === 'heavy_selling') {
+        if (maxNetBuy) maxNetBuy.value = '0';
+    }
+
+    onOutcomeFilterChanged(true);
+}
+
+function onOutcomeFilterChanged(immediate = false) {
+    if (window.event && window.event.type === 'change') {
+        immediate = true;
+    }
+
+    const summaryEl = document.getElementById('outcomes-active-filter-summary');
+    if (summaryEl) {
+        if (outcomesState.activeWorkflowId) {
+            const wf = outcomesState.workflows.find(w => String(w.id) === String(outcomesState.activeWorkflowId));
+            const wfName = wf ? escapeHtml(wf.name) : 'Workflow';
+            summaryEl.innerHTML = `<span style="color: #f59e0b; font-weight: 600;">✏️ Live criteria active (modified from "${wfName}")...</span>`;
+        } else {
+            summaryEl.innerHTML = '<span style="color: #38bdf8; font-weight: 600;">⚡ Filtering live signals...</span>';
+        }
+    }
+
+    if (outcomesState.debounceTimer) {
+        clearTimeout(outcomesState.debounceTimer);
+        outcomesState.debounceTimer = null;
+    }
+
+    const delay = immediate ? 0 : 350;
+    outcomesState.debounceTimer = setTimeout(() => {
+        runOutcomesSimulation();
+    }, delay);
+}
+
 function resetOutcomesFilters() {
+    if (outcomesState.debounceTimer) {
+        clearTimeout(outcomesState.debounceTimer);
+        outcomesState.debounceTimer = null;
+    }
     outcomesState.activeWorkflowId = null;
     const wfSelect = document.getElementById('outcomes-workflow-select');
     if (wfSelect) wfSelect.value = '';
@@ -6260,7 +6983,13 @@ function resetOutcomesFilters() {
         'outcomes-filter-min-perf', 'outcomes-filter-max-perf',
         'outcomes-filter-exclude-platform',
         'outcomes-filter-min-payment', 'outcomes-filter-max-payment', 'outcomes-filter-payment-label',
-        'outcomes-filter-name', 'outcomes-filter-word'
+        'outcomes-filter-name', 'outcomes-filter-word',
+        'outcomes-filter-min-net-buy', 'outcomes-filter-max-net-buy',
+        'outcomes-filter-min-buy-dom', 'outcomes-filter-min-buy-accel',
+        'outcomes-filter-max-sell-accel', 'outcomes-filter-min-buy-press-accel',
+        'outcomes-filter-min-bs-ratio', 'outcomes-filter-min-buy-liq',
+        'outcomes-filter-min-vol-mc', 'outcomes-filter-min-vol-liq',
+        'outcomes-filter-max-holder-conc', 'outcomes-filter-max-round-trip'
     ];
     textIds.forEach(id => {
         const el = document.getElementById(id);
@@ -6276,7 +7005,8 @@ function resetOutcomesFilters() {
         'outcomes-filter-category': 'all',
         'outcomes-filter-name-mode': 'include',
         'outcomes-filter-word-mode': 'include',
-        'outcomes-filter-extract-ca': 'all'
+        'outcomes-filter-extract-ca': 'all',
+        'outcomes-filter-ind-preset': 'all'
     };
     Object.entries(selects).forEach(([id, val]) => {
         const el = document.getElementById(id);
@@ -6290,12 +7020,16 @@ function resetOutcomesFilters() {
 }
 
 async function runOutcomesSimulation() {
-    if (outcomesState.isLoading) return;
+    if (outcomesState.abortController) {
+        try { outcomesState.abortController.abort(); } catch (e) {}
+    }
+    outcomesState.abortController = new AbortController();
+    const signal = outcomesState.abortController.signal;
+    const currentReqSeq = ++outcomesState.reqSeq;
     outcomesState.isLoading = true;
 
     const runBtn = document.getElementById('outcomes-run-btn');
     if (runBtn) {
-        runBtn.disabled = true;
         runBtn.innerHTML = `
             <svg class="animate-spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation: spin 1s linear infinite;">
                 <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
@@ -6383,6 +7117,45 @@ async function runOutcomesSimulation() {
         const extractCa = getStr('outcomes-filter-extract-ca');
         if (extractCa === 'yes') customFilters.extract_ca = 'yes';
 
+        // Akoueflow Indicators Filters
+        const indPreset = getStr('outcomes-filter-ind-preset');
+        if (indPreset && indPreset !== 'all') customFilters.ind_preset = indPreset;
+
+        const minNetBuy = getNum('outcomes-filter-min-net-buy');
+        const maxNetBuy = getNum('outcomes-filter-max-net-buy');
+        if (minNetBuy !== null) customFilters.min_net_buy = minNetBuy;
+        if (maxNetBuy !== null) customFilters.max_net_buy = maxNetBuy;
+
+        const minBuyDom = getNum('outcomes-filter-min-buy-dom');
+        if (minBuyDom !== null) customFilters.min_buy_dom = minBuyDom;
+
+        const minBuyAccel = getNum('outcomes-filter-min-buy-accel');
+        if (minBuyAccel !== null) customFilters.min_buy_accel = minBuyAccel;
+
+        const maxSellAccel = getNum('outcomes-filter-max-sell-accel');
+        if (maxSellAccel !== null) customFilters.max_sell_accel = maxSellAccel;
+
+        const minBuyPressAccel = getNum('outcomes-filter-min-buy-press-accel');
+        if (minBuyPressAccel !== null) customFilters.min_buy_press_accel = minBuyPressAccel;
+
+        const minBsRatio = getNum('outcomes-filter-min-bs-ratio');
+        if (minBsRatio !== null) customFilters.min_bs_ratio = minBsRatio;
+
+        const minBuyLiq = getNum('outcomes-filter-min-buy-liq');
+        if (minBuyLiq !== null) customFilters.min_buy_liq = minBuyLiq;
+
+        const minVolMc = getNum('outcomes-filter-min-vol-mc');
+        if (minVolMc !== null) customFilters.min_vol_mc = minVolMc;
+
+        const minVolLiq = getNum('outcomes-filter-min-vol-liq');
+        if (minVolLiq !== null) customFilters.min_vol_liq = minVolLiq;
+
+        const maxHolderConc = getNum('outcomes-filter-max-holder-conc');
+        if (maxHolderConc !== null) customFilters.max_holder_conc = maxHolderConc;
+
+        const maxRoundTrip = getNum('outcomes-filter-max-round-trip');
+        if (maxRoundTrip !== null) customFilters.max_round_trip = maxRoundTrip;
+
         const payload = {
             system: outcomesState.system,
             timeframe: outcomesState.timeframe,
@@ -6393,13 +7166,21 @@ async function runOutcomesSimulation() {
         const res = await fetch('/api/outcomes/simulate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            signal: signal
         });
 
         const data = await res.json();
+        if (currentReqSeq !== outcomesState.reqSeq) return;
+
         if (data.success) {
             outcomesState.lastResult = data;
             renderOutcomesSimulationResults(data);
+            const summaryEl = document.getElementById('outcomes-active-filter-summary');
+            if (summaryEl) {
+                const wfTag = outcomesState.activeWorkflowId ? ' (Customized)' : '';
+                summaryEl.innerHTML = `<span style="color: #34d399; font-weight: 600;">✓ Live updated: <strong>${data.matched_count}</strong> signals matched (${data.win_rate_2x}% 2x win rate)${wfTag}</span>`;
+            }
         } else {
             console.error('Simulation error:', data.error);
             if (typeof showAppToast === 'function') {
@@ -6407,15 +7188,18 @@ async function runOutcomesSimulation() {
             }
         }
     } catch (err) {
+        if (err.name === 'AbortError') return;
         console.error('Error running outcome simulation:', err);
     } finally {
-        outcomesState.isLoading = false;
-        if (runBtn) {
-            runBtn.disabled = false;
-            runBtn.innerHTML = `
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                <span>Run Backtest</span>
-            `;
+        if (currentReqSeq === outcomesState.reqSeq) {
+            outcomesState.isLoading = false;
+            if (runBtn) {
+                runBtn.disabled = false;
+                runBtn.innerHTML = `
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    <span>Run Backtest</span>
+                `;
+            }
         }
     }
 }
@@ -6565,6 +7349,64 @@ function filterOutcomesTable(term) {
     renderOutcomesTable(tokenList);
 }
 
+function renderOutcomesIndicatorsCell(inds) {
+    if (!inds || typeof inds !== 'object') {
+        return '<span style="color: #64748b;">—</span>';
+    }
+    const netBuy = inds.net_buy_pressure;
+    const buyDom = inds.buy_dominance_pct;
+    const bsRatio = inds.buyer_seller_ratio;
+
+    if (netBuy === undefined && buyDom === undefined && bsRatio === undefined) {
+        return '<span style="color: #64748b;">—</span>';
+    }
+
+    const pills = [];
+    if (netBuy !== null && netBuy !== undefined && !isNaN(netBuy)) {
+        const sign = netBuy >= 0 ? '+' : '';
+        const clr = netBuy >= 0 ? '#34d399' : '#f87171';
+        const bg = netBuy >= 0 ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)';
+        pills.push(`<span style="color: ${clr}; background: ${bg}; padding: 1px 5px; border-radius: 4px; font-weight: 700; white-space: nowrap;">${sign}${formatCompactMc(netBuy)}</span>`);
+    }
+
+    if (buyDom !== null && buyDom !== undefined && !isNaN(buyDom)) {
+        const domClr = buyDom >= 55 ? '#38bdf8' : (buyDom <= 45 ? '#f87171' : '#cbd5e1');
+        pills.push(`<span style="color: ${domClr}; font-weight: 600; white-space: nowrap;">${Math.round(buyDom)}% Dom</span>`);
+    }
+
+    if (bsRatio !== null && bsRatio !== undefined && !isNaN(bsRatio)) {
+        pills.push(`<span style="color: #a78bfa; font-size: 0.68rem; white-space: nowrap;">${Number(bsRatio).toFixed(1)}x B/S</span>`);
+    }
+
+    if (pills.length === 0) {
+        return '<span style="color: #64748b;">—</span>';
+    }
+
+    // Build comprehensive tooltip for all 10 indicators
+    const tipParts = [];
+    if (netBuy !== undefined && netBuy !== null) tipParts.push(`Net Buy: $${Number(netBuy).toLocaleString()}`);
+    if (buyDom !== undefined && buyDom !== null) tipParts.push(`Buy Dom: ${Number(buyDom).toFixed(1)}%`);
+    if (inds.buy_vol_accel !== undefined && inds.buy_vol_accel !== null) tipParts.push(`Buy Accel: ${Number(inds.buy_vol_accel).toFixed(2)}x`);
+    if (inds.sell_vol_accel !== undefined && inds.sell_vol_accel !== null) tipParts.push(`Sell Accel: ${Number(inds.sell_vol_accel).toFixed(2)}x`);
+    if (inds.buy_pressure_accel !== undefined && inds.buy_pressure_accel !== null) tipParts.push(`Buy Press Accel: ${Number(inds.buy_pressure_accel).toFixed(1)}%`);
+    if (bsRatio !== undefined && bsRatio !== null) tipParts.push(`B/S Ratio: ${Number(bsRatio).toFixed(2)}`);
+    if (inds.net_buy_to_liq !== undefined && inds.net_buy_to_liq !== null) tipParts.push(`Net Buy/Liq: ${Number(inds.net_buy_to_liq).toFixed(1)}%`);
+    if (inds.vol_to_mc !== undefined && inds.vol_to_mc !== null) tipParts.push(`Vol/MC: ${Number(inds.vol_to_mc).toFixed(2)}x`);
+    if (inds.vol_to_liq !== undefined && inds.vol_to_liq !== null) tipParts.push(`Vol/Liq: ${Number(inds.vol_to_liq).toFixed(2)}x`);
+    if (inds.holder_concentration !== undefined && inds.holder_concentration !== null) tipParts.push(`Top 10: ${Number(inds.holder_concentration).toFixed(1)}%`);
+    if (inds.round_trip_cost !== undefined && inds.round_trip_cost !== null) tipParts.push(`Round-Trip: ${Number(inds.round_trip_cost).toFixed(1)}%`);
+
+    const tip = tipParts.join(' | ');
+
+    return `
+        <div style="display: flex; flex-direction: column; gap: 2px; cursor: help;" title="${escapeHtml(tip)}">
+            <div style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                ${pills.join(' ')}
+            </div>
+        </div>
+    `;
+}
+
 function renderOutcomesTable(tokens) {
     const tbody = document.getElementById('outcomes-table-body');
     const countBadge = document.getElementById('outcomes-table-count');
@@ -6587,7 +7429,7 @@ function renderOutcomesTable(tokens) {
     if (!filtered || filtered.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="9" style="text-align: center; padding: 2.5rem; color: var(--text-muted);">
+                <td colspan="10" style="text-align: center; padding: 2.5rem; color: var(--text-muted);">
                     ${tokens.length === 0 ? 'No historical signals matched your selected filters.' : 'No tokens matched the search query.'}
                 </td>
             </tr>
@@ -6617,7 +7459,7 @@ function renderOutcomesTable(tokens) {
         else { badge1hColor = '#64748b'; badge1hBg = 'rgba(100, 116, 139, 0.16)'; }
 
         // Best peak badge (4h or best)
-        const bestMult = Number(t.peak_mult_4h || t.best_peak_multiplier || mult1h);
+        const bestMult = Number(t.best_peak || t.peak_mult_4h || t.best_peak_multiplier || mult1h);
         let bestColor = '#94a3b8';
         let bestBg = 'rgba(148, 163, 184, 0.12)';
         if (bestMult >= 5.0) { bestColor = '#fbbf24'; bestBg = 'rgba(251, 191, 36, 0.18)'; }
@@ -6676,6 +7518,9 @@ function renderOutcomesTable(tokens) {
                     ${liqFormatted}
                 </td>
                 <td style="padding: 10px 12px;">
+                    ${renderOutcomesIndicatorsCell(t.indicators)}
+                </td>
+                <td style="padding: 10px 12px;">
                     <div style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 5px; background: ${badge1hBg}; color: ${badge1hColor}; font-weight: 700;">
                         <span>${mult1h > 0 ? mult1h.toFixed(2) + 'x' : '—'}</span>
                     </div>
@@ -6721,7 +7566,9 @@ function exportOutcomesCSV() {
 
     const headers = [
         'Symbol', 'Name', 'Address', 'Platform', 'Signal Type', 'Timestamp',
-        'Entry MC', 'Liquidity', 'Volume 24h', '1h Peak Mult', '4h Peak Mult',
+        'Entry MC', 'Liquidity', 'Volume 24h',
+        'Net Buy Pressure', 'Buy Dom %', 'Buyer/Seller Ratio', 'Buy Accel',
+        '1h Peak Mult', '4h Peak Mult',
         'Pre Peak DD %', 'Trajectory'
     ];
 
@@ -6735,6 +7582,10 @@ function exportOutcomesCSV() {
         t.market_cap || t.entry_mc || 0,
         t.liquidity_usd || t.liquidity || 0,
         t.volume_24h || 0,
+        t.indicators?.net_buy_pressure ?? '',
+        t.indicators?.buy_dominance_pct ?? '',
+        t.indicators?.buyer_seller_ratio ?? '',
+        t.indicators?.buy_vol_accel ?? '',
         t.peak_mult_1h || 1.0,
         t.peak_mult_4h || 1.0,
         t.pre_peak_dd_1h_pct ?? t.min_drawdown_pct ?? 0,
@@ -6750,6 +7601,14 @@ function exportOutcomesCSV() {
     link.click();
     document.body.removeChild(link);
 }
+
+// Global Enter key handler for Outcome Lab criteria inputs
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && e.target && e.target.closest && e.target.closest('#tab-outcomes .outcomes-criteria-grid')) {
+        e.preventDefault();
+        runOutcomesSimulation();
+    }
+});
 
 loadPerformanceScannerStatus();
 setInterval(loadPerformanceScannerStatus, 8000);

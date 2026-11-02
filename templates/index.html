@@ -19,23 +19,40 @@
         .modal-overlay {
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0, 0, 0, 0.7);
-            backdrop-filter: blur(4px);
+            background: rgba(0, 0, 0, 0.78);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
             display: flex;
             align-items: center;
             justify-content: center;
             z-index: 1000;
         }
         .modal-content {
-            background: var(--bg-dark);
-            border: 1px solid var(--border-color);
+            background: #0c0c0f;
+            border: 1px solid rgba(255, 255, 255, 0.12);
             border-radius: 16px;
             width: 100%;
             max-width: 600px;
             padding: 2rem;
             max-height: 90vh;
             overflow-y: auto;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.05);
+        }
+        .modal-content .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 1.1rem;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+        }
+
+        .rules-section-box {
+            background: rgba(255, 255, 255, 0.015);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 1.2rem;
+            border-radius: 12px;
+            margin-bottom: 1rem;
         }
 
         .token-name-columns {
@@ -44,8 +61,8 @@
             gap: 1rem;
         }
         .token-name-column {
-            background: rgba(255,255,255,0.03);
-            border: 1px solid var(--border-color);
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 10px;
             padding: 1rem;
         }
@@ -54,10 +71,10 @@
             align-items: center;
             justify-content: space-between;
             gap: 8px;
-            background: rgba(236,72,153,0.1);
-            border: 1px solid rgba(236,72,153,0.3);
+            background: rgba(255, 255, 255, 0.035);
+            border: 1px solid rgba(255, 255, 255, 0.09);
             border-radius: 6px;
-            padding: 7px 9px;
+            padding: 7px 10px;
             margin-top: 7px;
             overflow-wrap: anywhere;
         }
@@ -69,11 +86,16 @@
                 "fields fields";
             gap: 0.85rem 1rem;
             align-items: center;
-            background: rgba(255,255,255,0.018);
-            border: 1px solid rgba(255,255,255,0.075);
-            padding: 16px;
-            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.025);
+            border: 1px solid rgba(255, 255, 255, 0.09);
+            padding: 14px 16px;
+            border-radius: 10px;
             margin-bottom: 10px;
+            transition: all 0.2s ease;
+        }
+        .rule-row:hover {
+            background: rgba(255, 255, 255, 0.04);
+            border-color: rgba(255, 255, 255, 0.18);
         }
         .rule-row__badge { grid-area: badge; }
         .rule-row__fields { grid-area: fields; }
@@ -176,17 +198,18 @@
         }
         .form-input {
             width: 100%;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid var(--border-color);
+            background: rgba(255, 255, 255, 0.035);
+            border: 1px solid rgba(255, 255, 255, 0.1);
             padding: 0.75rem 1rem;
             border-radius: 8px;
             color: var(--text-main);
             font-family: inherit;
-            transition: border-color 0.2s;
+            transition: border-color 0.2s ease, background 0.2s ease;
         }
         .form-input:focus {
             outline: none;
-            border-color: var(--accent-color);
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(6, 182, 212, 0.6);
         }
         
         .result-success {
@@ -976,27 +999,27 @@
                             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">MC Min ($)</label>
-                                    <input type="number" id="outcomes-filter-min-mc" class="form-input" placeholder="e.g. 10000" style="width: 100%;">
+                                    <input type="number" id="outcomes-filter-min-mc" class="form-input" placeholder="e.g. 10000" oninput="onOutcomeFilterChanged()" style="width: 100%;">
                                 </div>
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">MC Max ($)</label>
-                                    <input type="number" id="outcomes-filter-max-mc" class="form-input" placeholder="e.g. 500000" style="width: 100%;">
+                                    <input type="number" id="outcomes-filter-max-mc" class="form-input" placeholder="e.g. 500000" oninput="onOutcomeFilterChanged()" style="width: 100%;">
                                 </div>
                             </div>
                             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Liquidity Min ($)</label>
-                                    <input type="number" id="outcomes-filter-min-liq" class="form-input" placeholder="e.g. 5000" style="width: 100%;">
+                                    <input type="number" id="outcomes-filter-min-liq" class="form-input" placeholder="e.g. 5000" oninput="onOutcomeFilterChanged()" style="width: 100%;">
                                 </div>
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Liquidity Max ($)</label>
-                                    <input type="number" id="outcomes-filter-max-liq" class="form-input" placeholder="e.g. 100000" style="width: 100%;">
+                                    <input type="number" id="outcomes-filter-max-liq" class="form-input" placeholder="e.g. 100000" oninput="onOutcomeFilterChanged()" style="width: 100%;">
                                 </div>
                             </div>
                             <div style="display: grid; grid-template-columns: 80px 1fr 1fr; gap: 8px;">
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Vol Window</label>
-                                    <select id="outcomes-filter-volume-tf" class="form-input" style="width: 100%;">
+                                    <select id="outcomes-filter-volume-tf" class="form-input" onchange="onOutcomeFilterChanged()" style="width: 100%;">
                                         <option value="5m">5m</option>
                                         <option value="1h">1h</option>
                                         <option value="6h">6h</option>
@@ -1005,11 +1028,11 @@
                                 </div>
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Vol Min ($)</label>
-                                    <input type="number" id="outcomes-filter-min-vol" class="form-input" placeholder="0" style="width: 100%;">
+                                    <input type="number" id="outcomes-filter-min-vol" class="form-input" placeholder="0" oninput="onOutcomeFilterChanged()" style="width: 100%;">
                                 </div>
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Vol Max ($)</label>
-                                    <input type="number" id="outcomes-filter-max-vol" class="form-input" placeholder="∞" style="width: 100%;">
+                                    <input type="number" id="outcomes-filter-max-vol" class="form-input" placeholder="∞" oninput="onOutcomeFilterChanged()" style="width: 100%;">
                                 </div>
                             </div>
                         </div>
@@ -1022,16 +1045,16 @@
                             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Token Age Min</label>
-                                    <input type="text" id="outcomes-filter-min-age" class="form-input" placeholder="e.g. 5m, 1h, 2d" style="width: 100%;">
+                                    <input type="text" id="outcomes-filter-min-age" class="form-input" placeholder="e.g. 5m, 1h, 2d" oninput="onOutcomeFilterChanged()" style="width: 100%;">
                                 </div>
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Token Age Max</label>
-                                    <input type="text" id="outcomes-filter-max-age" class="form-input" placeholder="e.g. 24h, 7d" style="width: 100%;">
+                                    <input type="text" id="outcomes-filter-max-age" class="form-input" placeholder="e.g. 24h, 7d" oninput="onOutcomeFilterChanged()" style="width: 100%;">
                                 </div>
                             </div>
                             <div style="margin-bottom: 8px;">
                                 <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Age Mode</label>
-                                <select id="outcomes-filter-age-kind" class="form-input" style="width: 100%;">
+                                <select id="outcomes-filter-age-kind" class="form-input" onchange="onOutcomeFilterChanged()" style="width: 100%;">
                                     <option value="creation">Creation Age (Time since creation)</option>
                                     <option value="migration">Migration Age (Time since DEX migration)</option>
                                 </select>
@@ -1039,7 +1062,7 @@
                             <div style="display: grid; grid-template-columns: 80px 1fr 1fr; gap: 8px;">
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Perf TF</label>
-                                    <select id="outcomes-filter-perf-tf" class="form-input" style="width: 100%;">
+                                    <select id="outcomes-filter-perf-tf" class="form-input" onchange="onOutcomeFilterChanged()" style="width: 100%;">
                                         <option value="5m" selected>5m</option>
                                         <option value="1h">1h</option>
                                         <option value="6h">6h</option>
@@ -1048,11 +1071,11 @@
                                 </div>
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Min %</label>
-                                    <input type="number" id="outcomes-filter-min-perf" class="form-input" placeholder="-∞" style="width: 100%;">
+                                    <input type="number" id="outcomes-filter-min-perf" class="form-input" placeholder="-∞" oninput="onOutcomeFilterChanged()" style="width: 100%;">
                                 </div>
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Max %</label>
-                                    <input type="number" id="outcomes-filter-max-perf" class="form-input" placeholder="∞" style="width: 100%;">
+                                    <input type="number" id="outcomes-filter-max-perf" class="form-input" placeholder="∞" oninput="onOutcomeFilterChanged()" style="width: 100%;">
                                 </div>
                             </div>
                         </div>
@@ -1065,7 +1088,7 @@
                             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Platform</label>
-                                    <select id="outcomes-filter-platform" class="form-input" style="width: 100%;">
+                                    <select id="outcomes-filter-platform" class="form-input" onchange="onOutcomeFilterChanged()" style="width: 100%;">
                                         <option value="all">Any Platform</option>
                                         <option value="raydium">Raydium</option>
                                         <option value="pumpfun">Pump.fun</option>
@@ -1075,13 +1098,13 @@
                                 </div>
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Exclude Platform</label>
-                                    <input type="text" id="outcomes-filter-exclude-platform" class="form-input" placeholder="e.g. pumpfun|raydium" style="width: 100%;">
+                                    <input type="text" id="outcomes-filter-exclude-platform" class="form-input" placeholder="e.g. pumpfun|raydium" oninput="onOutcomeFilterChanged()" style="width: 100%;">
                                 </div>
                             </div>
                             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Migration Status</label>
-                                    <select id="outcomes-filter-migrated" class="form-input" style="width: 100%;">
+                                    <select id="outcomes-filter-migrated" class="form-input" onchange="onOutcomeFilterChanged()" style="width: 100%;">
                                         <option value="all">Any Status</option>
                                         <option value="migrated">Migrated Only (Yes)</option>
                                         <option value="unmigrated">Unmigrated Bonding (No)</option>
@@ -1089,7 +1112,7 @@
                                 </div>
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Signal Category</label>
-                                    <select id="outcomes-filter-category" class="form-input" style="width: 100%;">
+                                    <select id="outcomes-filter-category" class="form-input" onchange="onOutcomeFilterChanged()" style="width: 100%;">
                                         <option value="all">Any Category</option>
                                         <option value="cto">Community Takeover (CTO)</option>
                                         <option value="boost">Boost</option>
@@ -1102,15 +1125,15 @@
                             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Payment Min ($)</label>
-                                    <input type="number" id="outcomes-filter-min-payment" class="form-input" placeholder="0" style="width: 100%;">
+                                    <input type="number" id="outcomes-filter-min-payment" class="form-input" placeholder="0" oninput="onOutcomeFilterChanged()" style="width: 100%;">
                                 </div>
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Payment Max ($)</label>
-                                    <input type="number" id="outcomes-filter-max-payment" class="form-input" placeholder="∞" style="width: 100%;">
+                                    <input type="number" id="outcomes-filter-max-payment" class="form-input" placeholder="∞" oninput="onOutcomeFilterChanged()" style="width: 100%;">
                                 </div>
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Payment Label</label>
-                                    <input type="text" id="outcomes-filter-payment-label" class="form-input" placeholder="e.g. CTO" style="width: 100%;">
+                                    <input type="text" id="outcomes-filter-payment-label" class="form-input" placeholder="e.g. CTO" oninput="onOutcomeFilterChanged()" style="width: 100%;">
                                 </div>
                             </div>
                         </div>
@@ -1123,35 +1146,114 @@
                             <div style="display: grid; grid-template-columns: 110px 1fr; gap: 8px; margin-bottom: 8px;">
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Name Mode</label>
-                                    <select id="outcomes-filter-name-mode" class="form-input" style="width: 100%;">
+                                    <select id="outcomes-filter-name-mode" class="form-input" onchange="onOutcomeFilterChanged()" style="width: 100%;">
                                         <option value="include">Allow</option>
                                         <option value="exclude">Block</option>
                                     </select>
                                 </div>
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Token Name / Symbol</label>
-                                    <input type="text" id="outcomes-filter-name" class="form-input" placeholder="e.g. trump, doge, pepe" style="width: 100%;">
+                                    <input type="text" id="outcomes-filter-name" class="form-input" placeholder="e.g. trump, doge, pepe" oninput="onOutcomeFilterChanged()" style="width: 100%;">
                                 </div>
                             </div>
                             <div style="display: grid; grid-template-columns: 110px 1fr; gap: 8px; margin-bottom: 8px;">
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Word Mode</label>
-                                    <select id="outcomes-filter-word-mode" class="form-input" style="width: 100%;">
+                                    <select id="outcomes-filter-word-mode" class="form-input" onchange="onOutcomeFilterChanged()" style="width: 100%;">
                                         <option value="include">Require</option>
                                         <option value="exclude">Block</option>
                                     </select>
                                 </div>
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Word Regex / Pattern</label>
-                                    <input type="text" id="outcomes-filter-word" class="form-input" placeholder="e.g. scam|dump|presale" style="width: 100%;">
+                                    <input type="text" id="outcomes-filter-word" class="form-input" placeholder="e.g. scam|dump|presale" oninput="onOutcomeFilterChanged()" style="width: 100%;">
                                 </div>
                             </div>
                             <div>
                                 <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Contract Address Requirement</label>
-                                <select id="outcomes-filter-extract-ca" class="form-input" style="width: 100%;">
+                                <select id="outcomes-filter-extract-ca" class="form-input" onchange="onOutcomeFilterChanged()" style="width: 100%;">
                                     <option value="all">Any (Optional CA)</option>
                                     <option value="yes">Require Valid Contract Address (Extract CA)</option>
                                 </select>
+                            </div>
+                        </div>
+
+                        <!-- Card 5: Akoueflow Trading Indicators Filter Section -->
+                        <div style="grid-column: 1 / -1; background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(129, 140, 248, 0.3); border-radius: 10px; padding: 14px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+                                <div style="font-size: 0.76rem; font-weight: 700; color: #818cf8; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 6px;">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                                    <span>Akoueflow Indicators Filters (10 On-Chain Metrics)</span>
+                                </div>
+                                <span style="font-size: 0.72rem; color: var(--text-muted);">
+                                    Filter by net order flow, buy pressure acceleration, buyer/seller breadth &amp; risk metrics
+                                </span>
+                            </div>
+
+                            <!-- Row 1: Indicator Preset Selector -->
+                            <div style="margin-bottom: 12px;">
+                                <label style="display: block; font-size: 0.72rem; color: #cbd5e1; margin-bottom: 4px; font-weight: 600;">Indicator Preset</label>
+                                <select id="outcomes-filter-ind-preset" class="form-input" onchange="applyOutcomeIndicatorPreset(this.value)" style="width: 100%; background: rgba(15, 23, 42, 0.85); color: #fff;">
+                                    <option value="all">Custom / All Indicators</option>
+                                    <option value="strong_bullish">🔥 Strong Bullish Flow (Net Buy &gt; $5K, Dom ≥ 60%)</option>
+                                    <option value="buy_surge">⚡ Buy Volume Surge (Accel ≥ 2x, Dom ≥ 55%)</option>
+                                    <option value="high_breadth">👥 High Wallet Breadth (Buyer/Seller ≥ 1.5x)</option>
+                                    <option value="heavy_turnover">🌊 Heavy Liquidity Turnover (Net Buy/Liq ≥ 5%)</option>
+                                    <option value="low_risk">🛡️ Low Supply &amp; Exit Risk (Top 10 ≤ 35%, Exit Cost ≤ 6%)</option>
+                                    <option value="heavy_selling">🔴 Heavy Selling Pressure (Net Selling &lt; $0)</option>
+                                </select>
+                            </div>
+
+                            <!-- Grid of all 10 Akoueflow On-Chain Indicators -->
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px;">
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Net Buy Pressure ($ 5m)</label>
+                                    <div style="display: flex; gap: 6px; align-items: center;">
+                                        <input type="number" id="outcomes-filter-min-net-buy" class="form-input" placeholder="Min $" oninput="onOutcomeFilterChanged()" style="flex: 1;">
+                                        <span style="color: var(--text-muted); font-size: 0.74rem;">to</span>
+                                        <input type="number" id="outcomes-filter-max-net-buy" class="form-input" placeholder="Max $" oninput="onOutcomeFilterChanged()" style="flex: 1;">
+                                    </div>
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Min Buy Dominance (%)</label>
+                                    <input type="number" step="1" id="outcomes-filter-min-buy-dom" class="form-input" placeholder="e.g. 60 (≥ 60%)" oninput="onOutcomeFilterChanged()" style="width: 100%;">
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Min Buy Vol Accel (x)</label>
+                                    <input type="number" step="0.1" id="outcomes-filter-min-buy-accel" class="form-input" placeholder="e.g. 2.0 (≥ 2x)" oninput="onOutcomeFilterChanged()" style="width: 100%;">
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Max Sell Vol Accel (x)</label>
+                                    <input type="number" step="0.1" id="outcomes-filter-max-sell-accel" class="form-input" placeholder="e.g. 1.0 (≤ 1x)" oninput="onOutcomeFilterChanged()" style="width: 100%;">
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Min Buy Press Accel (%)</label>
+                                    <input type="number" step="0.5" id="outcomes-filter-min-buy-press-accel" class="form-input" placeholder="e.g. 10 (≥ +10%)" oninput="onOutcomeFilterChanged()" style="width: 100%;">
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Min Buyer/Seller Ratio</label>
+                                    <input type="number" step="0.1" id="outcomes-filter-min-bs-ratio" class="form-input" placeholder="e.g. 1.5 (≥ 1.5x)" oninput="onOutcomeFilterChanged()" style="width: 100%;">
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Min Net Buy / Liq (%)</label>
+                                    <input type="number" step="0.5" id="outcomes-filter-min-buy-liq" class="form-input" placeholder="e.g. 5 (≥ 5%)" oninput="onOutcomeFilterChanged()" style="width: 100%;">
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Min Volume / MC (x)</label>
+                                    <input type="number" step="0.1" id="outcomes-filter-min-vol-mc" class="form-input" placeholder="e.g. 1.0 (≥ 1x)" oninput="onOutcomeFilterChanged()" style="width: 100%;">
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Min Volume / Liq (x)</label>
+                                    <input type="number" step="0.1" id="outcomes-filter-min-vol-liq" class="form-input" placeholder="e.g. 2.0 (≥ 2x)" oninput="onOutcomeFilterChanged()" style="width: 100%;">
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Max Top 10 Holders (%)</label>
+                                    <input type="number" step="1" id="outcomes-filter-max-holder-conc" class="form-input" placeholder="e.g. 35 (≤ 35%)" oninput="onOutcomeFilterChanged()" style="width: 100%;">
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Max Round-Trip Cost (%)</label>
+                                    <input type="number" step="0.5" id="outcomes-filter-max-round-trip" class="form-input" placeholder="e.g. 6.0 (≤ 6%)" oninput="onOutcomeFilterChanged()" style="width: 100%;">
+                                </div>
                             </div>
                         </div>
 
@@ -1264,6 +1366,7 @@
                                         <th style="padding: 10px 12px; font-weight: 600;">SIGNAL TIME</th>
                                         <th style="padding: 10px 12px; font-weight: 600;">ENTRY MC</th>
                                         <th style="padding: 10px 12px; font-weight: 600;">LIQUIDITY</th>
+                                        <th style="padding: 10px 12px; font-weight: 600;">AKOUEFLOW</th>
                                         <th style="padding: 10px 12px; font-weight: 600;">1H PEAK</th>
                                         <th style="padding: 10px 12px; font-weight: 600;">BEST PEAK</th>
                                         <th style="padding: 10px 12px; font-weight: 600;">DRAWDOWN</th>
@@ -1273,7 +1376,7 @@
                                 </thead>
                                 <tbody id="outcomes-table-body">
                                     <tr>
-                                        <td colspan="9" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                                        <td colspan="10" style="text-align: center; padding: 3rem; color: var(--text-muted);">
                                             Click "Run Backtest" above to simulate outcomes for selected criteria.
                                         </td>
                                     </tr>
@@ -1445,8 +1548,18 @@
                     </p>
                     <form onsubmit="saveHeliusSettings(event)">
                         <div class="form-group">
-                            <label>Helius API Key</label>
+                            <label>Helius API Key 1 (Primary)</label>
                             <input class="form-input" id="setting-helius-key" placeholder="e.g. 12345678-abcd-1234-abcd-1234567890ab" />
+                        </div>
+                        <div class="settings-form-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label>Helius API Key 2 (Backup Failover)</label>
+                                <input class="form-input" id="setting-helius-key-2" placeholder="Optional backup key 2" />
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label>Helius API Key 3 (Backup Failover)</label>
+                                <input class="form-input" id="setting-helius-key-3" placeholder="Optional backup key 3" />
+                            </div>
                         </div>
                         <div class="form-group">
                             <label>DexScreener Solana Payment Address (Monitored)</label>
@@ -2497,6 +2610,72 @@
                         </div>
                     </div>
 
+                    <!-- Row 5: Akoueflow Trading Indicators Filter Section -->
+                    <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 0.85rem 1rem; margin-bottom: 1rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.65rem; flex-wrap: wrap; gap: 8px;">
+                            <div style="font-size: 0.76rem; font-weight: 600; text-transform: uppercase; color: #818cf8; letter-spacing: 0.5px; display: flex; align-items: center; gap: 6px;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                                <span>Akoueflow Indicators Filters (10 On-Chain Metrics)</span>
+                            </div>
+                            <div style="font-size: 0.72rem; color: var(--text-muted);">
+                                Filter by buy pressure, acceleration, wallet breadth &amp; supply concentration
+                            </div>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.85rem; align-items: flex-end;">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.76rem;">Indicator Preset</label>
+                                <select class="form-input" id="dvd-ind-preset" onchange="applyIndicatorPreset(this.value)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white; padding: 6px 10px; font-size: 0.8rem;">
+                                    <option value="all">Custom / All Indicators</option>
+                                    <option value="strong_bullish">🔥 Strong Bullish Flow (Net Buy &gt; $5K, Dom ≥ 60%)</option>
+                                    <option value="buy_surge">⚡ Buy Volume Surge (Accel ≥ 2x, Dom ≥ 55%)</option>
+                                    <option value="high_breadth">👥 High Wallet Breadth (Buyer/Seller ≥ 1.5x)</option>
+                                    <option value="heavy_turnover">🌊 Heavy Liquidity Turnover (Net Buy/Liq ≥ 5%)</option>
+                                    <option value="low_risk">🛡️ Low Supply &amp; Exit Risk (Top 10 ≤ 35%, Exit Cost ≤ 6%)</option>
+                                    <option value="heavy_selling">🔴 Heavy Selling Pressure (Net Selling &lt; $0)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.76rem;">Net Buy Pressure ($ 5m)</label>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <input type="number" class="form-input" id="dvd-min-net-buy" placeholder="Min $" oninput="onIndicatorInputChanged()" onchange="loadDexValidatedTableData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                    <span style="color: var(--text-muted); font-size: 0.78rem;">to</span>
+                                    <input type="number" class="form-input" id="dvd-max-net-buy" placeholder="Max $" oninput="onIndicatorInputChanged()" onchange="loadDexValidatedTableData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.76rem;">Min Buy Dominance (%)</label>
+                                <input type="number" step="1" class="form-input" id="dvd-min-buy-dom" placeholder="e.g. 60 (≥ 60%)" oninput="onIndicatorInputChanged()" onchange="loadDexValidatedTableData(1)" style="padding: 6px 10px; font-size: 0.8rem;" />
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.76rem;">Min Buy Vol Accel (x)</label>
+                                <input type="number" step="0.1" class="form-input" id="dvd-min-buy-accel" placeholder="e.g. 1.5 (≥ 1.5x)" oninput="onIndicatorInputChanged()" onchange="loadDexValidatedTableData(1)" style="padding: 6px 10px; font-size: 0.8rem;" />
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.76rem;">Min Buyer/Seller Ratio</label>
+                                <input type="number" step="0.1" class="form-input" id="dvd-min-bs-ratio" placeholder="e.g. 1.2 (≥ 1.2x)" oninput="onIndicatorInputChanged()" onchange="loadDexValidatedTableData(1)" style="padding: 6px 10px; font-size: 0.8rem;" />
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.76rem;">Min Net Buy / Liq (%)</label>
+                                <input type="number" step="0.5" class="form-input" id="dvd-min-buy-liq" placeholder="e.g. 5 (≥ 5%)" oninput="onIndicatorInputChanged()" onchange="loadDexValidatedTableData(1)" style="padding: 6px 10px; font-size: 0.8rem;" />
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.76rem;">Max Top 10 Holders (%)</label>
+                                <input type="number" step="1" class="form-input" id="dvd-max-holder-conc" placeholder="e.g. 40 (≤ 40%)" oninput="onIndicatorInputChanged()" onchange="loadDexValidatedTableData(1)" style="padding: 6px 10px; font-size: 0.8rem;" />
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.76rem;">Max Round-Trip Cost (%)</label>
+                                <input type="number" step="0.5" class="form-input" id="dvd-max-round-trip" placeholder="e.g. 6 (≤ 6%)" oninput="onIndicatorInputChanged()" onchange="loadDexValidatedTableData(1)" style="padding: 6px 10px; font-size: 0.8rem;" />
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Bottom Action Toolbar -->
                     <div style="display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap; padding-top: 0.5rem;">
                         <div style="display: flex; gap: 1.25rem; align-items: center; flex-wrap: wrap;">
@@ -2563,6 +2742,7 @@
                                     <th class="sortable-th" data-sort="perf_24h" data-default-dir="desc" onclick="sortTableByColumn('dvd', 'perf_24h', 'desc')">24h<span class="sort-arrow">⇅</span></th>
                                     <th class="sortable-th" data-sort="peak_mult_1h" data-default-dir="desc" onclick="sortTableByColumn('dvd', 'peak_mult_1h', 'desc')">1h Peak<span class="sort-arrow">⇅</span></th>
                                     <th class="sortable-th" data-sort="peak_mult_4h" data-default-dir="desc" onclick="sortTableByColumn('dvd', 'peak_mult_4h', 'desc')">4h Peak<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="net_buy_pressure" data-default-dir="desc" onclick="sortTableByColumn('dvd', 'net_buy_pressure', 'desc')">Akoueflow Indicators<span class="sort-arrow">⇅</span></th>
                                     <th class="sortable-th" data-sort="status" data-default-dir="asc" onclick="sortTableByColumn('dvd', 'status', 'asc')">Status<span class="sort-arrow">⇅</span></th>
                                     <th class="sortable-th" data-sort="reason" data-default-dir="asc" onclick="sortTableByColumn('dvd', 'reason', 'asc')">Forwarded Flow<span class="sort-arrow">⇅</span></th>
                                     <th style="text-align: right; padding-right: 1.5rem;">Actions</th>
@@ -2570,7 +2750,7 @@
                             </thead>
                             <tbody id="dex-validated-data-tbody">
                                 <tr>
-                                    <td colspan="17" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                                    <td colspan="18" style="text-align: center; padding: 3rem; color: var(--text-muted);">
                                         Connecting to DEX Screener WebSocket streams...
                                     </td>
                                 </tr>
@@ -2672,27 +2852,175 @@
 
                     <div class="form-group">
                         <label>Rules & Filters</label>
-                        <div style="background: rgba(255,255,255,0.03); padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+                        <div class="rules-section-box">
                             <div id="rules-container"></div>
                             
-                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 8px; margin-top: 1rem;">
-                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem;" onclick="addRule('token_age')">+ Add Token Age</button>
-                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #10b981;" onclick="addRule('market_cap')">+ Add Market Cap</button>
-                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #f59e0b;" onclick="addRule('performance')">+ Add Performance</button>
-                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #14b8a6;" onclick="addRule('liquidity')">+ Add Liquidity</button>
-                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #0ea5e9;" onclick="addRule('volume')">+ Add Volume</button>
-                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #059669;" onclick="addRule('dex_payment')">+ Add DEX Payment</button>
-                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #8b5cf6;" onclick="addRule('category')">+ Add Category</button>
-                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #06b6d4;" onclick="addRule('migrated')">+ Add Migration Filter</button>
-                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #0ea5e9;" onclick="addRule('show_wallet')">+ Show Wallet</button>
-                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #ef4444;" onclick="addRule('exclude_platform')">+ Exclude Platform</button>
-                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #ec4899;" onclick="addRule('token_name')">+ Add Token Name</button>
-                                <button type="button" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; background: #f43f5e;" onclick="addRule('filter')">+ Add Word Filter</button>
+                            <!-- Categorized Rule Selector -->
+                            <div class="workflow-rule-categories-wrapper" style="margin-top: 1.25rem; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 1rem;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem; flex-wrap: wrap; gap: 8px;">
+                                    <div>
+                                        <div style="font-size: 0.82rem; font-weight: 600; color: #f3f4f6; letter-spacing: 0.01em;">
+                                            Add Rules by Category
+                                        </div>
+                                        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">
+                                            Filter incoming signals by trading conditions
+                                        </div>
+                                    </div>
+                                    <div style="display: flex; gap: 4px; background: rgba(255,255,255,0.03); padding: 3px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08); flex-wrap: wrap;">
+                                        <button type="button" class="rule-cat-pill active" onclick="switchRuleCategory('indicators', this)">Akoueflow (10)</button>
+                                        <button type="button" class="rule-cat-pill" onclick="switchRuleCategory('valuation', this)">Valuation</button>
+                                        <button type="button" class="rule-cat-pill" onclick="switchRuleCategory('liquidity', this)">Liquidity</button>
+                                        <button type="button" class="rule-cat-pill" onclick="switchRuleCategory('timings', this)">Timings</button>
+                                        <button type="button" class="rule-cat-pill" onclick="switchRuleCategory('orders', this)">Orders</button>
+                                        <button type="button" class="rule-cat-pill" onclick="switchRuleCategory('content', this)">Content</button>
+                                        <button type="button" class="rule-cat-pill" onclick="switchRuleCategory('all', this)">All</button>
+                                    </div>
+                                </div>
+
+                                <!-- Category 1: Akoueflow Indicators -->
+                                <div id="rule-cat-panel-indicators" class="rule-cat-panel" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px;">
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('indicator', 'net_buy_pressure')">
+                                        <span class="btn-rule-cat__title">Net Buy Pressure</span>
+                                        <span class="btn-rule-cat__desc">Min / Max Net USD (5m)</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('indicator', 'buy_dominance_pct')">
+                                        <span class="btn-rule-cat__title">Buy Dominance %</span>
+                                        <span class="btn-rule-cat__desc">5m Buy % of volume</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('indicator', 'buy_pressure_accel')">
+                                        <span class="btn-rule-cat__title">Buy Press Accel</span>
+                                        <span class="btn-rule-cat__desc">5m vs 1h buying share</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('indicator', 'buy_vol_accel')">
+                                        <span class="btn-rule-cat__title">Buy Vol Accel</span>
+                                        <span class="btn-rule-cat__desc">5m run-rate vs 1h pace</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('indicator', 'sell_vol_accel')">
+                                        <span class="btn-rule-cat__title">Sell Vol Accel</span>
+                                        <span class="btn-rule-cat__desc">Growth in selling activity</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('indicator', 'net_buy_to_liq')">
+                                        <span class="btn-rule-cat__title">Net Buy / Liq %</span>
+                                        <span class="btn-rule-cat__desc">Turnover relative to pool</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('indicator', 'vol_to_mc')">
+                                        <span class="btn-rule-cat__title">Volume / MC (x)</span>
+                                        <span class="btn-rule-cat__desc">24h Valuation turnover</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('indicator', 'vol_to_liq')">
+                                        <span class="btn-rule-cat__title">Volume / Liq (x)</span>
+                                        <span class="btn-rule-cat__desc">Trading churn vs pool</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('indicator', 'buyer_seller_ratio')">
+                                        <span class="btn-rule-cat__title">Buyer/Seller Ratio</span>
+                                        <span class="btn-rule-cat__desc">Unique trader breadth</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('indicator', 'holder_concentration')">
+                                        <span class="btn-rule-cat__title">Top 10 Holders %</span>
+                                        <span class="btn-rule-cat__desc">Supply concentration risk</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('indicator', 'round_trip_cost')">
+                                        <span class="btn-rule-cat__title">Round-Trip Cost %</span>
+                                        <span class="btn-rule-cat__desc">Buy Slip + Sell Slip + Fee</span>
+                                    </button>
+                                </div>
+
+                                <!-- Category 2: Valuation & Performance -->
+                                <div id="rule-cat-panel-valuation" class="rule-cat-panel hidden" style="display: none; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px;">
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('market_cap')">
+                                        <span class="btn-rule-cat__title">Market Cap ($)</span>
+                                        <span class="btn-rule-cat__desc">Min / Max token valuation</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('performance', '5m')">
+                                        <span class="btn-rule-cat__title">5m Price Perf %</span>
+                                        <span class="btn-rule-cat__desc">Short-term price momentum</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('performance', '1hr')">
+                                        <span class="btn-rule-cat__title">1h Price Perf %</span>
+                                        <span class="btn-rule-cat__desc">1-hour price gain/loss</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('performance', '24hr')">
+                                        <span class="btn-rule-cat__title">24h Price Perf %</span>
+                                        <span class="btn-rule-cat__desc">24-hour price gain/loss</span>
+                                    </button>
+                                </div>
+
+                                <!-- Category 3: Liquidity & Volume -->
+                                <div id="rule-cat-panel-liquidity" class="rule-cat-panel hidden" style="display: none; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px;">
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('liquidity')">
+                                        <span class="btn-rule-cat__title">Liquidity Pool ($)</span>
+                                        <span class="btn-rule-cat__desc">Min / Max pool reserves</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('volume', '5m')">
+                                        <span class="btn-rule-cat__title">5m Trading Volume</span>
+                                        <span class="btn-rule-cat__desc">Fast-burst volume filter</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('volume', '1h')">
+                                        <span class="btn-rule-cat__title">1h Trading Volume</span>
+                                        <span class="btn-rule-cat__desc">1-hour volume liquidity</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('volume', '24h')">
+                                        <span class="btn-rule-cat__title">24h Trading Volume</span>
+                                        <span class="btn-rule-cat__desc">Full-day turnover volume</span>
+                                    </button>
+                                </div>
+
+                                <!-- Category 4: Timings & Lifecycle -->
+                                <div id="rule-cat-panel-timings" class="rule-cat-panel hidden" style="display: none; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px;">
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('token_age', 'creation')">
+                                        <span class="btn-rule-cat__title">Creation Age</span>
+                                        <span class="btn-rule-cat__desc">Min / Max age since mint</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('token_age', 'migration')">
+                                        <span class="btn-rule-cat__title">Migration Age</span>
+                                        <span class="btn-rule-cat__desc">Min / Max age since Raydium</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('migrated')">
+                                        <span class="btn-rule-cat__title">Migration Status</span>
+                                        <span class="btn-rule-cat__desc">Must be Migrated (Yes / No)</span>
+                                    </button>
+                                </div>
+
+                                <!-- Category 5: Orders & Boosts -->
+                                <div id="rule-cat-panel-orders" class="rule-cat-panel hidden" style="display: none; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px;">
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('category')">
+                                        <span class="btn-rule-cat__title">Signal Category</span>
+                                        <span class="btn-rule-cat__desc">Boost, CTO, Profile, Ad</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('boost_count')">
+                                        <span class="btn-rule-cat__title">DexScreener Boosts</span>
+                                        <span class="btn-rule-cat__desc">Min / Max boost threshold</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('dex_payment')">
+                                        <span class="btn-rule-cat__title">DEX Payment ($)</span>
+                                        <span class="btn-rule-cat__desc">Promotion cost in USD</span>
+                                    </button>
+                                </div>
+
+                                <!-- Category 6: Names & Security -->
+                                <div id="rule-cat-panel-content" class="rule-cat-panel hidden" style="display: none; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px;">
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('token_name')">
+                                        <span class="btn-rule-cat__title">Token Name Filter</span>
+                                        <span class="btn-rule-cat__desc">Exact / Contains allowlist</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('filter')">
+                                        <span class="btn-rule-cat__title">Word Filter (Regex)</span>
+                                        <span class="btn-rule-cat__desc">Must contain or exclude</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('exclude_platform')">
+                                        <span class="btn-rule-cat__title">Exclude Platform</span>
+                                        <span class="btn-rule-cat__desc">Drop pump.fun or raydium</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('show_wallet')">
+                                        <span class="btn-rule-cat__title">Show Payer Wallet</span>
+                                        <span class="btn-rule-cat__desc">Append wallet Solscan link</span>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 2rem;">
+                    <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px solid rgba(255, 255, 255, 0.14);">
                         <button type="button" class="btn-icon" style="padding: 0 1rem;" onclick="closeModal()">Cancel</button>
                         <button type="submit" class="btn-primary">Save Workflow</button>
                     </div>
@@ -2879,20 +3207,23 @@
         </div>
         <!-- Telegram Formatted Message Preview Modal -->
         <div id="tg-msg-modal" class="modal-overlay hidden">
-            <div class="modal-content" style="max-width: 650px;">
+            <div class="modal-content" style="max-width: 780px; max-height: 90vh; overflow-y: auto;">
                 <div class="header" style="margin-bottom: 1.25rem;">
                     <div>
                         <h2 style="font-size: 1.2rem; font-weight: 600; display: flex; align-items: center; gap: 8px;">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                            <span id="tg-msg-modal-title">Telegram Message</span>
+                            <span id="tg-msg-modal-title">Token Details &amp; Signal Message</span>
                         </h2>
-                        <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;" id="tg-msg-modal-subtitle">Exact message sent or formatted for Telegram</p>
+                        <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;" id="tg-msg-modal-subtitle">Comprehensive on-chain audit and signal details</p>
                     </div>
                     <button class="btn-icon" type="button" onclick="closeTgMsgModal()">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                     </button>
                 </div>
                 
+                <!-- Enriched DEX Validated Visual Metrics Container -->
+                <div id="tg-metrics-container" class="hidden" style="margin-bottom: 1.25rem;"></div>
+
                 <div id="tg-msg-content" class="tg-message-box"></div>
                 
                 <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 1.25rem;">

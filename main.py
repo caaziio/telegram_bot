@@ -5,6 +5,8 @@ import threading
 import re
 import logging
 import json
+import struct
+import base64
 from datetime import datetime, timezone
 import time
 import requests
@@ -530,7 +532,10 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                             batch_max_id = item_id
                         if not is_fully_enriched(item):
                             continue
-                        clean_rows.append(tuple(item.get(c) for c in cols))
+                        clean_rows.append(tuple(
+                    json.dumps(item.get(c)) if c == 'metrics_data' and isinstance(item.get(c), (dict, list)) else item.get(c)
+                    for c in cols
+                ))
 
                     if clean_rows:
                         with db_lock:
@@ -562,7 +567,10 @@ def sync_wallet_payments_from_supabase(limit_records=1000, full_sync=False):
                             batch_max_id = item_id
                         if not is_fully_enriched(item):
                             continue
-                        clean_rows.append(tuple(item.get(c) for c in cols))
+                        clean_rows.append(tuple(
+                    json.dumps(item.get(c)) if c == 'metrics_data' and isinstance(item.get(c), (dict, list)) else item.get(c)
+                    for c in cols
+                ))
                     if clean_rows:
                         with db_lock:
                             sq_conn = get_db()
@@ -594,7 +602,7 @@ def sync_dex_validated_from_supabase(full_sync=False):
             "detection_seconds", "reason", "formatted_message", "created_at",
             "max_mc_1h", "peak_mult_1h", "min_mc_1h", "min_dd_1h_pct", "pre_peak_low_mc_1h", "pre_peak_dd_1h_pct", "path_1h",
             "max_mc_4h", "peak_mult_4h", "min_mc_4h", "min_dd_4h_pct", "pre_peak_low_mc_4h", "pre_peak_dd_4h_pct", "path_4h",
-            "perf_checked_stage"
+            "perf_checked_stage", "metrics_data"
         ]
         perf_cols = {
             "max_mc_1h", "peak_mult_1h", "min_mc_1h", "min_dd_1h_pct", "pre_peak_low_mc_1h", "pre_peak_dd_1h_pct", "path_1h",
@@ -610,6 +618,8 @@ def sync_dex_validated_from_supabase(full_sync=False):
                 update_assignments.append("perf_checked_stage=MAX(COALESCE(dex_validated.perf_checked_stage, 0), COALESCE(excluded.perf_checked_stage, 0))")
             elif c in perf_cols:
                 update_assignments.append(f"{c}=COALESCE(excluded.{c}, dex_validated.{c})")
+            elif c == "status":
+                update_assignments.append("status=CASE WHEN dex_validated.status = 'forwarded' THEN 'forwarded' WHEN excluded.status = 'forwarded' THEN 'forwarded' ELSE excluded.status END")
             else:
                 update_assignments.append(f"{c}=excluded.{c}")
         upsert_sql = (
@@ -636,7 +646,10 @@ def sync_dex_validated_from_supabase(full_sync=False):
                 item_id = item.get('id') or 0
                 if item_id > batch_max_id:
                     batch_max_id = item_id
-                clean_rows.append(tuple(item.get(c) for c in cols))
+                clean_rows.append(tuple(
+                    json.dumps(item.get(c)) if c == 'metrics_data' and isinstance(item.get(c), (dict, list)) else item.get(c)
+                    for c in cols
+                ))
             if clean_rows:
                 with db_lock:
                     sq_conn = get_db()
@@ -664,6 +677,22 @@ def push_to_supabase_table(table_name, record, on_conflict=None):
             elif table_name == 'wallet_payments' and 'signature' in record and record.get('signature'):
                 supabase_client.table(table_name).upsert(record, on_conflict='signature').execute()
             elif table_name == 'dex_validated':
+                # Never overwrite an existing 'forwarded' status with 'detected' or 'skipped' in Supabase
+                status_to_push = record.get('status')
+                if status_to_push and status_to_push != 'forwarded':
+                    try:
+                        existing = supabase_client.table('dex_validated')\
+                            .select('status')\
+                            .eq('ca', record.get('ca'))\
+                            .eq('signal_type', record.get('signal_type'))\
+                            .eq('payment_timestamp', record.get('payment_timestamp'))\
+                            .eq('order_status', record.get('order_status'))\
+                            .limit(1)\
+                            .execute()
+                        if existing and existing.data and str(existing.data[0].get('status')).lower() == 'forwarded':
+                            record['status'] = 'forwarded'
+                    except Exception:
+                        pass
                 supabase_client.table(table_name).upsert(record, on_conflict='ca,signal_type,payment_timestamp,order_status').execute()
             else:
                 supabase_client.table(table_name).upsert(record).execute()
@@ -900,6 +929,7 @@ def init_db():
                 detection_seconds REAL,
                 reason TEXT,
                 formatted_message TEXT,
+                metrics_data TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -909,6 +939,10 @@ def init_db():
         ''')
         try:
             cursor.execute('ALTER TABLE dex_validated ADD COLUMN formatted_message TEXT')
+        except Exception:
+            pass
+        try:
+            cursor.execute('ALTER TABLE dex_validated ADD COLUMN metrics_data TEXT')
         except Exception:
             pass
 
@@ -1156,14 +1190,102 @@ def get_settings():
         conn = get_db()
         cursor = conn.cursor()
         settings = {}
-        for row in cursor.execute('SELECT key, value FROM settings').fetchall():
-            settings[row[0]] = row[1]
+        try:
+            for row in cursor.execute('SELECT key, value FROM settings').fetchall():
+                settings[row[0]] = row[1]
+        except Exception:
+            pass
 
         # Fallback to environment variables if not set in DB settings
-        if 'helius_api_key' not in settings and os.environ.get('HELIUS_API_KEY'):
-            settings['helius_api_key'] = os.environ.get('HELIUS_API_KEY')
+        for k in ('helius_api_key', 'helius_api_key_2', 'helius_api_key_3'):
+            if k not in settings and os.environ.get(k.upper()):
+                settings[k] = os.environ.get(k.upper())
 
         return settings
+
+
+# =====================================================================
+# HELIUS MULTI-KEY POOL & AUTOMATIC FAILOVER MANAGER
+# =====================================================================
+helius_keys_lock = threading.Lock()
+helius_key_cooldowns = {}  # key -> cooldown_until_timestamp
+
+def get_all_helius_keys():
+    """Return all configured Helius API keys in priority order (Key 1 -> Key 2 -> Key 3)."""
+    settings = get_settings()
+    keys = []
+    for k in ('helius_api_key', 'helius_api_key_2', 'helius_api_key_3'):
+        val = str(settings.get(k) or os.environ.get(k.upper()) or '').strip()
+        if val and val not in keys:
+            keys.append(val)
+    return keys
+
+def get_current_helius_key():
+    """Get the first active (non-cooled-down) Helius API key, or least recently cooled down."""
+    keys = get_all_helius_keys()
+    if not keys:
+        return None
+    now = time.time()
+    with helius_keys_lock:
+        for k in keys:
+            if now >= helius_key_cooldowns.get(k, 0):
+                return k
+        # If all in cooldown, return the one whose cooldown expires soonest
+        return min(keys, key=lambda k: helius_key_cooldowns.get(k, 0))
+
+def mark_helius_key_rate_limited(key, cooldown_seconds=60):
+    """Mark a key as rate-limited or quota-exhausted so requests switch to the next key."""
+    if not key:
+        return
+    with helius_keys_lock:
+        helius_key_cooldowns[key] = time.time() + cooldown_seconds
+        keys = get_all_helius_keys()
+        next_key = None
+        for k in keys:
+            if k != key and time.time() >= helius_key_cooldowns.get(k, 0):
+                next_key = k
+                break
+        short_k = f"{key[:6]}...{key[-4:]}" if len(key) >= 10 else key
+        short_next = f"{next_key[:6]}...{next_key[-4:]}" if next_key and len(next_key) >= 10 else (next_key or "None")
+        print(f"[HELIUS ROTATION] Key {short_k} hit rate limit / quota (HTTP 429/402/403). Cooldown {cooldown_seconds}s. Next active key: {short_next}", flush=True)
+
+def helius_request_with_failover(method, endpoint_template, timeout=8, **kwargs):
+    """
+    Executes a Helius request (GET or POST) with automatic key failover.
+    endpoint_template must contain '{key}' where the API key belongs.
+    e.g. 'https://api.helius.xyz/v0/addresses/{addr}/transactions?api-key={key}&limit=100'
+    or 'https://mainnet.helius-rpc.com/?api-key={key}'
+    """
+    keys = get_all_helius_keys()
+    if not keys:
+        return None
+
+    # Try keys ordered by cooldown expiry (active first, then soonest expiring)
+    now = time.time()
+    with helius_keys_lock:
+        sorted_keys = sorted(keys, key=lambda k: helius_key_cooldowns.get(k, 0))
+
+    last_response = None
+    for k in sorted_keys:
+        url = endpoint_template.format(key=k)
+        try:
+            if method.upper() == 'GET':
+                r = requests.get(url, timeout=timeout, **kwargs)
+            else:
+                r = requests.post(url, timeout=timeout, **kwargs)
+
+            # Rate limit (429), payment required / quota (402), or forbidden (403)
+            if r.status_code in (429, 402, 403) or (r.status_code == 400 and 'rate limit' in r.text.lower()):
+                mark_helius_key_rate_limited(k, cooldown_seconds=60)
+                last_response = r
+                continue
+
+            return r
+        except Exception as e:
+            last_response = None
+            continue
+
+    return last_response
 
 
 def regex_matches(value, pattern):
@@ -1193,11 +1315,14 @@ def get_workflows():
         cursor = conn.cursor()
 
         workflows = []
-        for wf in cursor.execute('SELECT * FROM workflows').fetchall():
-            wf_dict = dict(wf)
-            rules = cursor.execute('SELECT * FROM rules WHERE workflow_id = ?', (wf['id'],)).fetchall()
-            wf_dict['rules'] = [dict(r) for r in rules]
-            workflows.append(wf_dict)
+        try:
+            for wf in cursor.execute('SELECT * FROM workflows').fetchall():
+                wf_dict = dict(wf)
+                rules = cursor.execute('SELECT * FROM rules WHERE workflow_id = ?', (wf['id'],)).fetchall()
+                wf_dict['rules'] = [dict(r) for r in rules]
+                workflows.append(wf_dict)
+        except Exception:
+            pass
 
         return workflows
 
@@ -1449,6 +1574,120 @@ def process_message_logic(text, rules, context=None):
                     return None, True, f"Dropped by {label} Filter (Allowed: ${min_value}-${max_value}, Found: ${actual})"
             except Exception as e:
                 return None, True, f"Dropped by {rule_type.title()} Filter (Error parsing: {e})"
+
+        # BOOST COUNT FILTER LOGIC
+        elif rule_type == 'boost_count':
+            try:
+                min_b_str = rule.get('time_min')
+                max_b_str = rule.get('time_max')
+                min_b = float(min_b_str) if min_b_str and str(min_b_str).strip() != "" else 0
+                max_b = float(max_b_str) if max_b_str and str(max_b_str).strip() != "" else float('inf')
+
+                # First check context if provided
+                boost_val = context.get('boost_count')
+                if boost_val is None:
+                    # Look for "Boosts: 🚀 500" or "Boosts: 500" in message text
+                    boost_match = re.search(r'Boosts?:\s*(?:🚀\s*)?([\d,]+)', text, re.IGNORECASE)
+                    if boost_match:
+                        boost_val = float(boost_match.group(1).replace(',', ''))
+                    else:
+                        boost_val = 0
+
+                boost_val = float(boost_val or 0)
+                if not (min_b <= boost_val <= max_b):
+                    debug_log(f"      [BOOST COUNT] DROPPING: {min_b} <= {boost_val} <= {max_b} is FALSE")
+                    min_disp = f"{int(min_b):,}" if min_b != float('-inf') else "-∞"
+                    max_disp = f"{int(max_b):,}" if max_b != float('inf') else "∞"
+                    return None, True, f"Dropped by Boost Count Filter (Allowed: {min_disp}-{max_disp}, Found: {int(boost_val):,})"
+                else:
+                    debug_log(f"      [BOOST COUNT] PASSED: {min_b} <= {boost_val} <= {max_b}")
+            except Exception as e:
+                print(f"      [BOOST COUNT] Error evaluating filter: {e}", flush=True)
+
+        # AKOUEFLOW INDICATORS FILTER LOGIC
+        elif rule_type == 'indicator':
+            try:
+                indicator_key = (rule.get('search_text') or 'net_buy_pressure').strip().lower()
+                min_str = rule.get('time_min')
+                max_str = rule.get('time_max')
+                min_val = float(min_str) if min_str is not None and str(min_str).strip() != "" else float('-inf')
+                max_val = float(max_str) if max_str is not None and str(max_str).strip() != "" else float('inf')
+
+                # Check context indicators first
+                indicators = context.get('indicators')
+                if not indicators and isinstance(context.get('metrics_data'), dict):
+                    indicators = context.get('metrics_data', {}).get('indicators')
+
+                val = None
+                if isinstance(indicators, dict) and indicator_key in indicators:
+                    val = indicators.get(indicator_key)
+                else:
+                    # Fallback: Extract from message text
+                    if indicator_key == 'net_buy_pressure':
+                        m = re.search(r'Net Buy Pressure:\s*([+\-]?)\$?([\d,.]+)([KMB]?)', text, re.IGNORECASE)
+                        if m:
+                            sign = -1.0 if m.group(1) == '-' else 1.0
+                            num = float(m.group(2).replace(',', ''))
+                            sfx = m.group(3).upper()
+                            num *= {'K': 1_000, 'M': 1_000_000, 'B': 1_000_000_000}.get(sfx, 1)
+                            val = sign * num
+                    elif indicator_key == 'buy_dominance_pct':
+                        m = re.search(r'\((\d+(?:\.\d+)?)%\s*Buy Dom\)', text, re.IGNORECASE)
+                        if m:
+                            val = float(m.group(1))
+                    elif indicator_key == 'buy_pressure_accel':
+                        m = re.search(r'Buy Press Accel:\s*([+\-]?\d+(?:\.\d+)?)%', text, re.IGNORECASE)
+                        if m:
+                            val = float(m.group(1))
+                    elif indicator_key == 'buy_vol_accel':
+                        m = re.search(r'Vol Accel:\s*Buy\s*(\d+(?:\.\d+)?)x', text, re.IGNORECASE)
+                        if m:
+                            val = float(m.group(1))
+                    elif indicator_key == 'sell_vol_accel':
+                        m = re.search(r'Vol Accel:.*?Sell\s*(\d+(?:\.\d+)?)x', text, re.IGNORECASE)
+                        if m:
+                            val = float(m.group(1))
+                    elif indicator_key == 'net_buy_to_liq':
+                        m = re.search(r'Net Buy / Liq:\s*([+\-]?\d+(?:\.\d+)?)%', text, re.IGNORECASE)
+                        if m:
+                            val = float(m.group(1))
+                    elif indicator_key == 'vol_to_mc':
+                        m = re.search(r'Vol/MC:\s*(\d+(?:\.\d+)?)x', text, re.IGNORECASE)
+                        if m:
+                            val = float(m.group(1))
+                    elif indicator_key == 'vol_to_liq':
+                        m = re.search(r'Vol/Liq:\s*(\d+(?:\.\d+)?)x', text, re.IGNORECASE)
+                        if m:
+                            val = float(m.group(1))
+                    elif indicator_key == 'buyer_seller_ratio':
+                        m = re.search(r'Buyer/Seller Ratio:\s*(\d+(?:\.\d+)?)', text, re.IGNORECASE)
+                        if m:
+                            val = float(m.group(1))
+                    elif indicator_key == 'holder_concentration':
+                        m = re.search(r'Holder Concentration:\s*(\d+(?:\.\d+)?)%', text, re.IGNORECASE)
+                        if m:
+                            val = float(m.group(1))
+                    elif indicator_key == 'round_trip_cost':
+                        m = re.search(r'Round-Trip Cost:\s*~?(\d+(?:\.\d+)?)%', text, re.IGNORECASE)
+                        if m:
+                            val = float(m.group(1))
+
+                label = indicator_key.replace('_', ' ').title()
+                if val is None:
+                    if min_val != float('-inf') or max_val != float('inf'):
+                        debug_log(f"      [INDICATOR] DROPPING: {indicator_key} is unavailable or unsellable")
+                        return None, True, f"Dropped by Akoueflow Indicator Filter ({label} is unavailable or unsellable)"
+                else:
+                    val = float(val)
+                    if not (min_val <= val <= max_val):
+                        debug_log(f"      [INDICATOR] DROPPING: {min_val} <= {val} <= {max_val} is FALSE for {indicator_key}")
+                        min_disp = f"{min_val}" if min_val != float('-inf') else "-∞"
+                        max_disp = f"{max_val}" if max_val != float('inf') else "∞"
+                        return None, True, f"Dropped by Akoueflow Indicator Filter ({label}: Allowed {min_disp} to {max_disp}, Found {val})"
+                    else:
+                        debug_log(f"      [INDICATOR] PASSED: {min_val} <= {val} <= {max_val} for {indicator_key}")
+            except Exception as e:
+                print(f"      [INDICATOR] Error evaluating filter: {e}", flush=True)
 
         # SHOW WALLET LOGIC
         elif rule_type == 'show_wallet':
@@ -2399,38 +2638,34 @@ async def check_token_migration(ca, pairs):
                 break
 
         if bonding_curve_address:
-            settings = get_settings()
-            api_key = settings.get('helius_api_key')
-            if api_key:
-                url = f"https://mainnet.helius-rpc.com/?api-key={api_key}"
-                payload = {
-                    "jsonrpc": "2.0",
-                    "id": "get-bonding-curve",
-                    "method": "getAccountInfo",
-                    "params": [
-                        bonding_curve_address,
-                        {
-                            "encoding": "base64"
-                        }
-                    ]
-                }
-                headers = {"Content-Type": "application/json"}
-                try:
-                    r = await asyncio.to_thread(requests.post, url, json=payload, headers=headers, timeout=5)
-                    if r.status_code == 200:
-                        res = r.json()
-                        value = res.get("result", {}).get("value")
-                        if value and "data" in value:
-                            data_b64 = value["data"][0]
-                            import base64
-                            data_bytes = base64.b64decode(data_b64)
-                            if len(data_bytes) >= 49:
-                                # complete is a bool (1 byte) at offset 48 (0x30)
-                                is_completed_on_chain = (data_bytes[48] == 1)
-                                if is_completed_on_chain:
-                                    debug_log(f"[MIGRATION] On-chain check confirmed migration for {ca}.")
-                except Exception as e:
-                    print(f"[MIGRATION] Error verifying bonding curve on-chain: {e}", flush=True)
+            payload = {
+                "jsonrpc": "2.0",
+                "id": "get-bonding-curve",
+                "method": "getAccountInfo",
+                "params": [
+                    bonding_curve_address,
+                    {
+                        "encoding": "base64"
+                    }
+                ]
+            }
+            headers = {"Content-Type": "application/json"}
+            try:
+                r = await asyncio.to_thread(helius_request_with_failover, "POST", "https://mainnet.helius-rpc.com/?api-key={key}", json=payload, headers=headers, timeout=5)
+                if r and r.status_code == 200:
+                    res = r.json()
+                    value = res.get("result", {}).get("value")
+                    if value and "data" in value:
+                        data_b64 = value["data"][0]
+                        import base64
+                        data_bytes = base64.b64decode(data_b64)
+                        if len(data_bytes) >= 49:
+                            # complete is a bool (1 byte) at offset 48 (0x30)
+                            is_completed_on_chain = (data_bytes[48] == 1)
+                            if is_completed_on_chain:
+                                debug_log(f"[MIGRATION] On-chain check confirmed migration for {ca}.")
+            except Exception as e:
+                print(f"[MIGRATION] Error verifying bonding curve on-chain: {e}", flush=True)
 
     # 4. Determine migration status and details
     if is_completed_on_chain:
@@ -2448,6 +2683,613 @@ async def check_token_migration(ca, pairs):
         migration_detail = f"Yes (to {current_location})"
 
     return is_migrated, migration_detail, current_location
+
+async def enrich_dex_validated_token(ca, pairs, helius_api_key=None):
+    """
+    Collect the 12 priority metrics exclusively for DEX-validated tokens:
+    1. 5m buy volume USD
+    2. 5m sell volume USD
+    3. 1h buy volume USD
+    4. 1h sell volume USD
+    5. Unique buyers
+    6. Unique sellers
+    7. Holder concentration (Top 10 non-LP holders %)
+    8. Token mint creation time
+    9. Creator wallet history
+    10. Bonding-curve reserves (for pump.fun)
+    11. Estimated buy/sell slippage (simulated 1 SOL)
+    12. Mint / freeze authority
+    """
+    if not ca:
+        return {}
+
+    settings = get_settings()
+    helius_key = helius_api_key or settings.get('helius_api_key') or os.environ.get('HELIUS_API_KEY')
+
+    metrics = {
+        'volume_buy_5m_usd': 0.0,
+        'volume_sell_5m_usd': 0.0,
+        'volume_buy_1h_usd': 0.0,
+        'volume_sell_1h_usd': 0.0,
+        'unique_buyers': 0,
+        'unique_sellers': 0,
+        'volume_source': 'dexscreener_est',
+        'top10_concentration_pct': None,
+        'token_mint_creation_time': None,
+        'creator_wallet': None,
+        'creator_wallet_history': None,
+        'bonding_curve': None,
+        'slippage': {
+            'test_sol': 1.0,
+            'buy_slippage_pct': None,
+            'sell_slippage_pct': None,
+            'sellable': True,
+            'error': None
+        },
+        'authorities': {
+            'mint_authority': None,
+            'freeze_authority': None,
+            'is_mint_renounced': None,
+            'is_freeze_renounced': None
+        }
+    }
+
+    # 1. Creation time from pairs
+    creation_times = [p.get("pairCreatedAt") for p in pairs if p.get("pairCreatedAt")]
+    if creation_times:
+        oldest_ts = min(creation_times)
+        metrics['token_mint_creation_time'] = oldest_ts
+
+    # Subroutine: Helius account info (authorities & supply)
+    def _fetch_helius_auth():
+        try:
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getAccountInfo",
+                "params": [ca, {"encoding": "jsonParsed"}]
+            }
+            res = helius_request_with_failover("POST", "https://mainnet.helius-rpc.com/?api-key={key}", json=payload, timeout=6)
+            if res and res.status_code == 200:
+                val = res.json().get('result', {}).get('value')
+                if val and 'data' in val and isinstance(val['data'], dict):
+                    info = val['data'].get('parsed', {}).get('info', {})
+                    m_auth = info.get('mintAuthority')
+                    f_auth = info.get('freezeAuthority')
+                    return {
+                        'mint_authority': m_auth,
+                        'freeze_authority': f_auth,
+                        'is_mint_renounced': m_auth is None,
+                        'is_freeze_renounced': f_auth is None,
+                        'supply': info.get('supply'),
+                        'decimals': info.get('decimals')
+                    }
+        except Exception:
+            pass
+        return {}
+
+    # Subroutine: Pump.fun bonding curve on-chain reserves
+    def _fetch_bonding_curve():
+        bc_address = None
+        for p in pairs:
+            if p.get("dexId", "").lower() == "pumpfun":
+                bc_address = p.get("pairAddress")
+                break
+        if not bc_address and ca.lower().endswith("pump"):
+            for p in pairs:
+                if p.get("pairAddress"):
+                    bc_address = p.get("pairAddress")
+                    break
+
+        if not bc_address:
+            return None
+
+        try:
+            payload = {
+                "jsonrpc": "2.0",
+                "id": "bonding-curve",
+                "method": "getAccountInfo",
+                "params": [bc_address, {"encoding": "base64"}]
+            }
+            res = helius_request_with_failover("POST", "https://mainnet.helius-rpc.com/?api-key={key}", json=payload, timeout=6)
+            if res and res.status_code == 200:
+                val = res.json().get('result', {}).get('value')
+                if val and val.get('owner') == '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P' and 'data' in val:
+                    data_bytes = base64.b64decode(val['data'][0])
+                    if len(data_bytes) >= 49:
+                        v_tok = struct.unpack('<Q', data_bytes[8:16])[0] / 1e6
+                        v_sol = struct.unpack('<Q', data_bytes[16:24])[0] / 1e9
+                        r_tok = struct.unpack('<Q', data_bytes[24:32])[0] / 1e6
+                        r_sol = struct.unpack('<Q', data_bytes[32:40])[0] / 1e9
+                        comp = (data_bytes[48] == 1)
+                        prog = round(min(100.0, (r_sol / 85.0) * 100), 2)
+                        return {
+                            'is_pump': True,
+                            'bonding_curve_address': bc_address,
+                            'virtual_sol_reserves': round(v_sol, 4),
+                            'virtual_token_reserves': round(v_tok, 2),
+                            'real_sol_reserves': round(r_sol, 4),
+                            'real_token_reserves': round(r_tok, 2),
+                            'is_completed': comp,
+                            'progress_pct': prog
+                        }
+        except Exception:
+            pass
+        return None
+
+    # Subroutine: Jupiter simulated 1 SOL swap slippage (Buy & Sell)
+    def _fetch_jupiter_slippage():
+        sol_mint = 'So11111111111111111111111111111111111111112'
+        amt_lamports = 1_000_000_000  # 1 SOL
+        buy_url = f"https://api.jup.ag/swap/v1/quote?inputMint={sol_mint}&outputMint={ca}&amount={amt_lamports}&slippageBps=500"
+        try:
+            r_buy = requests.get(buy_url, timeout=5)
+            if r_buy.status_code == 200:
+                b_data = r_buy.json()
+                buy_impact = float(b_data.get('priceImpactPct') or 0.0)
+                out_tokens = int(b_data.get('outAmount') or 0)
+                sell_impact = None
+                sellable = False
+                if out_tokens > 0:
+                    sell_url = f"https://api.jup.ag/swap/v1/quote?inputMint={ca}&outputMint={sol_mint}&amount={out_tokens}&slippageBps=500"
+                    r_sell = requests.get(sell_url, timeout=5)
+                    if r_sell.status_code == 200:
+                        s_data = r_sell.json()
+                        sell_impact = float(s_data.get('priceImpactPct') or 0.0)
+                        sellable = True
+                    else:
+                        sellable = False
+                return {
+                    'test_sol': 1.0,
+                    'buy_slippage_pct': round(buy_impact, 2),
+                    'sell_slippage_pct': round(sell_impact, 2) if sell_impact is not None else None,
+                    'sellable': sellable,
+                    'error': None
+                }
+            else:
+                return {
+                    'test_sol': 1.0,
+                    'buy_slippage_pct': None,
+                    'sell_slippage_pct': None,
+                    'sellable': False,
+                    'error': 'No standard DEX route on Jupiter'
+                }
+        except Exception as e:
+            return {
+                'test_sol': 1.0,
+                'buy_slippage_pct': None,
+                'sell_slippage_pct': None,
+                'sellable': False,
+                'error': str(e)
+            }
+
+    # Subroutine: RugCheck for top 10 concentration & creator history
+    def _fetch_rugcheck():
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            r = requests.get(f"https://api.rugcheck.xyz/v1/tokens/{ca}/report", headers=headers, timeout=6)
+            if r.status_code == 200:
+                d = r.json()
+                holders = d.get('topHolders') or []
+                top10 = sum(float(h.get('pct') or 0.0) for h in holders[:10])
+                creator = d.get('creator')
+                c_tokens = d.get('creatorTokens') or []
+                return {
+                    'top10_concentration_pct': round(top10, 2),
+                    'creator_wallet': creator,
+                    'creator_wallet_history': {
+                        'total_created': len(c_tokens),
+                        'rugged': d.get('rugged', False),
+                        'risks_count': len(d.get('risks') or [])
+                    },
+                    'freeze_authority': d.get('freezeAuthority'),
+                    'mint_authority': d.get('mintAuthority')
+                }
+        except Exception:
+            pass
+        return {}
+
+    # Subroutine: Helius enhanced transactions for unique buyers, sellers & on-chain buy/sell volume
+    def _fetch_helius_trades():
+        try:
+            url_tmpl = f"https://api.helius.xyz/v0/addresses/{ca}/transactions?api-key={{key}}&limit=100"
+            r = helius_request_with_failover("GET", url_tmpl, timeout=6)
+            if not r or r.status_code != 200:
+                return None
+            txs = r.json()
+            if not isinstance(txs, list) or not txs:
+                return None
+
+            now = int(time.time())
+            sol_mint = 'So11111111111111111111111111111111111111112'
+            buyers_5m, sellers_5m = set(), set()
+            buyers_1h, sellers_1h = set(), set()
+            buy_sol_5m, sell_sol_5m = 0.0, 0.0
+            buy_sol_1h, sell_sol_1h = 0.0, 0.0
+
+            for tx in txs:
+                ts = tx.get('timestamp') or 0
+                age = now - ts
+                if age > 3600 or age < 0:
+                    continue
+
+                payer = tx.get('feePayer')
+                token_transfers = tx.get('tokenTransfers') or []
+                native_transfers = tx.get('nativeTransfers') or []
+
+                is_buy, is_sell = False, False
+                for tt in token_transfers:
+                    if tt.get('mint') == ca:
+                        u_to = tt.get('toUserAccount')
+                        u_from = tt.get('fromUserAccount')
+                        if payer and payer == u_to:
+                            is_buy = True
+                        elif payer and payer == u_from:
+                            is_sell = True
+
+                sol_amt = 0.0
+                for tt in token_transfers:
+                    if tt.get('mint') == sol_mint:
+                        sol_amt = max(sol_amt, float(tt.get('tokenAmount') or 0.0))
+                if sol_amt == 0.0:
+                    for nt in native_transfers:
+                        sol_amt = max(sol_amt, (nt.get('amount') or 0) / 1e9)
+
+                if is_buy:
+                    buyers_1h.add(payer)
+                    buy_sol_1h += sol_amt
+                    if age <= 300:
+                        buyers_5m.add(payer)
+                        buy_sol_5m += sol_amt
+                elif is_sell:
+                    sellers_1h.add(payer)
+                    sell_sol_1h += sol_amt
+                    if age <= 300:
+                        sellers_5m.add(payer)
+                        sell_sol_5m += sol_amt
+
+            return {
+                'buyers_5m': len(buyers_5m),
+                'sellers_5m': len(sellers_5m),
+                'buyers_1h': len(buyers_1h),
+                'sellers_1h': len(sellers_1h),
+                'buy_sol_5m': buy_sol_5m,
+                'sell_sol_5m': sell_sol_5m,
+                'buy_sol_1h': buy_sol_1h,
+                'sell_sol_1h': sell_sol_1h,
+            }
+        except Exception:
+            return None
+
+    # Execute network workers in parallel
+    h_auth, bc_data, jup_slip, rc_data, h_trades = await asyncio.gather(
+        asyncio.to_thread(_fetch_helius_auth),
+        asyncio.to_thread(_fetch_bonding_curve),
+        asyncio.to_thread(_fetch_jupiter_slippage),
+        asyncio.to_thread(_fetch_rugcheck),
+        asyncio.to_thread(_fetch_helius_trades),
+        return_exceptions=True
+    )
+
+    # 1. Fill Authorities
+    if isinstance(h_auth, dict) and h_auth and ('mint_authority' in h_auth or 'freeze_authority' in h_auth):
+        metrics['authorities'] = h_auth
+    elif isinstance(rc_data, dict) and ('mint_authority' in rc_data or 'freeze_authority' in rc_data):
+        m_auth = rc_data.get('mint_authority')
+        f_auth = rc_data.get('freeze_authority')
+        metrics['authorities'] = {
+            'mint_authority': m_auth,
+            'freeze_authority': f_auth,
+            'is_mint_renounced': m_auth is None,
+            'is_freeze_renounced': f_auth is None
+        }
+
+    # 2. Fill Bonding Curve
+    if isinstance(bc_data, dict) and bc_data:
+        metrics['bonding_curve'] = bc_data
+
+    # 3. Fill Slippage
+    if isinstance(jup_slip, dict) and jup_slip:
+        metrics['slippage'] = jup_slip
+        if not jup_slip.get('sellable') and metrics.get('bonding_curve'):
+            v_sol = metrics['bonding_curve'].get('virtual_sol_reserves') or 30.0
+            est_impact = round((1.0 / (v_sol + 1.0)) * 100, 2)
+            metrics['slippage']['buy_slippage_pct'] = est_impact
+            metrics['slippage']['sell_slippage_pct'] = est_impact
+            metrics['slippage']['sellable'] = True
+            metrics['slippage']['error'] = 'Pump.fun Bonding Curve'
+
+    # 4. Fill RugCheck data
+    if isinstance(rc_data, dict) and rc_data:
+        if rc_data.get('top10_concentration_pct') is not None:
+            metrics['top10_concentration_pct'] = rc_data['top10_concentration_pct']
+        if rc_data.get('creator_wallet'):
+            metrics['creator_wallet'] = rc_data['creator_wallet']
+        if rc_data.get('creator_wallet_history'):
+            metrics['creator_wallet_history'] = rc_data['creator_wallet_history']
+
+    # 5. Fill Volume & Unique Traders (Helius on-chain swaps with DexScreener fallback)
+    primary = pairs[0] if pairs else {}
+    vol_5m = float(primary.get('volume', {}).get('m5') or 0.0)
+    vol_1h = float(primary.get('volume', {}).get('h1') or 0.0)
+    sol_usd = get_token_price_usd("SOL") or 150.0
+
+    if isinstance(h_trades, dict) and h_trades and (h_trades['buyers_1h'] > 0 or h_trades['sellers_1h'] > 0):
+        b_sol_5m = h_trades['buy_sol_5m']
+        s_sol_5m = h_trades['sell_sol_5m']
+        tot_sol_5m = b_sol_5m + s_sol_5m
+        if tot_sol_5m > 0 and vol_5m > 0:
+            metrics['volume_buy_5m_usd'] = round(vol_5m * (b_sol_5m / tot_sol_5m), 2)
+            metrics['volume_sell_5m_usd'] = round(vol_5m * (s_sol_5m / tot_sol_5m), 2)
+        else:
+            metrics['volume_buy_5m_usd'] = round(b_sol_5m * sol_usd, 2)
+            metrics['volume_sell_5m_usd'] = round(s_sol_5m * sol_usd, 2)
+
+        b_sol_1h = h_trades['buy_sol_1h']
+        s_sol_1h = h_trades['sell_sol_1h']
+        tot_sol_1h = b_sol_1h + s_sol_1h
+        if tot_sol_1h > 0 and vol_1h > 0:
+            metrics['volume_buy_1h_usd'] = round(vol_1h * (b_sol_1h / tot_sol_1h), 2)
+            metrics['volume_sell_1h_usd'] = round(vol_1h * (s_sol_1h / tot_sol_1h), 2)
+        else:
+            metrics['volume_buy_1h_usd'] = round(b_sol_1h * sol_usd, 2)
+            metrics['volume_sell_1h_usd'] = round(s_sol_1h * sol_usd, 2)
+
+        metrics['unique_buyers'] = h_trades['buyers_5m']
+        metrics['unique_sellers'] = h_trades['sellers_5m']
+        metrics['volume_source'] = 'helius_onchain'
+    else:
+        tx_5m = primary.get('txns', {}).get('m5') or {}
+        b_5m = int(tx_5m.get('buys') or 0)
+        s_5m = int(tx_5m.get('sells') or 0)
+        tot_5m = b_5m + s_5m
+        tx_1h = primary.get('txns', {}).get('h1') or {}
+        b_1h = int(tx_1h.get('buys') or 0)
+        s_1h = int(tx_1h.get('sells') or 0)
+        tot_1h = b_1h + s_1h
+        metrics['volume_buy_5m_usd'] = round(vol_5m * (b_5m / tot_5m), 2) if tot_5m > 0 else 0.0
+        metrics['volume_sell_5m_usd'] = round(vol_5m * (s_5m / tot_5m), 2) if tot_5m > 0 else 0.0
+        metrics['volume_buy_1h_usd'] = round(vol_1h * (b_1h / tot_1h), 2) if tot_1h > 0 else 0.0
+        metrics['volume_sell_1h_usd'] = round(vol_1h * (s_1h / tot_1h), 2) if tot_1h > 0 else 0.0
+        metrics['unique_buyers'] = b_5m
+        metrics['unique_sellers'] = s_5m
+        metrics['volume_source'] = 'dexscreener_est'
+
+    # Compute the 10 Akoueflow trading indicators
+    metrics['indicators'] = compute_akoueflow_indicators(metrics, pairs)
+
+    return metrics
+
+def compute_akoueflow_indicators(metrics, pairs=None, market_cap=None, liquidity_usd=None, volume_24h=None):
+    """
+    Computes the 10 Akoueflow trading indicators:
+    1. Net Buy Pressure: Directional trading imbalance ($ net 5m and % buy dominance)
+    2. Buy Pressure Acceleration: Changes in buying dominance (5m buy ratio - 1h buy ratio)
+    3. Buy Volume Acceleration: Growth in buying activity ((Buy 5m * 12) / Buy 1h)
+    4. Sell Volume Acceleration: Growth in selling activity ((Sell 5m * 12) / Sell 1h)
+    5. Net Buy Volume / Liquidity: Directional turnover relative to pool size ((Buy 5m - Sell 5m) / Liq * 100)
+    6. Volume / Market Cap: Trading intensity relative to valuation (24h Vol / Market Cap)
+    7. Volume / Liquidity: Trading intensity relative to pool liquidity (24h Vol / Liquidity)
+    8. Unique Buyer/Seller Ratio: Breadth of wallet participation (Buyers 5m / Sellers 5m)
+    9. Holder Concentration: Supply concentration risk (Top 10 non-LP %)
+    10. Executable Round-Trip Cost: Practical entry/exit feasibility (Buy Slip % + Sell Slip % + DEX fee ~0.5%)
+    """
+    if not isinstance(metrics, dict):
+        metrics = {}
+    primary = pairs[0] if pairs and isinstance(pairs, list) and len(pairs) > 0 else {}
+
+    # 1. Volumes
+    buy_5m = float(metrics.get('volume_buy_5m_usd') or 0.0)
+    sell_5m = float(metrics.get('volume_sell_5m_usd') or 0.0)
+    tot_5m = buy_5m + sell_5m
+    net_buy_5m = round(buy_5m - sell_5m, 2)
+    buy_dom_5m = round((buy_5m / tot_5m) * 100.0, 1) if tot_5m > 0 else 50.0
+
+    buy_1h = float(metrics.get('volume_buy_1h_usd') or 0.0)
+    sell_1h = float(metrics.get('volume_sell_1h_usd') or 0.0)
+    tot_1h = buy_1h + sell_1h
+
+    # 2. Buy Pressure Acceleration: Buy Ratio 5m - Buy Ratio 1h
+    ratio_5m = (buy_5m / tot_5m) if tot_5m > 0 else 0.5
+    ratio_1h = (buy_1h / tot_1h) if tot_1h > 0 else 0.5
+    buy_pressure_accel = round((ratio_5m - ratio_1h) * 100.0, 1)
+
+    # 3. Buy Volume Acceleration: (Buy 5m * 12) / Buy 1h
+    if buy_1h > 0:
+        buy_vol_accel = round((buy_5m * 12.0) / buy_1h, 2)
+    elif buy_5m > 0:
+        buy_vol_accel = 12.0
+    else:
+        buy_vol_accel = 1.0
+
+    # 4. Sell Volume Acceleration: (Sell 5m * 12) / Sell 1h
+    if sell_1h > 0:
+        sell_vol_accel = round((sell_5m * 12.0) / sell_1h, 2)
+    elif sell_5m > 0:
+        sell_vol_accel = 12.0
+    else:
+        sell_vol_accel = 1.0
+
+    # Pool liquidity & 24h volume
+    liq = 0.0
+    if liquidity_usd is not None:
+        try:
+            liq = float(liquidity_usd)
+        except (ValueError, TypeError):
+            liq = 0.0
+    elif primary:
+        liq = float(primary.get('liquidity', {}).get('usd') or 0.0)
+
+    v24 = 0.0
+    if volume_24h is not None:
+        try:
+            v24 = float(volume_24h)
+        except (ValueError, TypeError):
+            v24 = 0.0
+    elif primary:
+        v24 = float(primary.get('volume', {}).get('h24') or 0.0)
+
+    mc = 0.0
+    if market_cap is not None:
+        try:
+            mc = float(market_cap)
+        except (ValueError, TypeError):
+            mc = 0.0
+    elif primary:
+        mc = float(primary.get('marketCap') or primary.get('fdv') or 0.0)
+
+    # 5. Net Buy Volume / Liquidity: (Net Buy 5m / Liquidity) * 100
+    net_buy_to_liq = round((net_buy_5m / liq) * 100.0, 2) if liq > 0 else 0.0
+
+    # 6. Volume / Market Cap: 24h Volume / Market Cap
+    vol_to_mc = round(v24 / mc, 2) if mc > 0 else None
+
+    # 7. Volume / Liquidity: 24h Volume / Liquidity
+    vol_to_liq = round(v24 / liq, 2) if liq > 0 else None
+
+    # 8. Unique Buyer/Seller Ratio
+    ub = int(metrics.get('unique_buyers') or 0)
+    us = int(metrics.get('unique_sellers') or 0)
+    if us > 0:
+        bs_ratio = round(ub / us, 2)
+    elif ub > 0:
+        bs_ratio = float(ub)
+    else:
+        bs_ratio = 1.0
+
+    # 9. Holder Concentration: Top 10 non-LP %
+    hc = metrics.get('top10_concentration_pct')
+    holder_concentration = round(float(hc), 2) if hc is not None else None
+
+    # 10. Executable Round-Trip Cost: Buy Slip % + Sell Slip % + DEX fee ~0.50%
+    slip = metrics.get('slippage') or {}
+    buy_slip = slip.get('buy_slippage_pct')
+    sell_slip = slip.get('sell_slippage_pct')
+    sellable = slip.get('sellable')
+    dex_fee_pct = 0.50
+    round_trip_cost = None
+    if sellable is False:
+        round_trip_cost = None  # Unsellable
+    elif buy_slip is not None and sell_slip is not None:
+        round_trip_cost = round(buy_slip + sell_slip + dex_fee_pct, 2)
+    elif buy_slip is not None:
+        round_trip_cost = round(buy_slip * 2.0 + dex_fee_pct, 2)
+
+    return {
+        'net_buy_pressure': net_buy_5m,
+        'buy_dominance_pct': buy_dom_5m,
+        'buy_pressure_accel': buy_pressure_accel,
+        'buy_vol_accel': buy_vol_accel,
+        'sell_vol_accel': sell_vol_accel,
+        'net_buy_to_liq': net_buy_to_liq,
+        'vol_to_mc': vol_to_mc,
+        'vol_to_liq': vol_to_liq,
+        'buyer_seller_ratio': bs_ratio,
+        'holder_concentration': holder_concentration,
+        'round_trip_cost': round_trip_cost,
+    }
+
+def format_akoueflow_indicators_block(indicators):
+    """Format the 10 Akoueflow trading indicators for the Telegram signal message."""
+    if not indicators or not isinstance(indicators, dict):
+        return ""
+    lines = ["\n📊 AKOUEFLOW TRADING INDICATORS"]
+
+    # 1. Net Buy Pressure
+    nb = indicators.get('net_buy_pressure', 0.0)
+    dom = indicators.get('buy_dominance_pct', 50.0)
+    nb_sign = "+" if nb > 0 else ("-" if nb < 0 else "")
+    lines.append(f"┃ 1. Net Buy Pressure: {nb_sign}{format_usd_metric(abs(nb))} ({dom:.1f}% Buy Dom)")
+
+    # 2. Buy Pressure Acceleration
+    bpa = indicators.get('buy_pressure_accel', 0.0)
+    bpa_sign = "+" if bpa > 0 else ""
+    lines.append(f"┃ 2. Buy Press Accel: {bpa_sign}{bpa:.1f}% (5m vs 1h)")
+
+    # 3 & 4. Buy / Sell Vol Accel
+    b_acc = indicators.get('buy_vol_accel', 1.0)
+    s_acc = indicators.get('sell_vol_accel', 1.0)
+    lines.append(f"┃ 3. Buy Vol Accel: {b_acc:.1f}x | 4. Sell Vol Accel: {s_acc:.1f}x")
+
+    # 5. Net Buy / Liquidity
+    nbl = indicators.get('net_buy_to_liq', 0.0)
+    nbl_sign = "+" if nbl > 0 else ""
+    lines.append(f"┃ 5. Net Buy / Liq: {nbl_sign}{nbl:.2f}%")
+
+    # 6 & 7. Vol / MC & Vol / Liq
+    vmc = indicators.get('vol_to_mc')
+    vliq = indicators.get('vol_to_liq')
+    vmc_str = f"{vmc:.2f}x" if vmc is not None else "N/A"
+    vliq_str = f"{vliq:.2f}x" if vliq is not None else "N/A"
+    lines.append(f"┃ 6. Vol/MC: {vmc_str} | 7. Vol/Liq: {vliq_str}")
+
+    # 8. Unique Buyer/Seller Ratio
+    bsr = indicators.get('buyer_seller_ratio', 1.0)
+    lines.append(f"┃ 8. Buyer/Seller Ratio: {bsr:.2f}")
+
+    # 9. Holder Concentration
+    hc = indicators.get('holder_concentration')
+    hc_str = f"{hc:.1f}%" if hc is not None else "N/A"
+    lines.append(f"┃ 9. Holder Concentration: {hc_str} (Top 10)")
+
+    # 10. Executable Round-Trip Cost
+    rtc = indicators.get('round_trip_cost')
+    rtc_str = f"~{rtc:.2f}%" if rtc is not None else "❌ Unsellable / High Risk"
+    lines.append(f"┃ 10. Round-Trip Cost: {rtc_str} (Slip + Fee)")
+
+    return "\n".join(lines)
+
+def format_dex_validated_metrics_block(metrics_data):
+    """Format on-chain audit and slippage metrics for signal message text."""
+    if not metrics_data or not isinstance(metrics_data, dict):
+        return ""
+    lines = ["\n🛡️ SECURITY & ON-CHAIN METRICS"]
+
+    auth = metrics_data.get('authorities') or {}
+    mint_auth = auth.get('mint_authority')
+    freeze_auth = auth.get('freeze_authority')
+    mint_str = "✅ Revoked" if mint_auth is None else f"⚠️ Active ({mint_auth[:4]}...{mint_auth[-4:]})"
+    freeze_str = "✅ Revoked" if freeze_auth is None else f"🚨 Active ({freeze_auth[:4]}...{freeze_auth[-4:]})"
+    lines.append(f"┃ Mint Authority: {mint_str}")
+    lines.append(f"┃ Freeze Authority: {freeze_str}")
+
+    slip = metrics_data.get('slippage') or {}
+    buy_slip = slip.get('buy_slippage_pct')
+    sell_slip = slip.get('sell_slippage_pct')
+    sellable = slip.get('sellable')
+    if buy_slip is not None or sell_slip is not None:
+        sellable_str = "✅ Passed" if sellable else "❌ Unsellable"
+        b_str = f"{buy_slip:.2f}%" if buy_slip is not None else "N/A"
+        s_str = f"{sell_slip:.2f}%" if sell_slip is not None else "N/A"
+        lines.append(f"┃ 1 SOL Slippage: Buy {b_str} | Sell {s_str} ({sellable_str})")
+
+    bc = metrics_data.get('bonding_curve')
+    if bc and bc.get('is_pump'):
+        prog = bc.get('progress_pct', 0.0)
+        r_sol = bc.get('real_sol_reserves', 0.0)
+        lines.append(f"┃ Pump Bonding Curve: {prog:.1f}% ({r_sol:.1f} SOL / 85 SOL)")
+
+    conc = metrics_data.get('top10_concentration_pct')
+    if conc is not None:
+        lines.append(f"┃ Top 10 Concentration: {conc:.1f}%")
+
+    creator = metrics_data.get('creator_wallet')
+    c_hist = metrics_data.get('creator_wallet_history') or {}
+    if creator:
+        tot = c_hist.get('total_created', 0)
+        lines.append(f"┃ Creator: {creator[:4]}...{creator[-4:]} ({tot} prior tokens)")
+
+    v_buy_5m = metrics_data.get('volume_buy_5m_usd', 0.0)
+    v_sell_5m = metrics_data.get('volume_sell_5m_usd', 0.0)
+    v_buy_1h = metrics_data.get('volume_buy_1h_usd', 0.0)
+    v_sell_1h = metrics_data.get('volume_sell_1h_usd', 0.0)
+    u_b = metrics_data.get('unique_buyers', 0)
+    u_s = metrics_data.get('unique_sellers', 0)
+    lines.append(f"┃ 5m Buy/Sell: {format_usd_metric(v_buy_5m)} / {format_usd_metric(v_sell_5m)}")
+    lines.append(f"┃ 1h Buy/Sell: {format_usd_metric(v_buy_1h)} / {format_usd_metric(v_sell_1h)}")
+    lines.append(f"┃ 5m Traders: {u_b:,} Buyers / {u_s:,} Sellers")
+
+    return "\n".join(lines)
 
 async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
     ca = item.get("tokenAddress")
@@ -2767,9 +3609,55 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
         'tokenAd': 'DEX AD',
     }
     category_line = ''
+    metrics_data = {}
+    validated_metrics_block = ''
+
+    total_boosts = int(item.get('total_boosts') or 0)
+    boost_amount = int(item.get('boost_amount') or 0)
+    is_boost_signal = (order_type == 'tokenBoost' or signal_type == 'boost' or total_boosts > 0)
+    if is_boost_signal and total_boosts == 0:
+        try:
+            r_ord = requests.get(f"https://api.dexscreener.com/orders/v1/solana/{ca}", timeout=4)
+            if r_ord.status_code == 200:
+                b_list = r_ord.json().get('boosts', [])
+                if b_list:
+                    total_boosts = sum(int(b.get('amount') or 0) for b in b_list)
+                    boost_amount = int(b_list[-1].get('amount') or 0)
+        except Exception:
+            pass
+
+    token_info["total_boosts"] = total_boosts
+    token_info["boost_amount"] = boost_amount
+
+    boost_line = ""
+    if is_boost_signal or total_boosts > 0:
+        if total_boosts > 0:
+            if boost_amount > 0 and boost_amount != total_boosts:
+                boost_line = f"┃ Boosts: 🚀 {total_boosts:,} (+{boost_amount:,} this order)\n"
+            else:
+                boost_line = f"┃ Boosts: 🚀 {total_boosts:,}\n"
+        else:
+            boost_line = f"┃ Boosts: 🚀 Pending\n"
+
     if storage_table == 'dex_validated':
         category_label = category_labels.get(order_type, str(signal_type or 'DEX').upper())
         category_line = f"┃ Category: {category_label}\n"
+        try:
+            metrics_data = await enrich_dex_validated_token(ca, pairs)
+            if metrics_data:
+                metrics_data['total_boosts'] = total_boosts
+                metrics_data['boost_amount'] = boost_amount
+                metrics_data['indicators'] = compute_akoueflow_indicators(metrics_data, pairs, raw_mc, liquidity_usd, volume_24h)
+            token_info["metrics_data"] = metrics_data
+            metrics_block_text = format_dex_validated_metrics_block(metrics_data)
+            indicators_block_text = format_akoueflow_indicators_block(metrics_data.get('indicators') if metrics_data else None)
+            if metrics_block_text:
+                validated_metrics_block = f"\n{metrics_block_text}\n"
+            if indicators_block_text:
+                validated_metrics_block += f"{indicators_block_text}\n"
+        except Exception as e:
+            print(f"[DEX VALIDATED ENRICHMENT ERROR] {ca}: {e}", flush=True)
+            metrics_data = {}
 
     msg = (f"🚀 PROJECT: {str(project_name).upper()} 🚀\n"
            f"━━━━━━━━━━━\n"
@@ -2782,12 +3670,14 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
            f"┃ Age (From creation): {age_creation_str}\n"
            f"┃ Age (After migration): {age_migration_str}\n"
            f"┃ Order: 📦 {type_display}\n"
+           f"{boost_line}"
            f"┃ DEX Payment: ${payment_amount_usd:.2f} USD\n"
            f"┃ Migrated: {migration_detail}\n"
            f"┃ Current DEX: {current_location}\n"
            f"┃ Status: {status_emoji} {order_status.upper()}\n"
            f"┃ Order Placed: {payment_time_str}\n\n"
            f"{metrics_block}\n"
+           f"{validated_metrics_block}"
            f"━━━━━━━━━━━\n"
            f"📈 Chart: {dex_url}")
     # Keep the full pre-filter message for result inspection even when a
@@ -2828,6 +3718,10 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                 "token_name": project_name,
                 "category": category_key_map.get(order_type, ''),
                 "signal_source": sig_source,
+                "boost_count": total_boosts,
+                "boost_amount": boost_amount,
+                "metrics_data": metrics_data,
+                "indicators": metrics_data.get('indicators') if metrics_data else {},
             })
             if dropped:
                 token_dropped_reasons.append(f"[{wf.get('name') or 'Flow'}]: {reason}")
@@ -2904,6 +3798,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                 payment_timestamp, order_status,
             )
             if storage_table == 'dex_validated':
+                metrics_json_str = json.dumps(metrics_data) if metrics_data else None
                 cursor.execute('''
                     INSERT INTO dex_validated (
                         ca, name, platform, market_cap, age,
@@ -2911,8 +3806,8 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                         liquidity_usd, volume_5m, volume_1h, volume_6h, volume_24h,
                         status, dex_url, migration_status, signal_type,
                         payment_timestamp, order_status, published_at, fetched_at,
-                        detection_seconds, reason, formatted_message
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        detection_seconds, reason, formatted_message, metrics_data
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(ca, signal_type, payment_timestamp, order_status) DO UPDATE SET
                         name=excluded.name,
                         platform=excluded.platform,
@@ -2934,12 +3829,20 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                         fetched_at=excluded.fetched_at,
                         detection_seconds=COALESCE(excluded.detection_seconds, dex_validated.detection_seconds),
                         reason=excluded.reason,
-                        formatted_message=excluded.formatted_message
+                        formatted_message=excluded.formatted_message,
+                        metrics_data=COALESCE(excluded.metrics_data, dex_validated.metrics_data)
                 ''', common_values + (
                     published_at, fetched_at, token_info.get('detection_seconds'), token_info.get('reason'),
-                    token_info.get('formatted_message') or msg
+                    token_info.get('formatted_message') or msg, metrics_json_str
                 ))
                 conn.commit()
+                # Query back the preserved status so we never downgrade 'forwarded' when pushing to Supabase
+                persisted_dv_row = cursor.execute(
+                    'SELECT status FROM dex_validated WHERE ca = ? AND signal_type = ? AND payment_timestamp = ? AND order_status = ?',
+                    (ca, signal_type, payment_timestamp, order_status)
+                ).fetchone()
+                if persisted_dv_row and persisted_dv_row[0]:
+                    db_status = persisted_dv_row[0]
             else:
                 cursor.execute('''
                     INSERT INTO cto_signals (
@@ -3119,6 +4022,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                         'fetched_at': fetched_at,
                         'detection_seconds': token_info.get('detection_seconds'),
                         'formatted_message': token_info.get('formatted_message') or msg,
+                        'metrics_data': metrics_data if metrics_data else None,
                     })
                 push_to_supabase_table(storage_table, signal_payload)
 
@@ -3267,9 +4171,9 @@ def get_dex_payment_info(token_address, payment_timestamp, api_key):
         sol_price = get_token_price_usd("SOL")
 
         for scan_addr in addresses_to_scan:
-            url = f"https://api.helius.xyz/v0/addresses/{scan_addr}/transactions?api-key={api_key}"
-            r = requests.get(url, timeout=10)
-            if r.status_code == 200:
+            url_tmpl = f"https://api.helius.xyz/v0/addresses/{scan_addr}/transactions?api-key={{key}}"
+            r = helius_request_with_failover("GET", url_tmpl, timeout=10)
+            if r and r.status_code == 200:
                 txs = r.json()
                 if txs and isinstance(txs, list):
                     for tx in txs:
@@ -3314,9 +4218,9 @@ def get_dex_payment_info(token_address, payment_timestamp, api_key):
 
         # Final fallback: scan the token address itself if the monitored addresses scan didn't find it
         if addresses_to_scan != [token_address]:
-            url = f"https://api.helius.xyz/v0/addresses/{token_address}/transactions?api-key={api_key}"
-            r = requests.get(url, timeout=10)
-            if r.status_code == 200:
+            url_tmpl = f"https://api.helius.xyz/v0/addresses/{token_address}/transactions?api-key={{key}}"
+            r = helius_request_with_failover("GET", url_tmpl, timeout=10)
+            if r and r.status_code == 200:
                 txs = r.json()
                 if txs and isinstance(txs, list):
                     for tx in txs:
@@ -3364,12 +4268,13 @@ async def find_token_from_payer_history(payer_address, payment_timestamp, api_ke
     if depth > 2:
         return None
 
-    url = f"https://api.helius.xyz/v0/addresses/{payer_address}/transactions?api-key={api_key}"
     try:
         debug_log(f"[PAYER HISTORY] Scanning history for payer {payer_address} around payment time {payment_timestamp} (depth={depth})...")
-        r = await asyncio.to_thread(requests.get, url, timeout=10)
-        if r.status_code != 200:
-            print(f"[PAYER HISTORY] Helius API HTTP {r.status_code} error: {r.text.strip()}", flush=True)
+        url_tmpl = f"https://api.helius.xyz/v0/addresses/{payer_address}/transactions?api-key={{key}}"
+        r = await asyncio.to_thread(helius_request_with_failover, "GET", url_tmpl, timeout=10)
+        if not r or r.status_code != 200:
+            err_text = r.text.strip() if r else "No response"
+            print(f"[PAYER HISTORY] Helius API error: {err_text}", flush=True)
             return None
 
         txs = r.json()
@@ -3506,8 +4411,7 @@ async def process_payment_payer_history(payer_address, payment_timestamp, api_ke
     else:
         debug_log(f"[HELIUS DISCOVERY] No token isolated from payer history for {payer_address}.")
 
-async def get_latest_signatures(address, api_key, limit=5):
-    url = f"https://mainnet.helius-rpc.com/?api-key={api_key}"
+async def get_latest_signatures(address, api_key=None, limit=5):
     payload = {
         "jsonrpc": "2.0",
         "id": "helius-polling",
@@ -3521,8 +4425,8 @@ async def get_latest_signatures(address, api_key, limit=5):
     }
     headers = {"Content-Type": "application/json"}
     try:
-        r = await asyncio.to_thread(requests.post, url, json=payload, headers=headers, timeout=10)
-        if r.status_code == 200:
+        r = await asyncio.to_thread(helius_request_with_failover, "POST", "https://mainnet.helius-rpc.com/?api-key={key}", json=payload, headers=headers, timeout=10)
+        if r and r.status_code == 200:
             res = r.json()
             if "result" in res and isinstance(res["result"], list):
                 return [tx.get("signature") for tx in res["result"] if tx.get("signature")]
@@ -3609,9 +4513,9 @@ async def wallet_tracker_polling_loop():
                         continue
 
                     # Only poll Enhanced Transactions when a new signature is detected
-                    url = f"https://api.helius.xyz/v0/addresses/{tracked_address}/transactions?api-key={api_key}"
-                    r = await asyncio.to_thread(requests.get, url, timeout=10)
-                    if r.status_code == 200:
+                    url_tmpl = f"https://api.helius.xyz/v0/addresses/{tracked_address}/transactions?api-key={{key}}"
+                    r = await asyncio.to_thread(helius_request_with_failover, "GET", url_tmpl, timeout=10)
+                    if r and r.status_code == 200:
                         txs = r.json()
                         if isinstance(txs, list):
                             for tx in txs:
@@ -4310,29 +5214,35 @@ def get_wallet_payments_log():
         return jsonify({"success": False, "error": str(e)})
 
 def parse_mc_usd(val):
-    if not val:
-        return None
-    clean_s = str(val).replace('$', '').strip()
-    m = re.search(r'([\d\.]+)\s*([KM]?)', clean_s, re.I)
-    if not m:
+    if val is None or str(val).strip() in ('', 'None', 'Unknown'):
         return None
     try:
+        clean_s = str(val).replace('$', '').replace(',', '').strip()
+        m = re.search(r'([\d\.]+)\s*([KMB]?)', clean_s, re.I)
+        if not m:
+            return None
         num = float(m.group(1))
         suf = m.group(2).upper()
         if suf == 'K':
             num *= 1_000
         elif suf == 'M':
             num *= 1_000_000
+        elif suf == 'B':
+            num *= 1_000_000_000
         return num
     except Exception:
         return None
 
 def parse_age_minutes(val):
-    if not val:
+    if val is None or str(val).strip() in ('', 'None', 'Unknown'):
         return None
-    s = str(val).lower()
+    s = str(val).lower().strip()
     if 'just now' in s or 'new' in s:
         return 0.0
+    try:
+        return float(s)
+    except ValueError:
+        pass
     m_d = re.search(r'(\d+)\s*(?:d|day)', s)
     m_h = re.search(r'(\d+)\s*(?:h|hr|hour)', s)
     m_m = re.search(r'(\d+)\s*(?:m|min|minute)', s)
@@ -4386,6 +5296,135 @@ def sqlite_regexp(expr, item):
         return bool(re.search(expr, str(item), re.IGNORECASE))
     except re.error:
         return expr.lower() in str(item).lower()
+
+def extract_indicator_val(metrics_data_raw, indicator_name):
+    if not metrics_data_raw or not indicator_name:
+        return None
+    try:
+        data = json.loads(metrics_data_raw) if isinstance(metrics_data_raw, str) else metrics_data_raw
+        if not isinstance(data, dict):
+            return None
+        inds = data.get('indicators')
+        key = str(indicator_name).strip().lower()
+        if inds and isinstance(inds, dict) and key in inds and inds[key] is not None:
+            return float(inds[key])
+        # Fallback calculations if metrics_data exists but indicators dict was missing
+        b = float(data.get('volume_buy_5m_usd') or 0.0)
+        s = float(data.get('volume_sell_5m_usd') or 0.0)
+        tot = b + s
+        if key == 'net_buy_pressure':
+            return b - s
+        elif key == 'buy_dominance_pct':
+            return round((b / tot) * 100.0, 1) if tot > 0 else 50.0
+        elif key == 'buy_pressure_accel':
+            r5 = (b / tot) if tot > 0 else 0.5
+            b1 = float(data.get('volume_buy_1h_usd') or 0.0)
+            s1 = float(data.get('volume_sell_1h_usd') or 0.0)
+            tot1 = b1 + s1
+            r1 = (b1 / tot1) if tot1 > 0 else 0.5
+            return round((r5 - r1) * 100.0, 1)
+        elif key == 'buy_vol_accel':
+            b1 = float(data.get('volume_buy_1h_usd') or 0.0)
+            return round((b * 12.0) / b1, 2) if b1 > 0 else (12.0 if b > 0 else 1.0)
+        elif key == 'sell_vol_accel':
+            s1 = float(data.get('volume_sell_1h_usd') or 0.0)
+            return round((s * 12.0) / s1, 2) if s1 > 0 else (12.0 if s > 0 else 1.0)
+        elif key == 'net_buy_to_liq':
+            liq = float(data.get('liquidity_usd') or (data.get('liquidity', {}).get('usd') if isinstance(data.get('liquidity'), dict) else 0.0) or 0.0)
+            return round(((b - s) / liq) * 100.0, 2) if liq > 0 else 0.0
+        elif key == 'vol_to_mc':
+            mc = float(data.get('market_cap') or data.get('fdv') or 0.0)
+            v24 = float(data.get('volume_24h') or (data.get('volume', {}).get('h24') if isinstance(data.get('volume'), dict) else 0.0) or 0.0)
+            return round(v24 / mc, 2) if mc > 0 else None
+        elif key == 'vol_to_liq':
+            liq = float(data.get('liquidity_usd') or (data.get('liquidity', {}).get('usd') if isinstance(data.get('liquidity'), dict) else 0.0) or 0.0)
+            v24 = float(data.get('volume_24h') or (data.get('volume', {}).get('h24') if isinstance(data.get('volume'), dict) else 0.0) or 0.0)
+            return round(v24 / liq, 2) if liq > 0 else None
+        elif key == 'buyer_seller_ratio':
+            ub = float(data.get('unique_buyers') or 0.0)
+            us = float(data.get('unique_sellers') or 0.0)
+            return round(ub / us, 2) if us > 0 else (float(ub) if ub > 0 else 1.0)
+        elif key == 'holder_concentration':
+            hc = data.get('top10_concentration_pct')
+            return float(hc) if hc is not None else None
+        elif key == 'round_trip_cost':
+            slip = data.get('slippage') or {}
+            bs = slip.get('buy_slippage_pct')
+            ss = slip.get('sell_slippage_pct')
+            if bs is not None and ss is not None:
+                return round(float(bs) + float(ss) + 0.5, 2)
+            elif bs is not None:
+                return round(float(bs) * 2.0 + 0.5, 2)
+    except Exception:
+        return None
+    return None
+
+def get_token_indicator_value(token, indicator_key):
+    """Extract numeric indicator value from token dict using indicators dict, metrics_data, or formatted_message regex."""
+    if not token or not indicator_key:
+        return None
+    key = str(indicator_key).strip().lower()
+
+    # 1. From precomputed indicators dict
+    inds = token.get('indicators')
+    if isinstance(inds, dict) and inds.get(key) is not None:
+        try:
+            return float(inds[key])
+        except (ValueError, TypeError):
+            pass
+
+    # 2. From metrics_data via extract_indicator_val
+    m_data = token.get('metrics_data')
+    if m_data:
+        val = extract_indicator_val(m_data, key)
+        if val is not None:
+            try:
+                return float(val)
+            except (ValueError, TypeError):
+                pass
+
+    # 3. Fallback extraction from formatted_message via regex
+    text = str(token.get('formatted_message') or '')
+    if text:
+        if key == 'net_buy_pressure':
+            m = re.search(r'Net Buy Pressure:\s*([+\-]?)\$?([\d,.]+)([KMB]?)', text, re.I)
+            if m:
+                s = -1.0 if m.group(1) == '-' else 1.0
+                n = float(m.group(2).replace(',', ''))
+                sfx = m.group(3).upper()
+                return s * n * {'K': 1_000, 'M': 1_000_000, 'B': 1_000_000_000}.get(sfx, 1)
+        elif key == 'buy_dominance_pct':
+            m = re.search(r'\((\d+(?:\.\d+)?)%\s*Buy Dom\)', text, re.I)
+            if m: return float(m.group(1))
+        elif key == 'buy_pressure_accel':
+            m = re.search(r'Buy Press Accel:\s*([+\-]?\d+(?:\.\d+)?)%', text, re.I)
+            if m: return float(m.group(1))
+        elif key == 'buy_vol_accel':
+            m = re.search(r'Vol Accel:\s*Buy\s*(\d+(?:\.\d+)?)x', text, re.I)
+            if m: return float(m.group(1))
+        elif key == 'sell_vol_accel':
+            m = re.search(r'Vol Accel:.*?Sell\s*(\d+(?:\.\d+)?)x', text, re.I)
+            if m: return float(m.group(1))
+        elif key == 'net_buy_to_liq':
+            m = re.search(r'Net Buy / Liq:\s*([+\-]?\d+(?:\.\d+)?)%', text, re.I)
+            if m: return float(m.group(1))
+        elif key == 'vol_to_mc':
+            m = re.search(r'Vol/MC:\s*(\d+(?:\.\d+)?)x', text, re.I)
+            if m: return float(m.group(1))
+        elif key == 'vol_to_liq':
+            m = re.search(r'Vol/Liq:\s*(\d+(?:\.\d+)?)x', text, re.I)
+            if m: return float(m.group(1))
+        elif key == 'buyer_seller_ratio':
+            m = re.search(r'Buyer/Seller Ratio:\s*(\d+(?:\.\d+)?)', text, re.I)
+            if m: return float(m.group(1))
+        elif key == 'holder_concentration':
+            m = re.search(r'Holder Concentration:\s*(\d+(?:\.\d+)?)%', text, re.I)
+            if m: return float(m.group(1))
+        elif key == 'round_trip_cost':
+            m = re.search(r'Round-Trip Cost:\s*~?(\d+(?:\.\d+)?)%', text, re.I)
+            if m: return float(m.group(1))
+
+    return None
 
 @app.route('/api/wallet/token_payments', methods=['GET'])
 def get_token_wallet_data():
@@ -4467,6 +5506,12 @@ def get_token_wallet_data():
             'pre_peak_dd_4h_pct': 'pre_peak_dd_4h_pct',
             'min_dd_1h_pct': 'min_dd_1h_pct',
             'min_dd_4h_pct': 'min_dd_4h_pct',
+            'net_buy_pressure': "get_indicator(metrics_data, 'net_buy_pressure')",
+            'buy_dominance': "get_indicator(metrics_data, 'buy_dominance_pct')",
+            'buy_vol_accel': "get_indicator(metrics_data, 'buy_vol_accel')",
+            'buyer_seller_ratio': "get_indicator(metrics_data, 'buyer_seller_ratio')",
+            'holder_concentration': "get_indicator(metrics_data, 'holder_concentration')",
+            'round_trip_cost': "get_indicator(metrics_data, 'round_trip_cost')",
         }
         order_col = valid_sorts.get(sort_by, 'id')
 
@@ -5192,9 +6237,9 @@ async def helius_polling_loop():
                     continue
 
                 # Fetch parsed transaction history ONLY when a new transaction is detected
-                url = f"https://api.helius.xyz/v0/addresses/{payment_address}/transactions?api-key={api_key}"
-                r = await asyncio.to_thread(requests.get, url, timeout=10)
-                if r.status_code == 200:
+                url_tmpl = f"https://api.helius.xyz/v0/addresses/{payment_address}/transactions?api-key={{key}}"
+                r = await asyncio.to_thread(helius_request_with_failover, "GET", url_tmpl, timeout=10)
+                if r and r.status_code == 200:
                     txs = r.json()
                     if isinstance(txs, list):
                         new_tokens_to_check = set()
@@ -5323,8 +6368,16 @@ def extract_dex_validated_events(payload, category, order_type, fetched_at_ms=No
                 ).timestamp() * 1000)
             except (TypeError, ValueError):
                 payment_timestamp = 0
-        elif category == 'boost':
-            payment_timestamp = int(float(event.get('totalAmount') or event.get('amount') or 0))
+        total_boosts = 0
+        boost_amount = 0
+        if category == 'boost':
+            try:
+                total_boosts = int(float(event.get('totalAmount') or event.get('amount') or 0))
+                boost_amount = int(float(event.get('amount') or 0))
+            except (ValueError, TypeError):
+                total_boosts = 0
+                boost_amount = 0
+            payment_timestamp = total_boosts
         else:
             payment_timestamp = 0
 
@@ -5339,6 +6392,8 @@ def extract_dex_validated_events(payload, category, order_type, fetched_at_ms=No
             'event_category': category,
             'storage_table': 'dex_validated',
             'persist_db': True,
+            'total_boosts': total_boosts,
+            'boost_amount': boost_amount,
         })
     return events
 
@@ -5739,6 +6794,12 @@ def get_dex_validated_records():
             'pre_peak_dd_4h_pct': 'pre_peak_dd_4h_pct',
             'min_dd_1h_pct': 'min_dd_1h_pct',
             'min_dd_4h_pct': 'min_dd_4h_pct',
+            'net_buy_pressure': "get_indicator(metrics_data, 'net_buy_pressure')",
+            'buy_dominance': "get_indicator(metrics_data, 'buy_dominance_pct')",
+            'buy_vol_accel': "get_indicator(metrics_data, 'buy_vol_accel')",
+            'buyer_seller_ratio': "get_indicator(metrics_data, 'buyer_seller_ratio')",
+            'holder_concentration': "get_indicator(metrics_data, 'holder_concentration')",
+            'round_trip_cost': "get_indicator(metrics_data, 'round_trip_cost')",
         }
         order_col = valid_sorts.get(sort_by, 'id')
 
@@ -5892,6 +6953,110 @@ def get_dex_validated_records():
             where_clauses.append("NOT ((COALESCE(name, '') || '\n' || COALESCE(reason, '') || '\n' || COALESCE(formatted_message, '')) REGEXP ?)")
             params.append(word_filter)
 
+        net_buy_filter = (request.args.get('net_buy_filter') or 'all').strip().lower()
+        if net_buy_filter == 'positive':
+            where_clauses.append("(COALESCE(get_indicator(metrics_data, 'net_buy_pressure'), 0) > 0)")
+        elif net_buy_filter == 'strong_buy':
+            where_clauses.append("(COALESCE(get_indicator(metrics_data, 'net_buy_pressure'), 0) >= 10000 AND COALESCE(get_indicator(metrics_data, 'buy_dominance_pct'), 50) >= 60)")
+        elif net_buy_filter == 'negative':
+            where_clauses.append("(COALESCE(get_indicator(metrics_data, 'net_buy_pressure'), 0) < 0)")
+
+        # Granular Akoueflow Indicators Filters
+        ind_preset = (request.args.get('ind_preset') or request.args.get('indicator_preset') or 'all').strip().lower()
+        min_net_buy = request.args.get('min_net_buy')
+        max_net_buy = request.args.get('max_net_buy')
+        min_buy_dom = request.args.get('min_buy_dom')
+        min_buy_accel = request.args.get('min_buy_accel')
+        min_bs_ratio = request.args.get('min_bs_ratio')
+        min_buy_liq = request.args.get('min_buy_liq')
+        min_vol_mc = request.args.get('min_vol_mc')
+        min_vol_liq = request.args.get('min_vol_liq')
+        max_holder_conc = request.args.get('max_holder_conc')
+        max_round_trip = request.args.get('max_round_trip')
+
+        if min_net_buy:
+            try:
+                where_clauses.append("get_indicator(metrics_data, 'net_buy_pressure') >= ?")
+                params.append(float(min_net_buy))
+            except ValueError:
+                pass
+        if max_net_buy:
+            try:
+                where_clauses.append("get_indicator(metrics_data, 'net_buy_pressure') <= ?")
+                params.append(float(max_net_buy))
+            except ValueError:
+                pass
+
+        if min_buy_dom:
+            try:
+                where_clauses.append("get_indicator(metrics_data, 'buy_dominance_pct') >= ?")
+                params.append(float(min_buy_dom))
+            except ValueError:
+                pass
+
+        if min_buy_accel:
+            try:
+                where_clauses.append("get_indicator(metrics_data, 'buy_vol_accel') >= ?")
+                params.append(float(min_buy_accel))
+            except ValueError:
+                pass
+
+        if min_bs_ratio:
+            try:
+                where_clauses.append("get_indicator(metrics_data, 'buyer_seller_ratio') >= ?")
+                params.append(float(min_bs_ratio))
+            except ValueError:
+                pass
+
+        if min_buy_liq:
+            try:
+                where_clauses.append("get_indicator(metrics_data, 'net_buy_to_liq') >= ?")
+                params.append(float(min_buy_liq))
+            except ValueError:
+                pass
+
+        if min_vol_mc:
+            try:
+                where_clauses.append("get_indicator(metrics_data, 'vol_to_mc') >= ?")
+                params.append(float(min_vol_mc))
+            except ValueError:
+                pass
+
+        if min_vol_liq:
+            try:
+                where_clauses.append("get_indicator(metrics_data, 'vol_to_liq') >= ?")
+                params.append(float(min_vol_liq))
+            except ValueError:
+                pass
+
+        if max_holder_conc:
+            try:
+                where_clauses.append("get_indicator(metrics_data, 'holder_concentration') <= ?")
+                params.append(float(max_holder_conc))
+            except ValueError:
+                pass
+
+        if max_round_trip:
+            try:
+                where_clauses.append("get_indicator(metrics_data, 'round_trip_cost') <= ?")
+                params.append(float(max_round_trip))
+            except ValueError:
+                pass
+
+        # Preset logic
+        if ind_preset == 'strong_bullish':
+            where_clauses.append("get_indicator(metrics_data, 'net_buy_pressure') >= 5000 AND get_indicator(metrics_data, 'buy_dominance_pct') >= 60")
+        elif ind_preset == 'buy_surge':
+            where_clauses.append("get_indicator(metrics_data, 'buy_vol_accel') >= 2.0 AND get_indicator(metrics_data, 'buy_dominance_pct') >= 55")
+        elif ind_preset == 'high_breadth':
+            where_clauses.append("get_indicator(metrics_data, 'buyer_seller_ratio') >= 1.5")
+        elif ind_preset == 'heavy_turnover':
+            where_clauses.append("get_indicator(metrics_data, 'net_buy_to_liq') >= 5.0")
+        elif ind_preset == 'low_risk':
+            where_clauses.append("get_indicator(metrics_data, 'holder_concentration') <= 35 AND get_indicator(metrics_data, 'round_trip_cost') <= 6.0")
+        elif ind_preset == 'heavy_selling':
+            where_clauses.append("(get_indicator(metrics_data, 'net_buy_pressure') < 0 OR get_indicator(metrics_data, 'buy_dominance_pct') < 40)")
+
         append_post_signal_outcome_filters(request.args, where_clauses, params)
 
         where_str = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
@@ -5903,6 +7068,7 @@ def get_dex_validated_records():
             conn.create_function('parse_creation_age_minutes', 2, parse_creation_age_minutes)
             conn.create_function('parse_migration_age_minutes', 2, parse_migration_age_minutes)
             conn.create_function('regexp', 2, sqlite_regexp)
+            conn.create_function('get_indicator', 2, extract_indicator_val)
             cursor = conn.cursor()
 
             count_query = f"SELECT COUNT(*) FROM dex_validated{where_str}"
@@ -5940,7 +7106,7 @@ def get_dex_validated_records():
                        {ts_expr} AS event_ts,
                        max_mc_1h, peak_mult_1h, min_mc_1h, min_dd_1h_pct, pre_peak_low_mc_1h, pre_peak_dd_1h_pct, path_1h,
                        max_mc_4h, peak_mult_4h, min_mc_4h, min_dd_4h_pct, pre_peak_low_mc_4h, pre_peak_dd_4h_pct, path_4h,
-                       perf_checked_stage
+                       perf_checked_stage, metrics_data
                 FROM dex_validated
                 {where_str}
                 ORDER BY {order_col} {sort_order} NULLS LAST
@@ -5994,7 +7160,14 @@ def get_dex_validated_records():
                 "pre_peak_dd_4h_pct": r[40] if len(r) > 40 else None,
                 "path_4h": r[41] if len(r) > 41 else None,
                 "perf_checked_stage": r[42] if len(r) > 42 else 0,
+                "metrics_data": r[43] if len(r) > 43 else None,
             }
+            m_data = row_dict.get("metrics_data")
+            if isinstance(m_data, str) and m_data.strip():
+                try:
+                    row_dict["metrics_data"] = json.loads(m_data)
+                except Exception:
+                    pass
             raw_msg = row_dict.get("formatted_message") or ""
             mig_status = str(row_dict.get("migration_status") or "")
             sig_type = str(row_dict.get("signal_type") or "").lower()
@@ -6998,12 +8171,14 @@ def token_matches_workflow_rules(token, rules):
         return True
 
     name = str(token.get('name') or token.get('token_name') or '').strip()
-    mc = float(parse_mc_usd(token.get('market_cap')) or 0.0)
-    age_m = float(parse_age_minutes(token.get('age')) or 0.0)
-    mig_age_m = float(parse_migration_age_minutes(token.get('migration_age'), token.get('formatted_message')) or 0.0)
+    mc = float(parse_mc_usd(token.get('market_cap')) or parse_mc_usd(token.get('entry_mc')) or 0.0)
+    age_m = parse_creation_age_minutes(token.get('age'), token.get('formatted_message'))
+    if age_m is None:
+        age_m = parse_age_minutes(token.get('age'))
+    mig_age_m = parse_migration_age_minutes(token.get('migration_age'), token.get('formatted_message'))
     liq = float(token.get('liquidity_usd') or 0.0)
     
-    ca_str = str(token.get('ca') or '').strip().lower()
+    ca_str = str(token.get('ca') or token.get('token_address') or '').strip().lower()
     plat_str = f"{token.get('platform', '')} {token.get('dex_url', '')} {token.get('formatted_message', '')} {'pumpfun' if ca_str.endswith('pump') else ''}".lower()
     plat = plat_str
     
@@ -7037,10 +8212,14 @@ def token_matches_workflow_rules(token, rules):
         elif rtype == 'token_age':
             age_kind = (stext or 'creation').lower().strip()
             eval_age = mig_age_m if age_kind == 'migration' else age_m
-            if tmin is not None and eval_age < tmin:
-                return False
-            if tmax is not None and eval_age > tmax:
-                return False
+            if eval_age is None:
+                if tmin is not None and tmin > 0:
+                    return False
+            else:
+                if tmin is not None and eval_age < tmin:
+                    return False
+                if tmax is not None and eval_age > tmax:
+                    return False
 
         elif rtype == 'liquidity':
             if tmin is not None and liq < tmin:
@@ -7073,18 +8252,24 @@ def token_matches_workflow_rules(token, rules):
 
         elif rtype == 'platform':
             req_plat = str(stext or '').lower().strip()
-            if req_plat and req_plat not in ('all', 'any') and req_plat not in plat:
-                return False
+            if req_plat and req_plat not in ('all', 'any'):
+                clean_plat = re.sub(r'[^a-z0-9]', '', plat)
+                clean_req = re.sub(r'[^a-z0-9]', '', req_plat)
+                if clean_req not in clean_plat:
+                    return False
 
         elif rtype == 'exclude_platform':
             ex = str(stext or '').lower().strip()
-            if ex and ex in plat:
-                return False
+            if ex and ex not in ('all', 'any'):
+                clean_plat = re.sub(r'[^a-z0-9]', '', plat)
+                clean_ex = re.sub(r'[^a-z0-9]', '', ex)
+                if clean_ex in clean_plat:
+                    return False
 
         elif rtype == 'category':
             req_cat = str(stext or '').lower().strip()
             if req_cat and req_cat not in ('all', 'any'):
-                cat_corpus = f"{cat} {token.get('signal_type', '')} {token.get('reason', '')} {token.get('tracked_address', '')} {token.get('source_system', '')}".lower()
+                cat_corpus = f"{cat} {token.get('signal_type', '')} {token.get('migration_status', '')} {token.get('reason', '')} {token.get('formatted_message', '')} {token.get('tracked_address', '')} {token.get('source_system', '')}".lower()
                 if req_cat in ('dex_paid', 'paid'):
                     if 'paid' not in cat_corpus and 'dex' not in cat_corpus:
                         return False
@@ -7093,6 +8278,12 @@ def token_matches_workflow_rules(token, rules):
                         return False
                 elif req_cat == 'boost':
                     if 'boost' not in cat_corpus:
+                        return False
+                elif req_cat == 'profile':
+                    if 'profile' not in cat_corpus:
+                        return False
+                elif req_cat == 'ad':
+                    if 'ad' not in cat_corpus and 'campaign' not in cat_corpus:
                         return False
                 elif req_cat not in cat_corpus:
                     return False
@@ -7114,8 +8305,12 @@ def token_matches_workflow_rules(token, rules):
                 c_match = any(lit in norm_name if q else bool(re.search(rf'(?<!\w){re.escape(lit)}(?!\w)', norm_name, re.IGNORECASE)) for lit, q in contains)
                 is_match = (norm_name in exacts) or c_match
             else:
-                pat = pattern or '.*'
-                is_match = bool(re.search(pat, name, re.IGNORECASE))
+                terms = [re.escape(t.strip()) for t in re.split(r'[,|]+', pattern) if t.strip()]
+                if terms:
+                    combined_regex = r'(?:' + '|'.join(terms) + r')'
+                    is_match = bool(re.search(combined_regex, name, re.IGNORECASE))
+                else:
+                    is_match = True
 
             if mode == 'exclude' and is_match and name:
                 return False
@@ -7125,12 +8320,17 @@ def token_matches_workflow_rules(token, rules):
         elif rtype == 'filter':
             # Word / Regex message filter
             mode = (rtext or 'include').strip().lower()
-            corpus = f"{name} {token.get('symbol', '')} {token.get('ca', '')}".lower()
+            corpus = f"{name} {token.get('symbol', '')} {token.get('ca', '')} {token.get('formatted_message', '')}".lower()
             if stext and str(stext).strip():
-                try:
-                    m = bool(re.search(str(stext).strip(), corpus, re.IGNORECASE))
-                except re.error:
-                    m = str(stext).strip().lower() in corpus
+                terms = [t.strip() for t in re.split(r'[,|]+', str(stext).strip()) if t.strip()]
+                if terms:
+                    escaped_terms = [re.escape(t) for t in terms]
+                    try:
+                        m = bool(re.search(r'(?:' + '|'.join(escaped_terms) + r')', corpus, re.IGNORECASE))
+                    except re.error:
+                        m = any(t.lower() in corpus for t in terms)
+                else:
+                    m = True
                 if mode == 'exclude' and m:
                     return False
                 if mode != 'exclude' and not m:
@@ -7167,11 +8367,61 @@ def token_matches_workflow_rules(token, rules):
                         if s_norm not in c_norm:
                             return False
 
+        elif rtype == 'indicator':
+            # Akoueflow indicator filter
+            indicator_key = (stext or 'net_buy_pressure').strip().lower()
+            val = get_token_indicator_value(token, indicator_key)
+            if val is None:
+                if tmin is not None or tmax is not None:
+                    return False
+            else:
+                if tmin is not None and val < tmin:
+                    return False
+                if tmax is not None and val > tmax:
+                    return False
+
+        elif rtype == 'indicator_preset':
+            preset = (stext or '').strip().lower()
+            net_buy = get_token_indicator_value(token, 'net_buy_pressure')
+            buy_dom = get_token_indicator_value(token, 'buy_dominance_pct')
+            buy_accel = get_token_indicator_value(token, 'buy_vol_accel')
+            bs_ratio = get_token_indicator_value(token, 'buyer_seller_ratio')
+            buy_liq = get_token_indicator_value(token, 'net_buy_to_liq')
+            holder_conc = get_token_indicator_value(token, 'holder_concentration')
+            round_trip = get_token_indicator_value(token, 'round_trip_cost')
+
+            if preset == 'strong_bullish':
+                if net_buy is None or net_buy < 5000: return False
+                if buy_dom is None or buy_dom < 60.0: return False
+            elif preset == 'buy_surge':
+                if buy_accel is None or buy_accel < 2.0: return False
+                if buy_dom is None or buy_dom < 55.0: return False
+            elif preset == 'high_breadth':
+                if bs_ratio is None or bs_ratio < 1.5: return False
+            elif preset == 'heavy_turnover':
+                if buy_liq is None or buy_liq < 5.0: return False
+            elif preset == 'low_risk':
+                if holder_conc is None or holder_conc > 35.0: return False
+                if round_trip is None or round_trip > 6.0: return False
+            elif preset == 'heavy_selling':
+                if (net_buy is not None and net_buy < 0) or (buy_dom is not None and buy_dom < 40.0):
+                    pass
+                else:
+                    return False
+
     return True
 
 
+_candidate_tokens_cache = {}
+_CANDIDATE_CACHE_TTL = 45  # seconds cache for instant Outcome Lab filter responses
+
 def get_historical_candidate_tokens(system='validated', timeframe='day'):
     """Fetch candidate historical signals from memory SQLite index or Supabase fallback."""
+    cache_key = (str(system).lower().strip(), str(timeframe).lower().strip())
+    cached = _candidate_tokens_cache.get(cache_key)
+    if cached and (time.time() - cached[0] < _CANDIDATE_CACHE_TTL):
+        return [dict(t) for t in cached[1]]
+
     now_ts = int(time.time())
     tf_seconds = {
         'day': 86400,
@@ -7204,7 +8454,8 @@ def get_historical_candidate_tokens(system='validated', timeframe='day'):
                        liquidity_usd, volume_5m, volume_1h, volume_6h, volume_24h, migration_status,
                        signal_type, formatted_message, max_mc_1h, peak_mult_1h, min_mc_1h, min_dd_1h_pct,
                        pre_peak_low_mc_1h, pre_peak_dd_1h_pct, path_1h, max_mc_4h, peak_mult_4h, min_mc_4h,
-                       min_dd_4h_pct, pre_peak_low_mc_4h, pre_peak_dd_4h_pct, path_4h, {ts_dv_expr} AS event_ts
+                       min_dd_4h_pct, pre_peak_low_mc_4h, pre_peak_dd_4h_pct, path_4h, {ts_dv_expr} AS event_ts,
+                       metrics_data
                 FROM dex_validated
                 WHERE {' AND '.join(where_dv)}
                 ORDER BY id DESC
@@ -7221,7 +8472,8 @@ def get_historical_candidate_tokens(system='validated', timeframe='day'):
                         'pre_peak_dd_1h_pct': row[23], 'path_1h': row[24], 'max_mc_4h': row[25],
                         'peak_mult_4h': row[26], 'min_mc_4h': row[27], 'min_dd_4h_pct': row[28],
                         'pre_peak_low_mc_4h': row[29], 'pre_peak_dd_4h_pct': row[30], 'path_4h': row[31],
-                        'event_ts': row[32], 'source_system': 'validated'
+                        'event_ts': row[32], 'metrics_data': row[33] if len(row) > 33 else None,
+                        'source_system': 'validated'
                     }
                     candidate_tokens.append(d)
             except Exception as e:
@@ -7294,6 +8546,9 @@ def get_historical_candidate_tokens(system='validated', timeframe='day'):
                     candidate_tokens.append(item)
         except Exception as sb_err:
             debug_log(f"[WF PERF] Supabase fallback error: {sb_err}")
+
+    if candidate_tokens:
+        _candidate_tokens_cache[cache_key] = (time.time(), candidate_tokens)
 
     return candidate_tokens
 
@@ -7612,15 +8867,15 @@ def simulate_outcomes():
         rules = []
         workflow_meta = None
 
-        # Load base rules from workflow if selected
         if workflow_id and supabase_client:
             try:
                 wf_id_int = int(workflow_id)
                 wf_res = supabase_client.table('workflows').select('id,name,is_active').eq('id', wf_id_int).execute()
                 if wf_res.data:
                     workflow_meta = wf_res.data[0]
-                    rule_res = supabase_client.table('rules').select('id,workflow_id,rule_type,search_text,replace_text,time_min,time_max').eq('workflow_id', wf_id_int).execute()
-                    rules.extend(rule_res.data or [])
+                    if not custom_filters:
+                        rule_res = supabase_client.table('rules').select('id,workflow_id,rule_type,search_text,replace_text,time_min,time_max').eq('workflow_id', wf_id_int).execute()
+                        rules.extend(rule_res.data or [])
             except Exception as e:
                 debug_log(f"[OUTCOMES] Error fetching workflow {workflow_id}: {e}")
 
@@ -7628,17 +8883,27 @@ def simulate_outcomes():
         if system in ('paid', 'validated'):
             rules = [r for r in rules if r.get('rule_type') != 'signal_type']
 
+        def safe_float_filter(val):
+            if val in (None, ''):
+                return None
+            if isinstance(val, (int, float)):
+                return float(val)
+            clean = re.sub(r'[\$,%]', '', str(val)).strip()
+            try:
+                return float(clean)
+            except Exception:
+                return None
+
         # Process custom filters
         if custom_filters:
             # Market Cap ($)
-            min_mc = custom_filters.get('min_mc') if custom_filters.get('min_mc') is not None else custom_filters.get('min_market_cap')
-            max_mc = custom_filters.get('max_mc') if custom_filters.get('max_mc') is not None else custom_filters.get('max_market_cap')
-            if min_mc not in (None, '') or max_mc not in (None, ''):
-                rules = [r for r in rules if r.get('rule_type') != 'market_cap']
+            min_mc = safe_float_filter(custom_filters.get('min_mc') if custom_filters.get('min_mc') is not None else custom_filters.get('min_market_cap'))
+            max_mc = safe_float_filter(custom_filters.get('max_mc') if custom_filters.get('max_mc') is not None else custom_filters.get('max_market_cap'))
+            if min_mc is not None or max_mc is not None:
                 rules.append({
                     'rule_type': 'market_cap',
-                    'time_min': float(min_mc) if min_mc not in (None, '') else None,
-                    'time_max': float(max_mc) if max_mc not in (None, '') else None
+                    'time_min': min_mc,
+                    'time_max': max_mc
                 })
 
             # Token Age (Minutes)
@@ -7648,7 +8913,6 @@ def simulate_outcomes():
             parsed_max_age = parse_filter_minutes(max_age_raw)
             age_kind = (custom_filters.get('age_kind') or 'creation').lower().strip()
             if parsed_min_age is not None or parsed_max_age is not None:
-                rules = [r for r in rules if r.get('rule_type') != 'token_age']
                 rules.append({
                     'rule_type': 'token_age',
                     'time_min': parsed_min_age,
@@ -7657,46 +8921,42 @@ def simulate_outcomes():
                 })
 
             # Liquidity ($)
-            min_liq = custom_filters.get('min_liq') if custom_filters.get('min_liq') is not None else custom_filters.get('min_liquidity')
-            max_liq = custom_filters.get('max_liq') if custom_filters.get('max_liq') is not None else custom_filters.get('max_liquidity')
-            if min_liq not in (None, '') or max_liq not in (None, ''):
-                rules = [r for r in rules if r.get('rule_type') != 'liquidity']
+            min_liq = safe_float_filter(custom_filters.get('min_liq') if custom_filters.get('min_liq') is not None else custom_filters.get('min_liquidity'))
+            max_liq = safe_float_filter(custom_filters.get('max_liq') if custom_filters.get('max_liq') is not None else custom_filters.get('max_liquidity'))
+            if min_liq is not None or max_liq is not None:
                 rules.append({
                     'rule_type': 'liquidity',
-                    'time_min': float(min_liq) if min_liq not in (None, '') else None,
-                    'time_max': float(max_liq) if max_liq not in (None, '') else None
+                    'time_min': min_liq,
+                    'time_max': max_liq
                 })
 
             # Volume ($)
-            min_vol = custom_filters.get('min_vol') if custom_filters.get('min_vol') is not None else custom_filters.get('min_volume')
-            max_vol = custom_filters.get('max_vol') if custom_filters.get('max_vol') is not None else custom_filters.get('max_volume')
+            min_vol = safe_float_filter(custom_filters.get('min_vol') if custom_filters.get('min_vol') is not None else custom_filters.get('min_volume'))
+            max_vol = safe_float_filter(custom_filters.get('max_vol') if custom_filters.get('max_vol') is not None else custom_filters.get('max_volume'))
             vol_tf = custom_filters.get('volume_tf') or '24h'
-            if min_vol not in (None, '') or max_vol not in (None, ''):
-                rules = [r for r in rules if r.get('rule_type') != 'volume']
+            if min_vol is not None or max_vol is not None:
                 rules.append({
                     'rule_type': 'volume',
-                    'time_min': float(min_vol) if min_vol not in (None, '') else None,
-                    'time_max': float(max_vol) if max_vol not in (None, '') else None,
+                    'time_min': min_vol,
+                    'time_max': max_vol,
                     'search_text': vol_tf
                 })
 
             # Pre-signal Performance (% change)
-            min_perf = custom_filters.get('min_perf')
-            max_perf = custom_filters.get('max_perf')
+            min_perf = safe_float_filter(custom_filters.get('min_perf'))
+            max_perf = safe_float_filter(custom_filters.get('max_perf'))
             perf_tf = custom_filters.get('perf_tf') or '5m'
-            if min_perf not in (None, '') or max_perf not in (None, ''):
-                rules = [r for r in rules if r.get('rule_type') != 'performance']
+            if min_perf is not None or max_perf is not None:
                 rules.append({
                     'rule_type': 'performance',
-                    'time_min': float(min_perf) if min_perf not in (None, '') else None,
-                    'time_max': float(max_perf) if max_perf not in (None, '') else None,
+                    'time_min': min_perf,
+                    'time_max': max_perf,
                     'search_text': perf_tf
                 })
 
-            # Category (boost, cto, ads, etc.)
+            # Category (boost, cto, profile, ad, etc.)
             cat = custom_filters.get('category')
             if cat and str(cat).lower() not in ('all', '', 'any'):
-                rules = [r for r in rules if r.get('rule_type') != 'category']
                 rules.append({
                     'rule_type': 'category',
                     'search_text': str(cat).strip()
@@ -7705,7 +8965,6 @@ def simulate_outcomes():
             # Migrated Status (yes, no, all)
             mig = custom_filters.get('migrated')
             if mig and str(mig).lower() not in ('all', '', 'any'):
-                rules = [r for r in rules if r.get('rule_type') != 'migrated']
                 rules.append({
                     'rule_type': 'migrated',
                     'search_text': 'yes' if str(mig).lower() in ('yes', 'migrated', 'true', '1') else 'no'
@@ -7714,7 +8973,6 @@ def simulate_outcomes():
             # Platform
             plat = custom_filters.get('platform')
             if plat and str(plat).lower() not in ('all', '', 'any'):
-                rules = [r for r in rules if r.get('rule_type') != 'platform']
                 rules.append({
                     'rule_type': 'platform',
                     'search_text': str(plat).strip()
@@ -7723,7 +8981,6 @@ def simulate_outcomes():
             # Exclude Platform
             ex_plat = custom_filters.get('exclude_platform')
             if ex_plat and str(ex_plat).lower() not in ('all', '', 'any'):
-                rules = [r for r in rules if r.get('rule_type') != 'exclude_platform']
                 rules.append({
                     'rule_type': 'exclude_platform',
                     'search_text': str(ex_plat).strip()
@@ -7733,7 +8990,6 @@ def simulate_outcomes():
             name_flt = custom_filters.get('name_filter') if custom_filters.get('name_filter') is not None else custom_filters.get('keywords')
             name_mode = custom_filters.get('name_mode') or 'include'
             if name_flt and str(name_flt).strip():
-                rules = [r for r in rules if r.get('rule_type') != 'token_name']
                 rules.append({
                     'rule_type': 'token_name',
                     'search_text': str(name_flt).strip(),
@@ -7744,7 +9000,6 @@ def simulate_outcomes():
             word_flt = custom_filters.get('word_filter')
             word_mode = custom_filters.get('word_mode') or 'include'
             if word_flt and str(word_flt).strip():
-                rules = [r for r in rules if r.get('rule_type') != 'filter']
                 rules.append({
                     'rule_type': 'filter',
                     'search_text': str(word_flt).strip(),
@@ -7754,30 +9009,63 @@ def simulate_outcomes():
             # Extract CA Requirement
             extract_ca = custom_filters.get('extract_ca')
             if extract_ca and str(extract_ca).lower() in ('yes', 'true', '1'):
-                rules = [r for r in rules if r.get('rule_type') != 'extract_ca']
                 rules.append({
                     'rule_type': 'extract_ca',
                     'search_text': 'yes'
                 })
 
             # DEX Payment ($)
-            p_min = custom_filters.get('dex_payment_min')
-            p_max = custom_filters.get('dex_payment_max')
+            p_min = safe_float_filter(custom_filters.get('dex_payment_min'))
+            p_max = safe_float_filter(custom_filters.get('dex_payment_max'))
             p_label = custom_filters.get('dex_payment_label')
-            if p_min not in (None, '') or p_max not in (None, '') or (p_label and str(p_label).strip()):
-                rules = [r for r in rules if r.get('rule_type') != 'dex_payment']
+            if p_min is not None or p_max is not None or (p_label and str(p_label).strip()):
                 rules.append({
                     'rule_type': 'dex_payment',
-                    'time_min': float(p_min) if p_min not in (None, '') else None,
-                    'time_max': float(p_max) if p_max not in (None, '') else None,
+                    'time_min': p_min,
+                    'time_max': p_max,
                     'search_text': str(p_label).strip() if p_label else ''
                 })
 
+            # Akoueflow Indicator Preset
+            ind_preset = str(custom_filters.get('ind_preset') or custom_filters.get('indicator_preset') or 'all').strip().lower()
+            if ind_preset and ind_preset != 'all':
+                rules.append({
+                    'rule_type': 'indicator_preset',
+                    'search_text': ind_preset
+                })
+
+            # Granular Akoueflow Indicators (10 metrics)
+            indicator_specs = [
+                ('net_buy_pressure', 'min_net_buy', 'max_net_buy'),
+                ('buy_dominance_pct', 'min_buy_dom', 'max_buy_dom'),
+                ('buy_pressure_accel', 'min_buy_press_accel', 'max_buy_press_accel'),
+                ('buy_vol_accel', 'min_buy_accel', 'max_buy_accel'),
+                ('sell_vol_accel', 'min_sell_accel', 'max_sell_accel'),
+                ('net_buy_to_liq', 'min_buy_liq', 'max_buy_liq'),
+                ('vol_to_mc', 'min_vol_mc', 'max_vol_mc'),
+                ('vol_to_liq', 'min_vol_liq', 'max_vol_liq'),
+                ('buyer_seller_ratio', 'min_bs_ratio', 'max_bs_ratio'),
+                ('holder_concentration', 'min_holder_conc', 'max_holder_conc'),
+                ('round_trip_cost', 'min_round_trip', 'max_round_trip')
+            ]
+            for ikey, min_k, max_k in indicator_specs:
+                imin = safe_float_filter(custom_filters.get(min_k))
+                imax = safe_float_filter(custom_filters.get(max_k))
+                if imin is not None or imax is not None:
+                    rules.append({
+                        'rule_type': 'indicator',
+                        'search_text': ikey,
+                        'time_min': imin,
+                        'time_max': imax
+                    })
+
         # 3. Baseline metrics across all candidates
         tot_cand = len(candidates)
-        all_peaks = [float(x.get('peak_mult_1h') or 1.0) for x in candidates]
-        baseline_win_2x = round((sum(1 for p in all_peaks if p >= 2.0) / tot_cand) * 100.0, 1) if tot_cand else 0.0
-        baseline_avg_1h = round(sum(all_peaks) / tot_cand, 2) if tot_cand else 1.0
+        all_peaks_1h = [min(float(x.get('peak_mult_1h') or 1.0), 100.0) for x in candidates]
+        all_peaks_best = [min(max(float(x.get('peak_mult_4h') or 1.0), float(x.get('peak_mult_1h') or 1.0)), 100.0) for x in candidates]
+        baseline_win_2x = round((sum(1 for p in all_peaks_best if p >= 2.0) / tot_cand) * 100.0, 1) if tot_cand else 0.0
+        baseline_avg_1h = round(sum(all_peaks_1h) / tot_cand, 2) if tot_cand else 1.0
+        baseline_avg_best = round(sum(all_peaks_best) / tot_cand, 2) if tot_cand else 1.0
 
         # 4. Filter candidates
         matched = []
@@ -7786,28 +9074,30 @@ def simulate_outcomes():
                 matched.append(t)
 
         matched_count = len(matched)
-        peaks_1h = [float(x.get('peak_mult_1h') or 1.0) for x in matched]
-        peaks_4h = [float(x.get('peak_mult_4h') or x.get('peak_mult_1h') or 1.0) for x in matched]
+        peaks_1h = [min(float(x.get('peak_mult_1h') or 1.0), 100.0) for x in matched]
+        peaks_4h = [min(float(x.get('peak_mult_4h') or x.get('peak_mult_1h') or 1.0), 100.0) for x in matched]
+        peaks_best = [min(max(float(x.get('peak_mult_4h') or 1.0), float(x.get('peak_mult_1h') or 1.0)), 100.0) for x in matched]
         drawdowns = [float(x.get('pre_peak_dd_1h_pct') or 0.0) for x in matched]
 
-        wins_1_5x = sum(1 for p in peaks_1h if p >= 1.5)
-        wins_2x = sum(1 for p in peaks_1h if p >= 2.0)
-        wins_3x = sum(1 for p in peaks_1h if p >= 3.0)
-        wins_5x = sum(1 for p in peaks_1h if p >= 5.0)
+        wins_1_5x = sum(1 for p in peaks_best if p >= 1.5)
+        wins_2x = sum(1 for p in peaks_best if p >= 2.0)
+        wins_3x = sum(1 for p in peaks_best if p >= 3.0)
+        wins_5x = sum(1 for p in peaks_best if p >= 5.0)
 
         tot_peaks = len(peaks_1h) or 1
         avg_1h = sum(peaks_1h) / tot_peaks if peaks_1h else 1.0
         avg_4h = sum(peaks_4h) / tot_peaks if peaks_4h else 1.0
+        avg_best = sum(peaks_best) / tot_peaks if peaks_best else 1.0
         avg_dd = sum(drawdowns) / tot_peaks if drawdowns else 0.0
         worst_dd = min(drawdowns) if drawdowns else 0.0
 
         # Performance Tier Distribution (<1x slate grey, 1x-1.5x amber, 1.5x-2x cyan, 2x-3x emerald, 3x-5x purple, 5x+ gold)
-        t_lt_1x = sum(1 for p in peaks_1h if p < 1.05)
-        t_1x_1_5x = sum(1 for p in peaks_1h if 1.05 <= p < 1.5)
-        t_1_5x_2x = sum(1 for p in peaks_1h if 1.5 <= p < 2.0)
-        t_2x_3x = sum(1 for p in peaks_1h if 2.0 <= p < 3.0)
-        t_3x_5x = sum(1 for p in peaks_1h if 3.0 <= p < 5.0)
-        t_5x_plus = sum(1 for p in peaks_1h if p >= 5.0)
+        t_lt_1x = sum(1 for p in peaks_best if p < 1.05)
+        t_1x_1_5x = sum(1 for p in peaks_best if 1.05 <= p < 1.5)
+        t_1_5x_2x = sum(1 for p in peaks_best if 1.5 <= p < 2.0)
+        t_2x_3x = sum(1 for p in peaks_best if 2.0 <= p < 3.0)
+        t_3x_5x = sum(1 for p in peaks_best if 3.0 <= p < 5.0)
+        t_5x_plus = sum(1 for p in peaks_best if p >= 5.0)
 
         tier_stats = {
             'lt_1x': t_lt_1x,
@@ -7838,9 +9128,10 @@ def simulate_outcomes():
             'pump_then_dump_pct': round((paths.count('PUMP_THEN_DUMP') / tot_paths) * 100.0, 1),
         }
 
-        # Sort matched tokens by peak multiplier descending
-        matched_sorted = sorted(matched, key=lambda x: float(x.get('peak_mult_1h') or 1.0), reverse=True)
+        # Sort matched tokens by best peak multiplier descending
+        matched_sorted = sorted(matched, key=lambda x: max(float(x.get('peak_mult_4h') or 1.0), float(x.get('peak_mult_1h') or 1.0)), reverse=True)
         best_token = matched_sorted[0] if matched_sorted else {}
+        best_token_peak = max(float(best_token.get('peak_mult_4h') or 1.0), float(best_token.get('peak_mult_1h') or 1.0)) if best_token else 1.0
 
         tokens_data = []
         for t in matched_sorted:
@@ -7851,7 +9142,7 @@ def simulate_outcomes():
                 'ca': ca,
                 'platform': t.get('platform') or '',
                 'market_cap': t.get('market_cap') or '',
-                'entry_mc': parse_mc_usd(t.get('market_cap')),
+                'entry_mc': parse_mc_usd(t.get('market_cap')) or parse_mc_usd(t.get('entry_mc')),
                 'age': t.get('age') or '',
                 'liquidity_usd': t.get('liquidity_usd'),
                 'volume_24h': t.get('volume_24h'),
@@ -7859,10 +9150,24 @@ def simulate_outcomes():
                 'source_system': t.get('source_system') or 'validated',
                 'peak_mult_1h': round(float(t.get('peak_mult_1h') or 1.0), 2),
                 'peak_mult_4h': round(float(t.get('peak_mult_4h') or t.get('peak_mult_1h') or 1.0), 2),
+                'best_peak': round(max(float(t.get('peak_mult_4h') or 1.0), float(t.get('peak_mult_1h') or 1.0)), 2),
                 'pre_peak_dd_1h_pct': round(float(t.get('pre_peak_dd_1h_pct') or 0.0), 1),
                 'path_1h': str(t.get('path_1h') or 'UNKNOWN').upper(),
                 'dex_url': t.get('dex_url') or (f"https://dexscreener.com/solana/{ca}" if ca else ''),
-                'event_ts': t.get('event_ts') or t.get('timestamp') or t.get('created_at') or t.get('fetched_at')
+                'event_ts': t.get('event_ts') or t.get('timestamp') or t.get('created_at') or t.get('fetched_at'),
+                'indicators': {
+                    'net_buy_pressure': get_token_indicator_value(t, 'net_buy_pressure'),
+                    'buy_dominance_pct': get_token_indicator_value(t, 'buy_dominance_pct'),
+                    'buy_pressure_accel': get_token_indicator_value(t, 'buy_pressure_accel'),
+                    'buy_vol_accel': get_token_indicator_value(t, 'buy_vol_accel'),
+                    'sell_vol_accel': get_token_indicator_value(t, 'sell_vol_accel'),
+                    'net_buy_to_liq': get_token_indicator_value(t, 'net_buy_to_liq'),
+                    'vol_to_mc': get_token_indicator_value(t, 'vol_to_mc'),
+                    'vol_to_liq': get_token_indicator_value(t, 'vol_to_liq'),
+                    'buyer_seller_ratio': get_token_indicator_value(t, 'buyer_seller_ratio'),
+                    'holder_concentration': get_token_indicator_value(t, 'holder_concentration'),
+                    'round_trip_cost': get_token_indicator_value(t, 'round_trip_cost')
+                }
             })
 
         return jsonify({
@@ -7883,13 +9188,14 @@ def simulate_outcomes():
             'worst_dd_pct': round(worst_dd, 1),
             'best_token_name': best_token.get('name') or 'None',
             'best_token_ca': best_token.get('ca') or '',
-            'best_token_peak': round(float(best_token.get('peak_mult_1h') or 1.0), 2) if best_token else 1.0,
+            'best_token_peak': round(float(best_token_peak), 2) if best_token else 1.0,
             'tier_stats': tier_stats,
             'trajectories': trajectories,
             'baseline': {
                 'total_candidates': tot_cand,
                 'win_rate_2x': baseline_win_2x,
-                'avg_peak_1h': baseline_avg_1h
+                'avg_peak_1h': baseline_avg_1h,
+                'avg_peak_4h': baseline_avg_best
             },
             'tokens': tokens_data
         })
