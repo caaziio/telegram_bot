@@ -125,8 +125,70 @@ def _fetch_dexscreener_pools_batch_sync(ca_list):
     return result_map
 
 
+# ---------------------------------------------------------------------------
+# GeckoTerminal access with a shared, adaptive rate limiter.
+# The free API allows roughly 30 calls/minute per IP; exceeding it returns 429 for
+# a while. All GeckoTerminal calls go through _gecko_get so the scanner thread and
+# the manual "Scan now" thread never exceed the budget together.
+# ---------------------------------------------------------------------------
+GECKO_HEADERS = {'Accept': 'application/json;version=20230302'}
+GECKO_RATE_LIMITED = 'RATE_LIMITED'  # sentinel: data unavailable right now, retry later
+
+
+class _GeckoRateLimiter:
+    MIN_INTERVAL = 2.5    # seconds between calls when healthy (~24/min)
+    MAX_INTERVAL = 12.0   # slowest pace after repeated 429s
+    COOLDOWN = 45.0       # pause after a 429 before trying again
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._interval = self.MIN_INTERVAL
+        self._next_at = 0.0
+
+    def wait(self):
+        with self._lock:
+            now = time.monotonic()
+            slot = max(now, self._next_at)
+            self._next_at = slot + self._interval
+        delay = slot - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
+
+    def on_success(self):
+        with self._lock:
+            self._interval = max(self.MIN_INTERVAL, self._interval * 0.9)
+
+    def on_rate_limited(self):
+        with self._lock:
+            self._interval = min(self.MAX_INTERVAL, self._interval * 1.5)
+            self._next_at = max(self._next_at, time.monotonic() + self.COOLDOWN)
+        print(f"[PERF SCANNER] GeckoTerminal rate limit hit - pausing {int(self.COOLDOWN)}s, pace now 1 call / {self._interval:.1f}s", flush=True)
+
+
+_gecko_limiter = _GeckoRateLimiter()
+
+
+def _gecko_get(url):
+    """Rate-limited GET. Returns the Response, or GECKO_RATE_LIMITED if GeckoTerminal
+    is throttling us / unreachable (the caller should retry the row later)."""
+    for _attempt in range(2):
+        _gecko_limiter.wait()
+        try:
+            res = requests.get(url, headers=GECKO_HEADERS, timeout=12)
+        except Exception as e:
+            debug_log(f"[PERF SCANNER] GeckoTerminal request error: {e}")
+            return GECKO_RATE_LIMITED
+        if res.status_code == 429:
+            _gecko_limiter.on_rate_limited()
+            continue
+        _gecko_limiter.on_success()
+        return res
+    return GECKO_RATE_LIMITED
+
+
 def _fetch_geckoterminal_pool_direct_sync(ca):
-    """Fallback: Fetch primary pool and meta directly from GeckoTerminal token pools endpoint."""
+    """Fallback: primary pool + meta from GeckoTerminal. Returns meta dict, None if the
+    token has no pools, or GECKO_RATE_LIMITED if it could not be checked right now."""
     if not ca:
         return None
     cache_key = f"pool_{ca}"
@@ -134,18 +196,15 @@ def _fetch_geckoterminal_pool_direct_sync(ca):
     if cached is not None:
         return cached if cached != 'NONE' else None
 
-    url = f"https://api.geckoterminal.com/api/v2/networks/solana/tokens/{ca}/pools"
-    headers = {'Accept': 'application/json;version=20230302'}
+    res = _gecko_get(f"https://api.geckoterminal.com/api/v2/networks/solana/tokens/{ca}/pools")
+    if res is GECKO_RATE_LIMITED:
+        return GECKO_RATE_LIMITED
     try:
-        res = requests.get(url, headers=headers, timeout=12)
-        if res.status_code == 429:
-            time.sleep(6.0)
-            res = requests.get(url, headers=headers, timeout=12)
         if res.status_code == 404:
             _cache_ohlcv_set(cache_key, 'NONE')
             return None
         if res.status_code != 200:
-            return None
+            return GECKO_RATE_LIMITED
         data = res.json().get('data') or []
         if not data:
             _cache_ohlcv_set(cache_key, 'NONE')
@@ -164,21 +223,20 @@ def _fetch_geckoterminal_pool_direct_sync(ca):
         mc_now = fdv_usd if fdv_usd > 0 else (reserve_usd * 2.0 if reserve_usd > 0 else 0.0)
         supply = (mc_now / price_now) if (mc_now > 0 and price_now > 0) else 1_000_000_000.0
 
-        meta = {
-            'pools': pools,
-            'mc_now': mc_now,
-            'price_now': price_now,
-            'supply': supply
-        }
+        meta = {'pools': pools, 'mc_now': mc_now, 'price_now': price_now, 'supply': supply}
         _cache_ohlcv_set(cache_key, meta)
         return meta
     except Exception as e:
         debug_log(f"[PERF SCANNER] GeckoTerminal direct pool lookup error for {ca}: {e}")
-        return None
+        return GECKO_RATE_LIMITED
 
 
 async def _fetch_geckoterminal_ohlcv(pool_address, t0, now_ts):
-    """Fetch chronological 1m OHLCV candles from GeckoTerminal free v2 API covering [t0, t0 + 4h] (with 5m/15m/1h fallback for older tokens)."""
+    """Chronological OHLCV candles covering [t0, t0 + 4h] (1m, with 5m/15m/1h fallback).
+
+    Returns the candle list, [] if GeckoTerminal confirms there is no history, or
+    GECKO_RATE_LIMITED if it could not be fetched right now (never cached).
+    """
     if not pool_address:
         return []
     before_ts = min(int(now_ts) + 120, int(t0) + 14400 + 300)
@@ -188,7 +246,6 @@ async def _fetch_geckoterminal_ohlcv(pool_address, t0, now_ts):
     if cached is not None:
         return cached
 
-    headers = {'Accept': 'application/json;version=20230302'}
     endpoints = [
         f"https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool_address}/ohlcv/minute?aggregate=1&before_timestamp={before_ts}&limit=300",
         f"https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool_address}/ohlcv/minute?aggregate=5&before_timestamp={before_ts + 600}&limit=100",
@@ -198,16 +255,14 @@ async def _fetch_geckoterminal_ohlcv(pool_address, t0, now_ts):
 
     t0_min = (int(t0) // 60) * 60
     for url in endpoints:
-        await asyncio.sleep(2.05)  # Respect GeckoTerminal 30 req/min free rate limit
+        res = await asyncio.to_thread(_gecko_get, url)
+        if res is GECKO_RATE_LIMITED:
+            return GECKO_RATE_LIMITED
         try:
-            res = await asyncio.to_thread(requests.get, url, headers=headers, timeout=12)
             if res.status_code == 404:
                 break
-            if res.status_code == 429:
-                await asyncio.sleep(8.0)
-                res = await asyncio.to_thread(requests.get, url, headers=headers, timeout=12)
             if res.status_code != 200:
-                continue
+                return GECKO_RATE_LIMITED
             payload = res.json()
             raw_list = ((payload.get('data') or {}).get('attributes') or {}).get('ohlcv_list') or []
             if not raw_list:
@@ -223,7 +278,9 @@ async def _fetch_geckoterminal_ohlcv(pool_address, t0, now_ts):
                 return candles
         except Exception as e:
             debug_log(f"[PERF SCANNER] GeckoTerminal OHLCV error for pool {pool_address}: {e}")
+            return GECKO_RATE_LIMITED
 
+    # GeckoTerminal answered but has no candles for this window: genuinely no history.
     _cache_ohlcv_set(bucket_key, [])
     return []
 
@@ -360,28 +417,36 @@ def _persist_row_perf_metrics(table_name, row_info, metrics_payload):
 
     if supabase_client:
         try:
+            # IMPORTANT: never match Supabase rows by the local ``id``. Local in-memory ids
+            # are assigned independently of Supabase ids, so an id match writes one
+            # signal's results onto an unrelated token. Only natural keys are used.
             if table_name == 'wallet_payments':
                 sig = row_info.get('signature')
-                res = None
-                if sig:
-                    res = supabase_client.table('wallet_payments').update(metrics_payload).eq('signature', sig).execute()
-                if (not res or not res.data) and row_id:
-                    supabase_client.table('wallet_payments').update(metrics_payload).eq('id', row_id).execute()
-            elif table_name == 'dex_validated':
-                # Always update by unique natural composite key (ca + signal_type + order_status + payment_timestamp)
                 ca_val = row_info.get('ca')
-                if ca_val:
-                    q = supabase_client.table('dex_validated').update(metrics_payload).eq('ca', ca_val)
-                    if row_info.get('signal_type') is not None:
-                        q = q.eq('signal_type', row_info.get('signal_type'))
-                    if row_info.get('order_status') is not None:
-                        q = q.eq('order_status', row_info.get('order_status'))
+                raw_ts = row_info.get('timestamp')
+                if sig:
+                    supabase_client.table('wallet_payments').update(metrics_payload).eq('signature', sig).execute()
+                elif ca_val and raw_ts:
+                    supabase_client.table('wallet_payments').update(metrics_payload).eq('ca', ca_val).eq('timestamp', raw_ts).execute()
+                else:
+                    debug_log(f"[PERF SCANNER] Skipped Supabase update for wallet_payments row without signature/timestamp (CA: {ca_val})")
+            elif table_name == 'dex_validated':
+                # Update only the exact signal: ca + signal_type + order_status + payment_timestamp
+                # (the table's unique key). No CA-only fallback - that would copy this
+                # signal's results onto every other signal of the same token.
+                ca_val = row_info.get('ca')
+                if ca_val and row_info.get('signal_type') is not None and row_info.get('order_status') is not None:
+                    q = (supabase_client.table('dex_validated').update(metrics_payload)
+                         .eq('ca', ca_val)
+                         .eq('signal_type', row_info.get('signal_type'))
+                         .eq('order_status', row_info.get('order_status')))
                     if row_info.get('payment_timestamp') is not None:
                         q = q.eq('payment_timestamp', row_info.get('payment_timestamp'))
-                    res = q.execute()
-                    if not res.data:
-                        # Fallback to ca only if specific composite variant wasn't matched
-                        supabase_client.table('dex_validated').update(metrics_payload).eq('ca', ca_val).execute()
+                    else:
+                        q = q.is_('payment_timestamp', 'null')
+                    q.execute()
+                else:
+                    debug_log(f"[PERF SCANNER] Skipped Supabase update for dex_validated row without full key (CA: {ca_val})")
         except Exception as e:
             debug_log(f"[PERF SCANNER] Supabase direct update notice on {table_name} (CA: {row_info.get('ca')}): {e}")
 
@@ -398,8 +463,9 @@ def _persist_row_perf_metrics(table_name, row_info, metrics_payload):
                 vals = list(metrics_payload.values())
                 if sig_type is not None and ord_status is not None and pay_ts is not None:
                     cur.execute(f"UPDATE {table_name} SET {set_cols} WHERE ca=? AND signal_type=? AND order_status=? AND payment_timestamp=?", vals + [ca_val, sig_type, ord_status, pay_ts])
-                else:
-                    cur.execute(f"UPDATE {table_name} SET {set_cols} WHERE ca=?", vals + [ca_val])
+                elif row_id:
+                    # Local ids are consistent within the local index, so this is safe locally.
+                    cur.execute(f"UPDATE {table_name} SET {set_cols} WHERE id=?", vals + [row_id])
             elif table_name == 'wallet_payments' and row_info.get('signature'):
                 vals = list(metrics_payload.values()) + [row_info['signature']]
                 cur.execute(f"UPDATE {table_name} SET {set_cols} WHERE signature=?", vals)
@@ -420,6 +486,7 @@ async def scan_post_signal_performance_batch(max_rows_per_table=60):
         perf_scanner_runtime['last_error'] = None
 
     updated_count = 0
+    skipped_rate_limited = 0
     try:
         now_ts = int(time.time())
         due_items = []
@@ -493,7 +560,8 @@ async def scan_post_signal_performance_batch(max_rows_per_table=60):
                            {wp_ts_expr} AS event_ts,
                            COALESCE(perf_checked_stage, 0) AS stage,
                            max_mc_1h, peak_mult_1h, min_mc_1h, min_dd_1h_pct, pre_peak_low_mc_1h, pre_peak_dd_1h_pct, path_1h,
-                           max_mc_4h, peak_mult_4h, min_mc_4h, min_dd_4h_pct, pre_peak_low_mc_4h, pre_peak_dd_4h_pct, path_4h
+                           max_mc_4h, peak_mult_4h, min_mc_4h, min_dd_4h_pct, pre_peak_low_mc_4h, pre_peak_dd_4h_pct, path_4h,
+                           timestamp
                     FROM wallet_payments
                     WHERE ca IS NOT NULL AND TRIM(ca) != ''
                       AND token_name IS NOT NULL AND TRIM(token_name) != ''
@@ -523,6 +591,7 @@ async def scan_post_signal_performance_batch(max_rows_per_table=60):
                         'pre_peak_low_mc_4h': r[17] if len(r) > 17 else None,
                         'pre_peak_dd_4h_pct': r[18] if len(r) > 18 else None,
                         'path_4h': r[19] if len(r) > 19 else None,
+                        'timestamp': r[20] if len(r) > 20 else None,
                     }
                     rd['table'] = 'wallet_payments'
                     wp_list.append(rd)
@@ -568,6 +637,7 @@ async def scan_post_signal_performance_batch(max_rows_per_table=60):
                         'ca': r.get('ca'),
                         'market_cap': r.get('market_cap'),
                         'signature': r.get('signature'),
+                        'timestamp': r.get('timestamp'),
                         'event_ts': ev_ts,
                         'stage': r.get('perf_checked_stage', 0),
                         'max_mc_1h': r.get('max_mc_1h'),
@@ -619,6 +689,9 @@ async def scan_post_signal_performance_batch(max_rows_per_table=60):
             # Fallback directly to CoinGecko/GeckoTerminal pool lookup if DexScreener returned no pool
             if not pools:
                 gecko_meta = await asyncio.to_thread(_fetch_geckoterminal_pool_direct_sync, ca)
+                if gecko_meta is GECKO_RATE_LIMITED:
+                    skipped_rate_limited += 1
+                    continue  # leave the row due; retry on a later pass
                 if gecko_meta and gecko_meta.get('pools'):
                     token_meta = gecko_meta
                     pools = token_meta.get('pools') or []
@@ -631,6 +704,11 @@ async def scan_post_signal_performance_batch(max_rows_per_table=60):
                 candles = await _fetch_geckoterminal_ohlcv(pool_addr, t0, now_ts)
                 if candles:
                     break
+            if candles is GECKO_RATE_LIMITED:
+                # Price history unavailable right now (throttled/unreachable). Do NOT fill the
+                # row with an estimate - leave it due so a later pass computes real values.
+                skipped_rate_limited += 1
+                continue
 
             payload = {}
             is_rescan = (item.get('stage', 0) == 2 and (item.get('min_mc_1h') is None or float(item.get('min_mc_1h') or 0.0) == 0.0))
@@ -745,7 +823,7 @@ async def scan_post_signal_performance_batch(max_rows_per_table=60):
             perf_scanner_runtime['last_batch_updated'] = updated_count
             perf_scanner_runtime['total_updated'] += updated_count
 
-        debug_log(f"[PERF SCANNER] Completed OHLCV peak scan pass: updated {updated_count} rows.")
+        print(f"[PERF SCANNER] Pass complete: {updated_count} rows filled, {skipped_rate_limited} left for retry (GeckoTerminal unavailable).", flush=True)
         return {'updated': updated_count, 'status': 'completed'}
     except Exception as e:
         import traceback

@@ -5,7 +5,12 @@ import json
 
 from bot.config import debug_log
 from bot.db.connection import custom_row_factory, db_lock, get_db
-from bot.services.token_indicators import TOKEN_LAUNCH_METRIC_KEYS, compute_token_launch_metric
+from bot.services.token_indicators import (
+    INDICATOR_PRESET_LABELS,
+    TOKEN_LAUNCH_METRIC_KEYS,
+    compute_token_launch_metric,
+    indicator_preset_passes,
+)
 
 def regex_matches(value, pattern):
     """Case-insensitively match a user-supplied regex.
@@ -433,6 +438,35 @@ def process_message_logic(text, rules, context=None):
                 # Look for "Status: ✅ Migrated (on pump.fun)" or "Platform: Solana"
                 if regex_matches(text, platform_to_exclude):
                     return None, True, f"Dropped by Platform Exclusion (Found '{platform_to_exclude}')"
+
+        # PLATFORM (INCLUDE) LOGIC - mirrors the Outcomes Lab platform filter
+        elif rule_type == 'platform':
+            req_plat = (rule.get('search_text') or '').strip().lower()
+            if req_plat and req_plat not in ('all', 'any'):
+                corpus = text.lower()
+                ca_match = re.search(r'CA:\s*([A-Za-z0-9]+)', text)
+                if ca_match and ca_match.group(1).lower().endswith('pump'):
+                    corpus += ' pumpfun'
+                clean_req = re.sub(r'[^a-z0-9]', '', req_plat)
+                if clean_req not in re.sub(r'[^a-z0-9]', '', corpus):
+                    return None, True, f"Dropped by Platform Filter (requires '{req_plat}')"
+
+        # AKOUEFLOW INDICATOR PRESET LOGIC - same thresholds as the Outcomes Lab
+        elif rule_type == 'indicator_preset':
+            preset = (rule.get('search_text') or '').strip().lower()
+            if preset and preset != 'all':
+                inds = context.get('indicators')
+                m_data = context.get('metrics_data')
+                if not inds and isinstance(m_data, dict):
+                    inds = m_data.get('indicators')
+                token_view = {
+                    'indicators': inds if isinstance(inds, dict) else {},
+                    'metrics_data': m_data if isinstance(m_data, dict) else None,
+                    'formatted_message': text,
+                }
+                if not indicator_preset_passes(preset, token_view):
+                    label = INDICATOR_PRESET_LABELS.get(preset, preset)
+                    return None, True, f"Dropped by Akoueflow Indicator Preset ({label})"
 
         # TOKEN NAME FILTER LOGIC
         elif rule_type == 'token_name':

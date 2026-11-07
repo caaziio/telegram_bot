@@ -141,7 +141,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                         detection_seconds, reason, formatted_message
                     ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(ca, signal_type, payment_timestamp, order_status) DO UPDATE SET
-                        fetched_at=excluded.fetched_at,
+                        fetched_at=CASE WHEN COALESCE(dex_validated.perf_checked_stage, 0) > 0 THEN dex_validated.fetched_at ELSE excluded.fetched_at END,
                         reason=excluded.reason
                 ''', (
                     ca, proj_name, plat, mc_val, age_val,
@@ -596,6 +596,8 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                 db_status, dex_url, migration_status_formatted, signal_type,
                 payment_timestamp, order_status,
             )
+            persisted_entry_mc = None
+            persisted_fetched_at = None
             if storage_table == 'dex_validated':
                 metrics_json_str = json.dumps(metrics_data) if metrics_data else None
                 cursor.execute('''
@@ -610,7 +612,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                     ON CONFLICT(ca, signal_type, payment_timestamp, order_status) DO UPDATE SET
                         name=excluded.name,
                         platform=excluded.platform,
-                        market_cap=excluded.market_cap,
+                        market_cap=CASE WHEN COALESCE(dex_validated.perf_checked_stage, 0) > 0 THEN dex_validated.market_cap ELSE excluded.market_cap END,
                         age=excluded.age,
                         perf_5m=excluded.perf_5m,
                         perf_1h=excluded.perf_1h,
@@ -625,7 +627,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                         dex_url=excluded.dex_url,
                         migration_status=excluded.migration_status,
                         published_at=COALESCE(excluded.published_at, dex_validated.published_at),
-                        fetched_at=excluded.fetched_at,
+                        fetched_at=CASE WHEN COALESCE(dex_validated.perf_checked_stage, 0) > 0 THEN dex_validated.fetched_at ELSE excluded.fetched_at END,
                         detection_seconds=COALESCE(excluded.detection_seconds, dex_validated.detection_seconds),
                         reason=excluded.reason,
                         formatted_message=excluded.formatted_message,
@@ -637,11 +639,16 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                 conn.commit()
                 # Query back the preserved status so we never downgrade 'forwarded' when pushing to Supabase
                 persisted_dv_row = cursor.execute(
-                    'SELECT status FROM dex_validated WHERE ca = ? AND signal_type = ? AND payment_timestamp = ? AND order_status = ?',
+                    'SELECT status, market_cap, fetched_at FROM dex_validated WHERE ca = ? AND signal_type = ? AND payment_timestamp = ? AND order_status = ?',
                     (ca, signal_type, payment_timestamp, order_status)
                 ).fetchone()
                 if persisted_dv_row and persisted_dv_row[0]:
                     db_status = persisted_dv_row[0]
+                # Re-detections keep the original entry market cap / signal time once
+                # 1h/4h results exist (see upsert above); push those to Supabase too.
+                if persisted_dv_row:
+                    persisted_entry_mc = persisted_dv_row[1]
+                    persisted_fetched_at = persisted_dv_row[2]
             else:
                 cursor.execute('''
                     INSERT INTO cto_signals (
@@ -817,7 +824,19 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                                 print(f"[SUPABASE] wallet_payments update error: {e}", flush=True)
                         threading.Thread(target=_update_supabase_wallet, daemon=True).start()
                     else:
-                        push_to_supabase_table('wallet_payments', sp_wallet_payload, on_conflict='ca')
+                        # No signature and no payer: mirror the local logic (update the
+                        # existing row for this CA, else insert). An upsert on 'ca' cannot
+                        # work because ca is not unique in Supabase (42P10 error).
+                        def _update_supabase_wallet_by_ca():
+                            try:
+                                found = supabase_client.table('wallet_payments').select('id').eq('ca', ca).order('id', desc=True).limit(1).execute()
+                                if found.data:
+                                    supabase_client.table('wallet_payments').update(sp_wallet_payload).eq('id', found.data[0]['id']).execute()
+                                else:
+                                    supabase_client.table('wallet_payments').insert(sp_wallet_payload).execute()
+                            except Exception as e:
+                                print(f"[SUPABASE] wallet_payments save by CA error: {e}", flush=True)
+                        threading.Thread(target=_update_supabase_wallet_by_ca, daemon=True).start()
             else:
                 # If a row was previously created for this signature without a token name, delete it
                 if sig:
@@ -829,7 +848,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                     'ca': ca,
                     'name': project_name,
                     'platform': chain_id,
-                    'market_cap': mc_str,
+                    'market_cap': persisted_entry_mc or mc_str,
                     'age': age_creation_str,
                     'perf_5m': perf_5m,
                     'perf_1h': perf_1h,
@@ -851,7 +870,7 @@ async def process_single_cto_item(item, target_channel, workflow_id, test_mode):
                 if storage_table == 'dex_validated':
                     signal_payload.update({
                         'published_at': published_at,
-                        'fetched_at': fetched_at,
+                        'fetched_at': persisted_fetched_at or fetched_at,
                         'detection_seconds': token_info.get('detection_seconds'),
                         'formatted_message': token_info.get('formatted_message') or msg,
                         'metrics_data': metrics_data if metrics_data else None,

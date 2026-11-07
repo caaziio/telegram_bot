@@ -561,3 +561,42 @@ def get_token_indicator_value(token, indicator_key):
         pass
 
     return None
+
+
+INDICATOR_PRESET_LABELS = {
+    'strong_bullish': 'Strong Bullish Flow',
+    'buy_surge': 'Buy Volume Surge',
+    'high_breadth': 'High Wallet Breadth',
+    'heavy_turnover': 'Heavy Liquidity Turnover',
+    'low_risk': 'Low Supply & Exit Risk',
+    'heavy_selling': 'Heavy Selling Pressure',
+}
+
+
+def indicator_preset_passes(preset, token):
+    """True if ``token`` satisfies the named Akoueflow indicator preset.
+
+    Shared by the Outcomes Lab and live workflow rules so both apply the same thresholds.
+    Unknown presets pass.
+    """
+    preset = str(preset or '').strip().lower()
+    v = lambda k: get_token_indicator_value(token, k)
+    if preset == 'strong_bullish':
+        nb, bd = v('net_buy_pressure'), v('buy_dominance_pct')
+        return nb is not None and nb >= 5000 and bd is not None and bd >= 60.0
+    if preset == 'buy_surge':
+        ba, bd = v('buy_vol_accel'), v('buy_dominance_pct')
+        return ba is not None and ba >= 2.0 and bd is not None and bd >= 55.0
+    if preset == 'high_breadth':
+        bs = v('buyer_seller_ratio')
+        return bs is not None and bs >= 1.5
+    if preset == 'heavy_turnover':
+        bl = v('net_buy_to_liq')
+        return bl is not None and bl >= 5.0
+    if preset == 'low_risk':
+        hc, rt = v('holder_concentration'), v('round_trip_cost')
+        return hc is not None and hc <= 35.0 and rt is not None and rt <= 6.0
+    if preset == 'heavy_selling':
+        nb, bd = v('net_buy_pressure'), v('buy_dominance_pct')
+        return (nb is not None and nb < 0) or (bd is not None and bd < 40.0)
+    return True

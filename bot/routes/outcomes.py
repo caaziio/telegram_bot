@@ -135,6 +135,238 @@ def get_outcomes_workflows():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+def parse_filter_minutes(val):
+    if val is None or str(val).strip() == '':
+        return None
+    s = str(val).lower().strip()
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    d = int(re.search(r'(\d+)\s*(?:d|day)', s).group(1)) if re.search(r'(\d+)\s*(?:d|day)', s) else 0
+    h = int(re.search(r'(\d+)\s*(?:h|hr|hour)', s).group(1)) if re.search(r'(\d+)\s*(?:h|hr|hour)', s) else 0
+    m = int(re.search(r'(\d+)\s*(?:m|min|minute)', s).group(1)) if re.search(r'(\d+)\s*(?:m|min|minute)', s) else 0
+    total = (d * 1440) + (h * 60) + m
+    return float(total) if (d or h or m or '0' in s) else None
+
+
+def safe_float_filter(val):
+    if val in (None, ''):
+        return None
+    if isinstance(val, (int, float)):
+        return float(val)
+    clean = re.sub(r'[\$,%]', '', str(val)).strip()
+    try:
+        return float(clean)
+    except Exception:
+        return None
+
+
+def build_rules_from_custom_filters(custom_filters):
+    """Convert Outcomes Lab custom filters into workflow rules.
+
+    Shared by the simulation and 'Save as Workflow' so a saved workflow
+    applies exactly the rules that were backtested.
+    """
+    rules = []
+    if not custom_filters:
+        return rules
+    # Market Cap ($)
+    min_mc = safe_float_filter(custom_filters.get('min_mc') if custom_filters.get('min_mc') is not None else custom_filters.get('min_market_cap'))
+    max_mc = safe_float_filter(custom_filters.get('max_mc') if custom_filters.get('max_mc') is not None else custom_filters.get('max_market_cap'))
+    if min_mc is not None or max_mc is not None:
+        rules.append({
+            'rule_type': 'market_cap',
+            'time_min': min_mc,
+            'time_max': max_mc
+        })
+
+    # Token Age (Minutes)
+    min_age_raw = custom_filters.get('min_age')
+    max_age_raw = custom_filters.get('max_age')
+    parsed_min_age = parse_filter_minutes(min_age_raw)
+    parsed_max_age = parse_filter_minutes(max_age_raw)
+    age_kind = (custom_filters.get('age_kind') or 'creation').lower().strip()
+    if parsed_min_age is not None or parsed_max_age is not None:
+        rules.append({
+            'rule_type': 'token_age',
+            'time_min': parsed_min_age,
+            'time_max': parsed_max_age,
+            'search_text': age_kind
+        })
+
+    # Liquidity ($)
+    min_liq = safe_float_filter(custom_filters.get('min_liq') if custom_filters.get('min_liq') is not None else custom_filters.get('min_liquidity'))
+    max_liq = safe_float_filter(custom_filters.get('max_liq') if custom_filters.get('max_liq') is not None else custom_filters.get('max_liquidity'))
+    if min_liq is not None or max_liq is not None:
+        rules.append({
+            'rule_type': 'liquidity',
+            'time_min': min_liq,
+            'time_max': max_liq
+        })
+
+    # Volume ($)
+    min_vol = safe_float_filter(custom_filters.get('min_vol') if custom_filters.get('min_vol') is not None else custom_filters.get('min_volume'))
+    max_vol = safe_float_filter(custom_filters.get('max_vol') if custom_filters.get('max_vol') is not None else custom_filters.get('max_volume'))
+    vol_tf = custom_filters.get('volume_tf') or '24h'
+    if min_vol is not None or max_vol is not None:
+        rules.append({
+            'rule_type': 'volume',
+            'time_min': min_vol,
+            'time_max': max_vol,
+            'search_text': vol_tf
+        })
+
+    # Pre-signal Performance (% change)
+    min_perf = safe_float_filter(custom_filters.get('min_perf'))
+    max_perf = safe_float_filter(custom_filters.get('max_perf'))
+    perf_tf = custom_filters.get('perf_tf') or '5m'
+    if min_perf is not None or max_perf is not None:
+        rules.append({
+            'rule_type': 'performance',
+            'time_min': min_perf,
+            'time_max': max_perf,
+            'search_text': perf_tf
+        })
+
+    # Category (boost, cto, profile, ad, etc.)
+    cat = custom_filters.get('category')
+    if cat and str(cat).lower() not in ('all', '', 'any'):
+        rules.append({
+            'rule_type': 'category',
+            'search_text': str(cat).strip()
+        })
+
+    # Migrated Status (yes, no, all)
+    mig = custom_filters.get('migrated')
+    if mig and str(mig).lower() not in ('all', '', 'any'):
+        rules.append({
+            'rule_type': 'migrated',
+            'search_text': 'yes' if str(mig).lower() in ('yes', 'migrated', 'true', '1') else 'no'
+        })
+
+    # Platform
+    plat = custom_filters.get('platform')
+    if plat and str(plat).lower() not in ('all', '', 'any'):
+        rules.append({
+            'rule_type': 'platform',
+            'search_text': str(plat).strip()
+        })
+
+    # Exclude Platform
+    ex_plat = custom_filters.get('exclude_platform')
+    if ex_plat and str(ex_plat).lower() not in ('all', '', 'any'):
+        rules.append({
+            'rule_type': 'exclude_platform',
+            'search_text': str(ex_plat).strip()
+        })
+
+    # Token Name / Symbol Filter (substring, exact, or regex)
+    name_flt = custom_filters.get('name_filter') if custom_filters.get('name_filter') is not None else custom_filters.get('keywords')
+    name_mode = custom_filters.get('name_mode') or 'include'
+    if name_flt and str(name_flt).strip():
+        rules.append({
+            'rule_type': 'token_name',
+            'search_text': str(name_flt).strip(),
+            'replace_text': name_mode
+        })
+
+    # Message / Word Filter
+    word_flt = custom_filters.get('word_filter')
+    word_mode = custom_filters.get('word_mode') or 'include'
+    if word_flt and str(word_flt).strip():
+        rules.append({
+            'rule_type': 'filter',
+            'search_text': str(word_flt).strip(),
+            'replace_text': word_mode
+        })
+
+    # Extract CA Requirement
+    extract_ca = custom_filters.get('extract_ca')
+    if extract_ca and str(extract_ca).lower() in ('yes', 'true', '1'):
+        rules.append({
+            'rule_type': 'extract_ca',
+            'search_text': 'yes'
+        })
+
+    # DEX Payment ($)
+    p_min = safe_float_filter(custom_filters.get('dex_payment_min'))
+    p_max = safe_float_filter(custom_filters.get('dex_payment_max'))
+    p_label = custom_filters.get('dex_payment_label')
+    if p_min is not None or p_max is not None or (p_label and str(p_label).strip()):
+        rules.append({
+            'rule_type': 'dex_payment',
+            'time_min': p_min,
+            'time_max': p_max,
+            'search_text': str(p_label).strip() if p_label else ''
+        })
+
+    # Akoueflow Indicator Preset
+    ind_preset = str(custom_filters.get('ind_preset') or custom_filters.get('indicator_preset') or 'all').strip().lower()
+    if ind_preset and ind_preset != 'all':
+        rules.append({
+            'rule_type': 'indicator_preset',
+            'search_text': ind_preset
+        })
+
+    # Granular Akoueflow Indicators (10 metrics)
+    indicator_specs = [
+        ('net_buy_pressure', 'min_net_buy', 'max_net_buy'),
+        ('buy_dominance_pct', 'min_buy_dom', 'max_buy_dom'),
+        ('buy_pressure_accel', 'min_buy_press_accel', 'max_buy_press_accel'),
+        ('buy_vol_accel', 'min_buy_accel', 'max_buy_accel'),
+        ('sell_vol_accel', 'min_sell_accel', 'max_sell_accel'),
+        ('net_buy_to_liq', 'min_buy_liq', 'max_buy_liq'),
+        ('vol_to_mc', 'min_vol_mc', 'max_vol_mc'),
+        ('vol_to_liq', 'min_vol_liq', 'max_vol_liq'),
+        ('buyer_seller_ratio', 'min_bs_ratio', 'max_bs_ratio'),
+        ('holder_concentration', 'min_holder_conc', 'max_holder_conc'),
+        ('round_trip_cost', 'min_round_trip', 'max_round_trip'),
+        ('bonding_curve_pct', 'min_bonding_curve', 'max_bonding_curve'),
+        ('dev_prior_tokens', 'min_dev_tokens', 'max_dev_tokens'),
+    ]
+    for ikey, min_k, max_k in indicator_specs:
+        imin = safe_float_filter(custom_filters.get(min_k))
+        imax = safe_float_filter(custom_filters.get(max_k))
+        if imin is not None or imax is not None:
+            rules.append({
+                'rule_type': 'indicator',
+                'search_text': ikey,
+                'time_min': imin,
+                'time_max': imax
+            })
+    return rules
+
+
+@app.route('/api/outcomes/filters_to_rules', methods=['POST'])
+def outcomes_filters_to_rules():
+    """Return the workflow rules for the current Outcomes Lab filters (for 'Save as Workflow')."""
+    try:
+        req_data = request.get_json() or {}
+        custom_filters = req_data.get('custom_filters') or {}
+        system = str(req_data.get('system') or 'all').lower().strip()
+        rules = build_rules_from_custom_filters(custom_filters)
+        # Live workflows match exclude_platform as a regex against the message, while the
+        # Outcomes Lab matches loosely (punctuation ignored, pump CAs count as pump.fun).
+        # Translate to regexes that exclude the same tokens live.
+        live_exclude_patterns = {
+            'pumpfun': r'pump\.?fun|pumpswap|CA:\s*\S*pump\b',
+            'pump': r'pump\.?fun|pumpswap|CA:\s*\S*pump\b',
+            'raydium': r'raydium',
+            'moonshot': r'moonshot',
+            'meteora': r'meteora',
+        }
+        for rule in rules:
+            if rule.get('rule_type') == 'exclude_platform':
+                key = re.sub(r'[^a-z0-9]', '', str(rule.get('search_text') or '').lower())
+                if key in live_exclude_patterns:
+                    rule['search_text'] = live_exclude_patterns[key]
+        signal_type = {'validated': 'validated', 'paid': 'dex_paid'}.get(system, 'both')
+        return jsonify({'success': True, 'rules': rules, 'signal_type': signal_type})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/outcomes/simulate', methods=['POST'])
 def simulate_outcomes():
     """Simulate workflow rules or custom filter criteria against historical signals."""
@@ -146,20 +378,6 @@ def simulate_outcomes():
         date_to = req_data.get('date_to') or req_data.get('to_date') or req_data.get('to')
         workflow_id = req_data.get('workflow_id')
         custom_filters = req_data.get('custom_filters') or req_data.get('filters') or {}
-
-        def parse_filter_minutes(val):
-            if val is None or str(val).strip() == '':
-                return None
-            s = str(val).lower().strip()
-            try:
-                return float(s)
-            except ValueError:
-                pass
-            d = int(re.search(r'(\d+)\s*(?:d|day)', s).group(1)) if re.search(r'(\d+)\s*(?:d|day)', s) else 0
-            h = int(re.search(r'(\d+)\s*(?:h|hr|hour)', s).group(1)) if re.search(r'(\d+)\s*(?:h|hr|hour)', s) else 0
-            m = int(re.search(r'(\d+)\s*(?:m|min|minute)', s).group(1)) if re.search(r'(\d+)\s*(?:m|min|minute)', s) else 0
-            total = (d * 1440) + (h * 60) + m
-            return float(total) if (d or h or m or '0' in s) else None
 
         # 1. Fetch historical candidate tokens
         candidates = get_historical_candidate_tokens(system, timeframe, date_from=date_from, date_to=date_to)
@@ -184,183 +402,8 @@ def simulate_outcomes():
         if system in ('paid', 'validated'):
             rules = [r for r in rules if r.get('rule_type') != 'signal_type']
 
-        def safe_float_filter(val):
-            if val in (None, ''):
-                return None
-            if isinstance(val, (int, float)):
-                return float(val)
-            clean = re.sub(r'[\$,%]', '', str(val)).strip()
-            try:
-                return float(clean)
-            except Exception:
-                return None
-
         # Process custom filters
-        if custom_filters:
-            # Market Cap ($)
-            min_mc = safe_float_filter(custom_filters.get('min_mc') if custom_filters.get('min_mc') is not None else custom_filters.get('min_market_cap'))
-            max_mc = safe_float_filter(custom_filters.get('max_mc') if custom_filters.get('max_mc') is not None else custom_filters.get('max_market_cap'))
-            if min_mc is not None or max_mc is not None:
-                rules.append({
-                    'rule_type': 'market_cap',
-                    'time_min': min_mc,
-                    'time_max': max_mc
-                })
-
-            # Token Age (Minutes)
-            min_age_raw = custom_filters.get('min_age')
-            max_age_raw = custom_filters.get('max_age')
-            parsed_min_age = parse_filter_minutes(min_age_raw)
-            parsed_max_age = parse_filter_minutes(max_age_raw)
-            age_kind = (custom_filters.get('age_kind') or 'creation').lower().strip()
-            if parsed_min_age is not None or parsed_max_age is not None:
-                rules.append({
-                    'rule_type': 'token_age',
-                    'time_min': parsed_min_age,
-                    'time_max': parsed_max_age,
-                    'search_text': age_kind
-                })
-
-            # Liquidity ($)
-            min_liq = safe_float_filter(custom_filters.get('min_liq') if custom_filters.get('min_liq') is not None else custom_filters.get('min_liquidity'))
-            max_liq = safe_float_filter(custom_filters.get('max_liq') if custom_filters.get('max_liq') is not None else custom_filters.get('max_liquidity'))
-            if min_liq is not None or max_liq is not None:
-                rules.append({
-                    'rule_type': 'liquidity',
-                    'time_min': min_liq,
-                    'time_max': max_liq
-                })
-
-            # Volume ($)
-            min_vol = safe_float_filter(custom_filters.get('min_vol') if custom_filters.get('min_vol') is not None else custom_filters.get('min_volume'))
-            max_vol = safe_float_filter(custom_filters.get('max_vol') if custom_filters.get('max_vol') is not None else custom_filters.get('max_volume'))
-            vol_tf = custom_filters.get('volume_tf') or '24h'
-            if min_vol is not None or max_vol is not None:
-                rules.append({
-                    'rule_type': 'volume',
-                    'time_min': min_vol,
-                    'time_max': max_vol,
-                    'search_text': vol_tf
-                })
-
-            # Pre-signal Performance (% change)
-            min_perf = safe_float_filter(custom_filters.get('min_perf'))
-            max_perf = safe_float_filter(custom_filters.get('max_perf'))
-            perf_tf = custom_filters.get('perf_tf') or '5m'
-            if min_perf is not None or max_perf is not None:
-                rules.append({
-                    'rule_type': 'performance',
-                    'time_min': min_perf,
-                    'time_max': max_perf,
-                    'search_text': perf_tf
-                })
-
-            # Category (boost, cto, profile, ad, etc.)
-            cat = custom_filters.get('category')
-            if cat and str(cat).lower() not in ('all', '', 'any'):
-                rules.append({
-                    'rule_type': 'category',
-                    'search_text': str(cat).strip()
-                })
-
-            # Migrated Status (yes, no, all)
-            mig = custom_filters.get('migrated')
-            if mig and str(mig).lower() not in ('all', '', 'any'):
-                rules.append({
-                    'rule_type': 'migrated',
-                    'search_text': 'yes' if str(mig).lower() in ('yes', 'migrated', 'true', '1') else 'no'
-                })
-
-            # Platform
-            plat = custom_filters.get('platform')
-            if plat and str(plat).lower() not in ('all', '', 'any'):
-                rules.append({
-                    'rule_type': 'platform',
-                    'search_text': str(plat).strip()
-                })
-
-            # Exclude Platform
-            ex_plat = custom_filters.get('exclude_platform')
-            if ex_plat and str(ex_plat).lower() not in ('all', '', 'any'):
-                rules.append({
-                    'rule_type': 'exclude_platform',
-                    'search_text': str(ex_plat).strip()
-                })
-
-            # Token Name / Symbol Filter (substring, exact, or regex)
-            name_flt = custom_filters.get('name_filter') if custom_filters.get('name_filter') is not None else custom_filters.get('keywords')
-            name_mode = custom_filters.get('name_mode') or 'include'
-            if name_flt and str(name_flt).strip():
-                rules.append({
-                    'rule_type': 'token_name',
-                    'search_text': str(name_flt).strip(),
-                    'replace_text': name_mode
-                })
-
-            # Message / Word Filter
-            word_flt = custom_filters.get('word_filter')
-            word_mode = custom_filters.get('word_mode') or 'include'
-            if word_flt and str(word_flt).strip():
-                rules.append({
-                    'rule_type': 'filter',
-                    'search_text': str(word_flt).strip(),
-                    'replace_text': word_mode
-                })
-
-            # Extract CA Requirement
-            extract_ca = custom_filters.get('extract_ca')
-            if extract_ca and str(extract_ca).lower() in ('yes', 'true', '1'):
-                rules.append({
-                    'rule_type': 'extract_ca',
-                    'search_text': 'yes'
-                })
-
-            # DEX Payment ($)
-            p_min = safe_float_filter(custom_filters.get('dex_payment_min'))
-            p_max = safe_float_filter(custom_filters.get('dex_payment_max'))
-            p_label = custom_filters.get('dex_payment_label')
-            if p_min is not None or p_max is not None or (p_label and str(p_label).strip()):
-                rules.append({
-                    'rule_type': 'dex_payment',
-                    'time_min': p_min,
-                    'time_max': p_max,
-                    'search_text': str(p_label).strip() if p_label else ''
-                })
-
-            # Akoueflow Indicator Preset
-            ind_preset = str(custom_filters.get('ind_preset') or custom_filters.get('indicator_preset') or 'all').strip().lower()
-            if ind_preset and ind_preset != 'all':
-                rules.append({
-                    'rule_type': 'indicator_preset',
-                    'search_text': ind_preset
-                })
-
-            # Granular Akoueflow Indicators (10 metrics)
-            indicator_specs = [
-                ('net_buy_pressure', 'min_net_buy', 'max_net_buy'),
-                ('buy_dominance_pct', 'min_buy_dom', 'max_buy_dom'),
-                ('buy_pressure_accel', 'min_buy_press_accel', 'max_buy_press_accel'),
-                ('buy_vol_accel', 'min_buy_accel', 'max_buy_accel'),
-                ('sell_vol_accel', 'min_sell_accel', 'max_sell_accel'),
-                ('net_buy_to_liq', 'min_buy_liq', 'max_buy_liq'),
-                ('vol_to_mc', 'min_vol_mc', 'max_vol_mc'),
-                ('vol_to_liq', 'min_vol_liq', 'max_vol_liq'),
-                ('buyer_seller_ratio', 'min_bs_ratio', 'max_bs_ratio'),
-                ('holder_concentration', 'min_holder_conc', 'max_holder_conc'),
-                ('round_trip_cost', 'min_round_trip', 'max_round_trip'),
-                ('bonding_curve_pct', 'min_bonding_curve', 'max_bonding_curve'),
-                ('dev_prior_tokens', 'min_dev_tokens', 'max_dev_tokens'),
-            ]
-            for ikey, min_k, max_k in indicator_specs:
-                imin = safe_float_filter(custom_filters.get(min_k))
-                imax = safe_float_filter(custom_filters.get(max_k))
-                if imin is not None or imax is not None:
-                    rules.append({
-                        'rule_type': 'indicator',
-                        'search_text': ikey,
-                        'time_min': imin,
-                        'time_max': imax
-                    })
+        rules.extend(build_rules_from_custom_filters(custom_filters))
 
         # 3. Baseline metrics across all candidates
         tot_cand = len(candidates)

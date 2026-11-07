@@ -8,6 +8,7 @@ import time
 from bot.config import debug_log
 from bot.db.connection import db_lock, get_db, supabase_client
 from bot.services.token_indicators import (
+    indicator_preset_passes,
     get_token_indicator_value,
     parse_age_minutes,
     parse_creation_age_minutes,
@@ -233,33 +234,8 @@ def token_matches_workflow_rules(token, rules):
                     return False
 
         elif rtype == 'indicator_preset':
-            preset = (stext or '').strip().lower()
-            net_buy = get_token_indicator_value(token, 'net_buy_pressure')
-            buy_dom = get_token_indicator_value(token, 'buy_dominance_pct')
-            buy_accel = get_token_indicator_value(token, 'buy_vol_accel')
-            bs_ratio = get_token_indicator_value(token, 'buyer_seller_ratio')
-            buy_liq = get_token_indicator_value(token, 'net_buy_to_liq')
-            holder_conc = get_token_indicator_value(token, 'holder_concentration')
-            round_trip = get_token_indicator_value(token, 'round_trip_cost')
-
-            if preset == 'strong_bullish':
-                if net_buy is None or net_buy < 5000: return False
-                if buy_dom is None or buy_dom < 60.0: return False
-            elif preset == 'buy_surge':
-                if buy_accel is None or buy_accel < 2.0: return False
-                if buy_dom is None or buy_dom < 55.0: return False
-            elif preset == 'high_breadth':
-                if bs_ratio is None or bs_ratio < 1.5: return False
-            elif preset == 'heavy_turnover':
-                if buy_liq is None or buy_liq < 5.0: return False
-            elif preset == 'low_risk':
-                if holder_conc is None or holder_conc > 35.0: return False
-                if round_trip is None or round_trip > 6.0: return False
-            elif preset == 'heavy_selling':
-                if (net_buy is not None and net_buy < 0) or (buy_dom is not None and buy_dom < 40.0):
-                    pass
-                else:
-                    return False
+            if not indicator_preset_passes(stext, token):
+                return False
 
     return True
 

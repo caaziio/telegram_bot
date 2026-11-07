@@ -755,6 +755,12 @@ function clearWorkflowFilters() {
 function selectFlowGroup(groupId) {
     activeFlowGroupView = String(groupId || 'all');
     try { localStorage.setItem('teleflow_active_flow_group', activeFlowGroupView); } catch (_) {}
+    // Clicking a folder from any other page should open the Workflows page on that folder.
+    const workflowsTab = document.getElementById('tab-workflows');
+    if (workflowsTab && workflowsTab.classList.contains('hidden')) {
+        switchTab('workflows'); // renders the folder tree and the workflows of activeFlowGroupView
+        return;
+    }
     renderWorkflows();
 }
 
@@ -1436,11 +1442,13 @@ function renderRules() {
             badgeColor = '#38bdf8'; badgeBg = 'rgba(56, 189, 248, 0.1)'; badgeBorder = 'rgba(56, 189, 248, 0.22)';
         } else if (rule.rule_type === 'show_wallet') {
             badgeColor = '#38bdf8'; badgeBg = 'rgba(56, 189, 248, 0.1)'; badgeBorder = 'rgba(56, 189, 248, 0.22)';
+        } else if (rule.rule_type === 'platform') {
+            badgeColor = '#34d399'; badgeBg = 'rgba(52, 211, 153, 0.1)'; badgeBorder = 'rgba(52, 211, 153, 0.22)';
         } else if (rule.rule_type === 'exclude_platform') {
             badgeColor = '#f87171'; badgeBg = 'rgba(248, 113, 113, 0.1)'; badgeBorder = 'rgba(248, 113, 113, 0.22)';
         } else if (rule.rule_type === 'token_name') {
             badgeColor = '#f472b6'; badgeBg = 'rgba(244, 114, 182, 0.1)'; badgeBorder = 'rgba(244, 114, 182, 0.22)';
-        } else if (rule.rule_type === 'indicator') {
+        } else if (rule.rule_type === 'indicator' || rule.rule_type === 'indicator_preset') {
             badgeColor = '#818cf8'; badgeBg = 'rgba(129, 140, 248, 0.1)'; badgeBorder = 'rgba(129, 140, 248, 0.22)';
         } else if (rule.rule_type === 'filter') {
             badgeColor = '#fb7185'; badgeBg = 'rgba(251, 113, 133, 0.1)'; badgeBorder = 'rgba(251, 113, 133, 0.22)';
@@ -1583,6 +1591,27 @@ function renderRules() {
             fieldsHtml += `
                 <label style="font-size:0.85rem; color:var(--text-muted)">Regex:</label>
                 <input class="form-input" style="flex: 1; max-width: 250px;" placeholder="e.g. pump\\.fun|raydium" value="${rule.search_text || ''}" oninput="updateRule(${index}, 'search_text', this.value)" title="Case-insensitive regular expression">
+            `;
+        } else if (rule.rule_type === 'platform') {
+            fieldsHtml += `
+                <label style="font-size:0.85rem; color:var(--text-muted)">Must be on:</label>
+                <input class="form-input" style="flex: 1; max-width: 250px;" placeholder="e.g. raydium, pumpfun, meteora" value="${escapeHtml(rule.search_text || '')}" oninput="updateRule(${index}, 'search_text', this.value)" title="Signal must mention this platform/DEX (spaces and punctuation ignored)">
+            `;
+        } else if (rule.rule_type === 'indicator_preset') {
+            const presetVal = String(rule.search_text || 'strong_bullish').toLowerCase();
+            const presetOpts = [
+                ['strong_bullish', 'Strong Bullish Flow (Net Buy ≥ $5K, Dom ≥ 60%)'],
+                ['buy_surge', 'Buy Volume Surge (Accel ≥ 2x, Dom ≥ 55%)'],
+                ['high_breadth', 'High Wallet Breadth (Buyer/Seller ≥ 1.5x)'],
+                ['heavy_turnover', 'Heavy Liquidity Turnover (Net Buy/Liq ≥ 5%)'],
+                ['low_risk', 'Low Supply & Exit Risk (Top 10 ≤ 35%, Exit ≤ 6%)'],
+                ['heavy_selling', 'Heavy Selling Pressure (Net Buy < $0 or Dom < 40%)'],
+            ];
+            fieldsHtml += `
+                <label style="font-size:0.85rem; color:var(--text-muted)">Preset:</label>
+                <select class="form-input" style="flex: 1; max-width: 360px;" onchange="updateRule(${index}, 'search_text', this.value)">
+                    ${presetOpts.map(([v, l]) => `<option value="${v}" ${presetVal === v ? 'selected' : ''}>${l}</option>`).join('')}
+                </select>
             `;
         } else if (rule.rule_type === 'token_name') {
             const mode = (rule.replace_text || 'include').toLowerCase();
@@ -1867,6 +1896,7 @@ async function saveWorkflow(e) {
             await saveFlowGroups(false);
             renderWorkflows();
             closeModal();
+            if (typeof loadOutcomesWorkflows === 'function') loadOutcomesWorkflows();
         } else {
             alert('Error saving workflow: ' + (result.error || 'Unknown error'));
         }
@@ -7015,6 +7045,49 @@ async function initOutcomesLabPage() {
     }
 }
 
+/**
+ * Save the current Outcomes Lab filters as a real workflow: converts the filters
+ * into workflow rules on the server (same conversion the backtest uses), then opens
+ * the normal workflow editor pre-filled so the user can name it, pick a target
+ * channel/folder, review the rules and save.
+ */
+async function saveOutcomesAsWorkflow() {
+    const customFilters = collectOutcomesCustomFilters();
+    if (!Object.keys(customFilters).length) {
+        alert('Add at least one filter in the Outcomes Lab before saving it as a workflow.');
+        return;
+    }
+    let data;
+    try {
+        const res = await fetch('/api/outcomes/filters_to_rules', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ custom_filters: customFilters, system: outcomesState.system })
+        });
+        data = await res.json();
+    } catch (err) {
+        alert('Could not convert the filters into workflow rules: ' + err.message);
+        return;
+    }
+    if (!data || !data.success) {
+        alert('Could not convert the filters into workflow rules: ' + ((data && data.error) || 'Unknown error'));
+        return;
+    }
+
+    openModal();
+    document.getElementById('modal-title').innerText = 'Save Outcomes Filters as Workflow';
+    const baseWf = outcomesState.activeWorkflowId
+        ? (outcomesState.workflows || []).find(w => String(w.id) === String(outcomesState.activeWorkflowId))
+        : null;
+    const nameEl = document.getElementById('flow-name');
+    nameEl.value = baseWf && baseWf.name ? `${baseWf.name} (Outcomes)` : '';
+    nameEl.placeholder = 'Name your new workflow';
+    setFlowModalSignalType(data.signal_type || 'both');
+    currentRules = (data.rules || []).map(r => ({ ...r }));
+    renderRules();
+    setTimeout(() => nameEl.focus(), 50);
+}
+
 async function loadOutcomesWorkflows() {
     try {
         const res = await fetch('/api/outcomes/workflows');
@@ -7407,6 +7480,138 @@ function resetOutcomesFilters() {
     runOutcomesSimulation();
 }
 
+/**
+ * Read every Outcomes Lab filter input into the custom_filters object the
+ * backend understands (used by the simulation and by 'Save as Workflow').
+ */
+function collectOutcomesCustomFilters() {
+    const getNum = id => {
+        const v = parseFloat(document.getElementById(id)?.value);
+        return (!isNaN(v) && isFinite(v)) ? v : null;
+    };
+    const getStr = id => {
+        const v = document.getElementById(id)?.value;
+        return v !== undefined && v !== null ? String(v).trim() : '';
+    };
+
+    const customFilters = {};
+    const minMc = getNum('outcomes-filter-min-mc');
+    const maxMc = getNum('outcomes-filter-max-mc');
+    if (minMc !== null) customFilters.min_mc = minMc;
+    if (maxMc !== null) customFilters.max_mc = maxMc;
+
+    const minLiq = getNum('outcomes-filter-min-liq');
+    const maxLiq = getNum('outcomes-filter-max-liq');
+    if (minLiq !== null) customFilters.min_liq = minLiq;
+    if (maxLiq !== null) customFilters.max_liq = maxLiq;
+
+    const volTf = getStr('outcomes-filter-volume-tf') || '24h';
+    const minVol = getNum('outcomes-filter-min-vol');
+    const maxVol = getNum('outcomes-filter-max-vol');
+    if (minVol !== null) customFilters.min_vol = minVol;
+    if (maxVol !== null) customFilters.max_vol = maxVol;
+    if (minVol !== null || maxVol !== null) customFilters.volume_tf = volTf;
+
+    const minAge = getStr('outcomes-filter-min-age');
+    const maxAge = getStr('outcomes-filter-max-age');
+    const ageKind = getStr('outcomes-filter-age-kind') || 'creation';
+    if (minAge) customFilters.min_age = minAge;
+    if (maxAge) customFilters.max_age = maxAge;
+    if (minAge || maxAge) customFilters.age_kind = ageKind;
+
+    const perfTf = getStr('outcomes-filter-perf-tf') || '5m';
+    const minPerf = getNum('outcomes-filter-min-perf');
+    const maxPerf = getNum('outcomes-filter-max-perf');
+    if (minPerf !== null) customFilters.min_perf = minPerf;
+    if (maxPerf !== null) customFilters.max_perf = maxPerf;
+    if (minPerf !== null || maxPerf !== null) customFilters.perf_tf = perfTf;
+
+    const plat = getStr('outcomes-filter-platform');
+    if (plat && plat !== 'all') customFilters.platform = plat;
+
+    const exclPlat = getStr('outcomes-filter-exclude-platform');
+    if (exclPlat) customFilters.exclude_platform = exclPlat;
+
+    const mig = getStr('outcomes-filter-migrated');
+    if (mig && mig !== 'all') customFilters.migrated = mig;
+
+    const cat = getStr('outcomes-filter-category');
+    if (cat && cat !== 'all') customFilters.category = cat;
+
+    const pMin = getNum('outcomes-filter-min-payment');
+    const pMax = getNum('outcomes-filter-max-payment');
+    const pLabel = getStr('outcomes-filter-payment-label');
+    if (pMin !== null) customFilters.dex_payment_min = pMin;
+    if (pMax !== null) customFilters.dex_payment_max = pMax;
+    if (pLabel) customFilters.dex_payment_label = pLabel;
+
+    const nameFilter = getStr('outcomes-filter-name');
+    const nameMode = getStr('outcomes-filter-name-mode') || 'include';
+    if (nameFilter) {
+        customFilters.name_filter = nameFilter;
+        customFilters.name_mode = nameMode;
+    }
+
+    const wordFilter = getStr('outcomes-filter-word');
+    const wordMode = getStr('outcomes-filter-word-mode') || 'include';
+    if (wordFilter) {
+        customFilters.word_filter = wordFilter;
+        customFilters.word_mode = wordMode;
+    }
+
+    const extractCa = getStr('outcomes-filter-extract-ca');
+    if (extractCa === 'yes') customFilters.extract_ca = 'yes';
+
+    // Akoueflow Indicators Filters
+    const indPreset = getStr('outcomes-filter-ind-preset');
+    if (indPreset && indPreset !== 'all') customFilters.ind_preset = indPreset;
+
+    const minNetBuy = getNum('outcomes-filter-min-net-buy');
+    const maxNetBuy = getNum('outcomes-filter-max-net-buy');
+    if (minNetBuy !== null) customFilters.min_net_buy = minNetBuy;
+    if (maxNetBuy !== null) customFilters.max_net_buy = maxNetBuy;
+
+    const minBuyDom = getNum('outcomes-filter-min-buy-dom');
+    if (minBuyDom !== null) customFilters.min_buy_dom = minBuyDom;
+
+    const minBuyAccel = getNum('outcomes-filter-min-buy-accel');
+    if (minBuyAccel !== null) customFilters.min_buy_accel = minBuyAccel;
+
+    const maxSellAccel = getNum('outcomes-filter-max-sell-accel');
+    if (maxSellAccel !== null) customFilters.max_sell_accel = maxSellAccel;
+
+    const minBuyPressAccel = getNum('outcomes-filter-min-buy-press-accel');
+    if (minBuyPressAccel !== null) customFilters.min_buy_press_accel = minBuyPressAccel;
+
+    const minBsRatio = getNum('outcomes-filter-min-bs-ratio');
+    if (minBsRatio !== null) customFilters.min_bs_ratio = minBsRatio;
+
+    const minBuyLiq = getNum('outcomes-filter-min-buy-liq');
+    if (minBuyLiq !== null) customFilters.min_buy_liq = minBuyLiq;
+
+    const minVolMc = getNum('outcomes-filter-min-vol-mc');
+    if (minVolMc !== null) customFilters.min_vol_mc = minVolMc;
+
+    const minVolLiq = getNum('outcomes-filter-min-vol-liq');
+    if (minVolLiq !== null) customFilters.min_vol_liq = minVolLiq;
+
+    const maxHolderConc = getNum('outcomes-filter-max-holder-conc');
+    if (maxHolderConc !== null) customFilters.max_holder_conc = maxHolderConc;
+
+    const maxRoundTrip = getNum('outcomes-filter-max-round-trip');
+    if (maxRoundTrip !== null) customFilters.max_round_trip = maxRoundTrip;
+
+    const minBondingCurve = getNum('outcomes-filter-min-bonding-curve');
+    if (minBondingCurve !== null) customFilters.min_bonding_curve = minBondingCurve;
+    const maxBondingCurve = getNum('outcomes-filter-max-bonding-curve');
+    if (maxBondingCurve !== null) customFilters.max_bonding_curve = maxBondingCurve;
+    const minDevTokens = getNum('outcomes-filter-min-dev-tokens');
+    if (minDevTokens !== null) customFilters.min_dev_tokens = minDevTokens;
+    const maxDevTokens = getNum('outcomes-filter-max-dev-tokens');
+    if (maxDevTokens !== null) customFilters.max_dev_tokens = maxDevTokens;
+    return customFilters;
+}
+
 async function runOutcomesSimulation() {
     if (outcomesState.abortController) {
         try { outcomesState.abortController.abort(); } catch (e) {}
@@ -7428,130 +7633,7 @@ async function runOutcomesSimulation() {
     }
 
     try {
-        const getNum = id => {
-            const v = parseFloat(document.getElementById(id)?.value);
-            return (!isNaN(v) && isFinite(v)) ? v : null;
-        };
-        const getStr = id => {
-            const v = document.getElementById(id)?.value;
-            return v !== undefined && v !== null ? String(v).trim() : '';
-        };
-
-        const customFilters = {};
-        const minMc = getNum('outcomes-filter-min-mc');
-        const maxMc = getNum('outcomes-filter-max-mc');
-        if (minMc !== null) customFilters.min_mc = minMc;
-        if (maxMc !== null) customFilters.max_mc = maxMc;
-
-        const minLiq = getNum('outcomes-filter-min-liq');
-        const maxLiq = getNum('outcomes-filter-max-liq');
-        if (minLiq !== null) customFilters.min_liq = minLiq;
-        if (maxLiq !== null) customFilters.max_liq = maxLiq;
-
-        const volTf = getStr('outcomes-filter-volume-tf') || '24h';
-        const minVol = getNum('outcomes-filter-min-vol');
-        const maxVol = getNum('outcomes-filter-max-vol');
-        if (minVol !== null) customFilters.min_vol = minVol;
-        if (maxVol !== null) customFilters.max_vol = maxVol;
-        if (minVol !== null || maxVol !== null) customFilters.volume_tf = volTf;
-
-        const minAge = getStr('outcomes-filter-min-age');
-        const maxAge = getStr('outcomes-filter-max-age');
-        const ageKind = getStr('outcomes-filter-age-kind') || 'creation';
-        if (minAge) customFilters.min_age = minAge;
-        if (maxAge) customFilters.max_age = maxAge;
-        if (minAge || maxAge) customFilters.age_kind = ageKind;
-
-        const perfTf = getStr('outcomes-filter-perf-tf') || '5m';
-        const minPerf = getNum('outcomes-filter-min-perf');
-        const maxPerf = getNum('outcomes-filter-max-perf');
-        if (minPerf !== null) customFilters.min_perf = minPerf;
-        if (maxPerf !== null) customFilters.max_perf = maxPerf;
-        if (minPerf !== null || maxPerf !== null) customFilters.perf_tf = perfTf;
-
-        const plat = getStr('outcomes-filter-platform');
-        if (plat && plat !== 'all') customFilters.platform = plat;
-
-        const exclPlat = getStr('outcomes-filter-exclude-platform');
-        if (exclPlat) customFilters.exclude_platform = exclPlat;
-
-        const mig = getStr('outcomes-filter-migrated');
-        if (mig && mig !== 'all') customFilters.migrated = mig;
-
-        const cat = getStr('outcomes-filter-category');
-        if (cat && cat !== 'all') customFilters.category = cat;
-
-        const pMin = getNum('outcomes-filter-min-payment');
-        const pMax = getNum('outcomes-filter-max-payment');
-        const pLabel = getStr('outcomes-filter-payment-label');
-        if (pMin !== null) customFilters.dex_payment_min = pMin;
-        if (pMax !== null) customFilters.dex_payment_max = pMax;
-        if (pLabel) customFilters.dex_payment_label = pLabel;
-
-        const nameFilter = getStr('outcomes-filter-name');
-        const nameMode = getStr('outcomes-filter-name-mode') || 'include';
-        if (nameFilter) {
-            customFilters.name_filter = nameFilter;
-            customFilters.name_mode = nameMode;
-        }
-
-        const wordFilter = getStr('outcomes-filter-word');
-        const wordMode = getStr('outcomes-filter-word-mode') || 'include';
-        if (wordFilter) {
-            customFilters.word_filter = wordFilter;
-            customFilters.word_mode = wordMode;
-        }
-
-        const extractCa = getStr('outcomes-filter-extract-ca');
-        if (extractCa === 'yes') customFilters.extract_ca = 'yes';
-
-        // Akoueflow Indicators Filters
-        const indPreset = getStr('outcomes-filter-ind-preset');
-        if (indPreset && indPreset !== 'all') customFilters.ind_preset = indPreset;
-
-        const minNetBuy = getNum('outcomes-filter-min-net-buy');
-        const maxNetBuy = getNum('outcomes-filter-max-net-buy');
-        if (minNetBuy !== null) customFilters.min_net_buy = minNetBuy;
-        if (maxNetBuy !== null) customFilters.max_net_buy = maxNetBuy;
-
-        const minBuyDom = getNum('outcomes-filter-min-buy-dom');
-        if (minBuyDom !== null) customFilters.min_buy_dom = minBuyDom;
-
-        const minBuyAccel = getNum('outcomes-filter-min-buy-accel');
-        if (minBuyAccel !== null) customFilters.min_buy_accel = minBuyAccel;
-
-        const maxSellAccel = getNum('outcomes-filter-max-sell-accel');
-        if (maxSellAccel !== null) customFilters.max_sell_accel = maxSellAccel;
-
-        const minBuyPressAccel = getNum('outcomes-filter-min-buy-press-accel');
-        if (minBuyPressAccel !== null) customFilters.min_buy_press_accel = minBuyPressAccel;
-
-        const minBsRatio = getNum('outcomes-filter-min-bs-ratio');
-        if (minBsRatio !== null) customFilters.min_bs_ratio = minBsRatio;
-
-        const minBuyLiq = getNum('outcomes-filter-min-buy-liq');
-        if (minBuyLiq !== null) customFilters.min_buy_liq = minBuyLiq;
-
-        const minVolMc = getNum('outcomes-filter-min-vol-mc');
-        if (minVolMc !== null) customFilters.min_vol_mc = minVolMc;
-
-        const minVolLiq = getNum('outcomes-filter-min-vol-liq');
-        if (minVolLiq !== null) customFilters.min_vol_liq = minVolLiq;
-
-        const maxHolderConc = getNum('outcomes-filter-max-holder-conc');
-        if (maxHolderConc !== null) customFilters.max_holder_conc = maxHolderConc;
-
-        const maxRoundTrip = getNum('outcomes-filter-max-round-trip');
-        if (maxRoundTrip !== null) customFilters.max_round_trip = maxRoundTrip;
-
-        const minBondingCurve = getNum('outcomes-filter-min-bonding-curve');
-        if (minBondingCurve !== null) customFilters.min_bonding_curve = minBondingCurve;
-        const maxBondingCurve = getNum('outcomes-filter-max-bonding-curve');
-        if (maxBondingCurve !== null) customFilters.max_bonding_curve = maxBondingCurve;
-        const minDevTokens = getNum('outcomes-filter-min-dev-tokens');
-        if (minDevTokens !== null) customFilters.min_dev_tokens = minDevTokens;
-        const maxDevTokens = getNum('outcomes-filter-max-dev-tokens');
-        if (maxDevTokens !== null) customFilters.max_dev_tokens = maxDevTokens;
+        const customFilters = collectOutcomesCustomFilters();
 
         const payload = {
             system: outcomesState.system,
