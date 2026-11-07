@@ -151,7 +151,8 @@ ALTER TABLE wallet_payments
   ADD COLUMN IF NOT EXISTS pre_peak_low_mc_4h REAL,
   ADD COLUMN IF NOT EXISTS pre_peak_dd_4h_pct REAL,
   ADD COLUMN IF NOT EXISTS path_4h TEXT,
-  ADD COLUMN IF NOT EXISTS perf_checked_stage INTEGER DEFAULT 0;
+  ADD COLUMN IF NOT EXISTS perf_checked_stage INTEGER DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS metrics_data JSONB;
 
 ALTER TABLE dex_validated
   ADD COLUMN IF NOT EXISTS max_mc_1h REAL,
@@ -168,7 +169,8 @@ ALTER TABLE dex_validated
   ADD COLUMN IF NOT EXISTS pre_peak_low_mc_4h REAL,
   ADD COLUMN IF NOT EXISTS pre_peak_dd_4h_pct REAL,
   ADD COLUMN IF NOT EXISTS path_4h TEXT,
-  ADD COLUMN IF NOT EXISTS perf_checked_stage INTEGER DEFAULT 0;
+  ADD COLUMN IF NOT EXISTS perf_checked_stage INTEGER DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS metrics_data JSONB;
 
 -- Enable Row Level Security (RLS)
 ALTER TABLE settings ENABLE ROW LEVEL SECURITY;

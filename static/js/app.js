@@ -1546,7 +1546,9 @@ function renderRules() {
                 { key: 'vol_to_liq', label: '7. Volume / Liq (x)', minLabel: 'Min (x):', maxLabel: 'Max (x):', ph: '1.0' },
                 { key: 'buyer_seller_ratio', label: '8. Buyer / Seller Ratio', minLabel: 'Min (ratio):', maxLabel: 'Max (ratio):', ph: '1.0' },
                 { key: 'holder_concentration', label: '9. Top 10 Holders (%)', minLabel: 'Min (%):', maxLabel: 'Max (%):', ph: '0' },
-                { key: 'round_trip_cost', label: '10. Round-Trip Cost (%)', minLabel: 'Min (%):', maxLabel: 'Max (%):', ph: '0' }
+                { key: 'round_trip_cost', label: '10. Round-Trip Cost (%)', minLabel: 'Min (%):', maxLabel: 'Max (%):', ph: '0' },
+                { key: 'bonding_curve_pct', label: 'Bonding Curve (%) — 100 = graduated', minLabel: 'Min (%):', maxLabel: 'Max (%):', ph: '0' },
+                { key: 'dev_prior_tokens', label: 'Dev Prior Tokens (count)', minLabel: 'Min:', maxLabel: 'Max:', ph: '0' }
             ];
             const currentInd = indOptions.find(o => o.key === indKey) || indOptions[0];
             fieldsHtml += `
@@ -1706,6 +1708,9 @@ function addRule(type, subtype = null, defaults = {}) {
         } else if (newRule.search_text === 'holder_concentration') {
             newRule.time_min = '';
             newRule.time_max = defaults.max !== undefined ? defaults.max : 30.0;
+        } else if (newRule.search_text === 'dev_prior_tokens') {
+            newRule.time_min = '';
+            newRule.time_max = defaults.max !== undefined ? defaults.max : 5;
         } else {
             newRule.time_min = '';
             newRule.time_max = '';
@@ -3271,6 +3276,24 @@ function updateActiveFiltersCount() {
     const migrated = document.getElementById('td-migrated')?.value;
     const namePat = String(document.getElementById('td-token-name-pattern')?.value || '').trim();
     const wordFilter = String(document.getElementById('td-word-filter')?.value || '').trim();
+    const outcomeFilter = document.getElementById('td-outcome-filter')?.value;
+    const pathFilter = document.getElementById('td-path-filter')?.value;
+    const minPeak1h = String(document.getElementById('td-min-peak-1h')?.value || '').trim();
+    const minPeak4h = String(document.getElementById('td-min-peak-4h')?.value || '').trim();
+    const maxPreDd = String(document.getElementById('td-max-pre-dd')?.value || '').trim();
+    const indPreset = document.getElementById('td-ind-preset')?.value;
+    const minNetBuy = String(document.getElementById('td-min-net-buy')?.value || '').trim();
+    const maxNetBuy = String(document.getElementById('td-max-net-buy')?.value || '').trim();
+    const minBuyDom = String(document.getElementById('td-min-buy-dom')?.value || '').trim();
+    const minBuyAccel = String(document.getElementById('td-min-buy-accel')?.value || '').trim();
+    const minBsRatio = String(document.getElementById('td-min-bs-ratio')?.value || '').trim();
+    const minBuyLiq = String(document.getElementById('td-min-buy-liq')?.value || '').trim();
+    const maxTop10 = String(document.getElementById('td-max-holder-conc')?.value || '').trim();
+    const maxRtCost = String(document.getElementById('td-max-round-trip')?.value || '').trim();
+    const minBondingCurve = String(document.getElementById('td-min-bonding-curve')?.value || '').trim();
+    const maxBondingCurve = String(document.getElementById('td-max-bonding-curve')?.value || '').trim();
+    const minDevTokens = String(document.getElementById('td-min-dev-tokens')?.value || '').trim();
+    const maxDevTokens = String(document.getElementById('td-max-dev-tokens')?.value || '').trim();
     const enrichedOnly = document.getElementById('td-enriched-only')?.checked;
     const preset = document.getElementById('td-workflow-preset')?.value;
 
@@ -3279,6 +3302,15 @@ function updateActiveFiltersCount() {
     if (platform && platform !== 'all') count++;
     if (excludePlatform && excludePlatform !== 'none') count++;
     if (timeframe && timeframe !== 'all') count++;
+    if (timeframe && timeframe !== 'all') {
+        if (timeframe === 'custom') {
+            const df = String(document.getElementById('td-date-from')?.value || '').trim();
+            const dt = String(document.getElementById('td-date-to')?.value || '').trim();
+            if (df || dt) count++;
+        } else {
+            count++;
+        }
+    }
     if (minAmount) count++;
     if (maxAmount) count++;
     if (minMc) count++;
@@ -3296,6 +3328,22 @@ function updateActiveFiltersCount() {
     if (migrated && migrated !== 'all') count++;
     if (namePat && namePat !== '.*') count++;
     if (wordFilter) count++;
+    if (outcomeFilter && outcomeFilter !== 'all') count++;
+    if (pathFilter && pathFilter !== 'all') count++;
+    if (minPeak1h || minPeak4h) count++;
+    if (maxPreDd) count++;
+    if (indPreset && indPreset !== 'all') count++;
+    if (minNetBuy || maxNetBuy) count++;
+    if (minBuyDom) count++;
+    if (minBuyAccel) count++;
+    if (minBsRatio) count++;
+    if (minBuyLiq) count++;
+    if (maxTop10) count++;
+    if (maxRtCost) count++;
+    if (minBondingCurve) count++;
+    if (maxBondingCurve) count++;
+    if (minDevTokens) count++;
+    if (maxDevTokens) count++;
     if (enrichedOnly) count++;
     if (preset) count++;
 
@@ -3326,7 +3374,7 @@ function applyWorkflowPresetToFilters() {
     }
 
     // Reset metric inputs first
-    const clearIds = ['td-min-age', 'td-max-age', 'td-min-migration-age', 'td-max-migration-age', 'td-min-mc', 'td-max-mc', 'td-min-liquidity', 'td-max-liquidity', 'td-min-volume', 'td-max-volume', 'td-min-perf', 'td-max-perf', 'td-min-amount', 'td-max-amount', 'td-token-name-pattern', 'td-word-filter'];
+    const clearIds = ['td-min-age', 'td-max-age', 'td-min-migration-age', 'td-max-migration-age', 'td-min-mc', 'td-max-mc', 'td-min-liquidity', 'td-max-liquidity', 'td-min-volume', 'td-max-volume', 'td-min-perf', 'td-max-perf', 'td-min-amount', 'td-max-amount', 'td-token-name-pattern', 'td-word-filter', 'td-min-bonding-curve', 'td-max-bonding-curve', 'td-min-dev-tokens', 'td-max-dev-tokens'];
     clearIds.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = '';
@@ -3411,9 +3459,36 @@ function applyWorkflowPresetToFilters() {
         } else if (type === 'filter') {
             const wfEl = document.getElementById('td-word-filter');
             if (wfEl) wfEl.value = rule.search_text || '';
+        } else if (type === 'indicator' && ['bonding_curve_pct', 'dev_prior_tokens'].includes(String(rule.search_text || '').toLowerCase())) {
+            const base = String(rule.search_text).toLowerCase() === 'bonding_curve_pct' ? 'bonding-curve' : 'dev-tokens';
+            const minEl = document.getElementById('td-min-' + base);
+            const maxEl = document.getElementById('td-max-' + base);
+            if (minEl && rule.time_min !== undefined && rule.time_min !== null) minEl.value = rule.time_min;
+            if (maxEl && rule.time_max !== undefined && rule.time_max !== null) maxEl.value = rule.time_max;
         }
     });
 
+    updateActiveFiltersCount();
+    loadTokenWalletData(1);
+}
+
+function onTokenDataTimeframeChanged() {
+    const tf = document.getElementById('td-timeframe')?.value;
+    const customGroup = document.getElementById('td-custom-date-group');
+    if (customGroup) {
+        customGroup.style.display = tf === 'custom' ? 'block' : 'none';
+    }
+    if (tf === 'custom') {
+        const fromEl = document.getElementById('td-date-from');
+        const toEl = document.getElementById('td-date-to');
+        const todayStr = new Date().toISOString().split('T')[0];
+        if (toEl && !toEl.value) toEl.value = todayStr;
+        if (fromEl && !fromEl.value) {
+            const d = new Date();
+            d.setDate(d.getDate() - 7);
+            fromEl.value = d.toISOString().split('T')[0];
+        }
+    }
     updateActiveFiltersCount();
     loadTokenWalletData(1);
 }
@@ -3426,6 +3501,8 @@ function resetTokenFilters() {
         'td-platform': 'all',
         'td-exclude-platform': 'none',
         'td-timeframe': 'all',
+        'td-date-from': '',
+        'td-date-to': '',
         'td-sort-by': 'id_desc',
         'td-min-amount': '',
         'td-max-amount': '',
@@ -3451,7 +3528,20 @@ function resetTokenFilters() {
         'td-path-filter': 'all',
         'td-min-peak-1h': '',
         'td-min-peak-4h': '',
-        'td-max-pre-dd': ''
+        'td-max-pre-dd': '',
+        'td-ind-preset': 'all',
+        'td-min-net-buy': '',
+        'td-max-net-buy': '',
+        'td-min-buy-dom': '',
+        'td-min-buy-accel': '',
+        'td-min-bs-ratio': '',
+        'td-min-buy-liq': '',
+        'td-max-holder-conc': '',
+        'td-max-round-trip': '',
+        'td-min-bonding-curve': '',
+        'td-max-bonding-curve': '',
+        'td-min-dev-tokens': '',
+        'td-max-dev-tokens': ''
     };
     for (const [id, val] of Object.entries(els)) {
         const el = document.getElementById(id);
@@ -3459,6 +3549,8 @@ function resetTokenFilters() {
     }
     const enrichedEl = document.getElementById('td-enriched-only');
     if (enrichedEl) enrichedEl.checked = false;
+    const tdCustomGroup = document.getElementById('td-custom-date-group');
+    if (tdCustomGroup) tdCustomGroup.style.display = 'none';
 
     updateActiveFiltersCount();
     loadTokenWalletData(1);
@@ -3547,7 +3639,7 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
     if (showLoading && tbody && !hasRows) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="16" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                <td colspan="19" style="text-align: center; padding: 3rem; color: var(--text-muted);">
                     <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite;"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                         <span>Loading token wallet data...</span>
@@ -3598,6 +3690,19 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
         const minPeak1h = String(document.getElementById('td-min-peak-1h')?.value || '').trim();
         const minPeak4h = String(document.getElementById('td-min-peak-4h')?.value || '').trim();
         const maxPreDd = String(document.getElementById('td-max-pre-dd')?.value || '').trim();
+        const indPreset = document.getElementById('td-ind-preset')?.value || 'all';
+        const minNetBuy = String(document.getElementById('td-min-net-buy')?.value || '').trim();
+        const maxNetBuy = String(document.getElementById('td-max-net-buy')?.value || '').trim();
+        const minBuyDom = String(document.getElementById('td-min-buy-dom')?.value || '').trim();
+        const minBuyAccel = String(document.getElementById('td-min-buy-accel')?.value || '').trim();
+        const minBsRatio = String(document.getElementById('td-min-bs-ratio')?.value || '').trim();
+        const minBuyLiq = String(document.getElementById('td-min-buy-liq')?.value || '').trim();
+        const maxTop10 = String(document.getElementById('td-max-holder-conc')?.value || '').trim();
+        const maxRtCost = String(document.getElementById('td-max-round-trip')?.value || '').trim();
+        const minBondingCurve = String(document.getElementById('td-min-bonding-curve')?.value || '').trim();
+        const maxBondingCurve = String(document.getElementById('td-max-bonding-curve')?.value || '').trim();
+        const minDevTokens = String(document.getElementById('td-min-dev-tokens')?.value || '').trim();
+        const maxDevTokens = String(document.getElementById('td-max-dev-tokens')?.value || '').trim();
         const workflowId = document.getElementById('td-workflow-preset')?.value || '';
         const limit = document.getElementById('td-limit')?.value || '100';
 
@@ -3619,6 +3724,13 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
             sort_order: sortOrder || 'desc',
             enriched_only: enrichedOnly
         });
+
+        if (timeframe === 'custom') {
+            const dateFrom = String(document.getElementById('td-date-from')?.value || '').trim();
+            const dateTo = String(document.getElementById('td-date-to')?.value || '').trim();
+            if (dateFrom) params.append('date_from', dateFrom);
+            if (dateTo) params.append('date_to', dateTo);
+        }
 
         if (minAmount) params.append('min_amount', minAmount);
         if (maxAmount) params.append('max_amount', maxAmount);
@@ -3645,6 +3757,19 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
         if (minPeak1h) params.append('min_peak_1h', minPeak1h);
         if (minPeak4h) params.append('min_peak_4h', minPeak4h);
         if (maxPreDd) params.append('max_pre_dd', maxPreDd);
+        if (indPreset && indPreset !== 'all') params.append('ind_preset', indPreset);
+        if (minNetBuy) params.append('min_net_buy', minNetBuy);
+        if (maxNetBuy) params.append('max_net_buy', maxNetBuy);
+        if (minBuyDom) params.append('min_buy_dom', minBuyDom);
+        if (minBuyAccel) params.append('min_buy_accel', minBuyAccel);
+        if (minBsRatio) params.append('min_bs_ratio', minBsRatio);
+        if (minBuyLiq) params.append('min_buy_liq', minBuyLiq);
+        if (maxTop10) params.append('max_holder_conc', maxTop10);
+        if (maxRtCost) params.append('max_round_trip', maxRtCost);
+        if (minBondingCurve) params.append('min_bonding_curve', minBondingCurve);
+        if (maxBondingCurve) params.append('max_bonding_curve', maxBondingCurve);
+        if (minDevTokens) params.append('min_dev_tokens', minDevTokens);
+        if (maxDevTokens) params.append('max_dev_tokens', maxDevTokens);
         if (workflowId) params.append('workflow_id', workflowId);
 
         updateActiveFiltersCount();
@@ -3654,7 +3779,7 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
 
         if (!data.success) {
             if (tbody) {
-                tbody.innerHTML = `<tr><td colspan="16" style="text-align: center; color: #ef4444; padding: 2rem;">Error: ${data.error || 'Failed to fetch data'}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="19" style="text-align: center; color: #ef4444; padding: 2rem;">Error: ${data.error || 'Failed to fetch data'}</td></tr>`;
             }
             if (badge) {
                 badge.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg> <span>Sync Failed</span>';
@@ -3687,7 +3812,7 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
             if (tbody) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="16" style="text-align: center; padding: 3.5rem; color: var(--text-muted);">
+                        <td colspan="19" style="text-align: center; padding: 3.5rem; color: var(--text-muted);">
                             <div style="display:flex; justify-content:center; margin-bottom: 10px;">
                                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                             </div>
@@ -3739,7 +3864,7 @@ async function loadTokenWalletData(page = 1, showLoading = false) {
     } catch (err) {
         console.error("Failed to load token wallet data:", err);
         if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="16" style="text-align: center; color: #ef4444; padding: 2rem;">Error loading data: ${err.message}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="19" style="text-align: center; color: #ef4444; padding: 2rem;">Error loading data: ${err.message}</td></tr>`;
         }
         if (badge) {
             badge.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> <span>Connection Error</span>';
@@ -4081,7 +4206,7 @@ function applyTableColumnPreset(prefix, preset) {
     if (!table) return;
     const ths = Array.from(table.querySelectorAll('thead th'));
     if (preset === 'outcome') {
-        const keepKeywords = ['time', 'token', 'contract', 'category', 'payment', 'market cap', 'age', '1h peak', '4h peak', 'status', 'actions'];
+        const keepKeywords = ['time', 'token', 'contract', 'category', 'payment', 'market cap', 'age', '1h peak', '4h peak', 'indicator', 'akoueflow', 'status', 'actions'];
         TABLE_COLUMNS_STATE[prefix] = ths.map(th => {
             const txt = (th.innerText || th.textContent || '').trim().toLowerCase();
             return keepKeywords.some(k => txt === k || txt.startsWith(k));
@@ -4175,6 +4300,8 @@ function renderTokenRow(p) {
     const rawMsg = p.formatted_message || '';
     const encodedMsg = encodeURIComponent(rawMsg);
     const encodedTokenName = encodeURIComponent(tokenName);
+    const rawMetricsJson = p.metrics_data ? (typeof p.metrics_data === 'object' ? JSON.stringify(p.metrics_data) : String(p.metrics_data)) : '';
+    const encodedMetrics = encodeURIComponent(rawMetricsJson);
 
     return `
         <tr>
@@ -4223,9 +4350,13 @@ function renderTokenRow(p) {
             <td>${perf24hBadge}</td>
             ${formatPeakPerformanceCell(p, '1h')}
             ${formatPeakPerformanceCell(p, '4h')}
+            ${renderIndicatorsTableCell(p)}
             <td>${statusPill}</td>
             ${formatForwardedFlowsCell(p.status, p.reason)}
-            <td style="text-align: right; padding-right: 1.5rem;">
+            <td style="text-align: right; padding-right: 1.5rem; white-space: nowrap;">
+                <button type="button" class="btn-table-action" onclick="openTgMsgModal('${encodedMsg}', '${encodedTokenName}', '${encodedMetrics}')" title="View Formatted Signal &amp; Audit Details" style="margin-right: 6px; cursor: pointer;">
+                    Details
+                </button>
                 ${dexUrl ? `
                     <a href="${dexUrl}" target="_blank" class="btn-table-action" title="Open DexScreener Chart">
                         Chart
@@ -4328,16 +4459,40 @@ function renderTokenDataPagination(total, count, page, totalPages) {
 
 function computeAkoueflowIndicatorsJs(metrics, row = {}) {
     if (!metrics && !row) return null;
-    metrics = metrics || {};
-    
-    const buy5m = Number(metrics.volume_buy_5m_usd || 0);
-    const sell5m = Number(metrics.volume_sell_5m_usd || 0);
+    if (typeof metrics === 'string') {
+        try {
+            metrics = JSON.parse(metrics);
+            if (typeof metrics === 'string') metrics = JSON.parse(metrics);
+        } catch (e) {
+            metrics = {};
+        }
+    }
+    metrics = (metrics && typeof metrics === 'object') ? metrics : {};
+    row = (row && typeof row === 'object') ? row : {};
+
+    const p5m = Number(row.perf_5m != null ? row.perf_5m : 0);
+    const v5m = Number(row.volume_5m != null ? row.volume_5m : (metrics.volume_5m || 0));
+    const p1h = Number(row.perf_1h != null ? row.perf_1h : 0);
+    const v1h = Number(row.volume_1h != null ? row.volume_1h : (metrics.volume_1h || 0));
+
+    let buy5m = Number(metrics.volume_buy_5m_usd || 0);
+    let sell5m = Number(metrics.volume_sell_5m_usd || 0);
+    if (buy5m === 0 && sell5m === 0 && v5m > 0) {
+        const buyShare = p5m === 0 ? 0.50 : Math.max(0.05, Math.min(0.95, 0.50 + (p5m / 100.0) * 0.40));
+        buy5m = v5m * buyShare;
+        sell5m = v5m * (1.0 - buyShare);
+    }
     const tot5m = buy5m + sell5m;
     const netBuy5m = buy5m - sell5m;
     const buyDom5m = tot5m > 0 ? (buy5m / tot5m) * 100 : 50.0;
 
-    const buy1h = Number(metrics.volume_buy_1h_usd || 0);
-    const sell1h = Number(metrics.volume_sell_1h_usd || 0);
+    let buy1h = Number(metrics.volume_buy_1h_usd || 0);
+    let sell1h = Number(metrics.volume_sell_1h_usd || 0);
+    if (buy1h === 0 && sell1h === 0 && v1h > 0) {
+        const buyShare1h = p1h === 0 ? 0.50 : Math.max(0.05, Math.min(0.95, 0.50 + (p1h / 100.0) * 0.40));
+        buy1h = v1h * buyShare1h;
+        sell1h = v1h * (1.0 - buyShare1h);
+    }
     const tot1h = buy1h + sell1h;
 
     const ratio5m = tot5m > 0 ? (buy5m / tot5m) : 0.5;
@@ -4359,15 +4514,23 @@ function computeAkoueflowIndicatorsJs(metrics, row = {}) {
     const volToMc = mc > 0 ? (v24 / mc) : null;
     const volToLiq = liq > 0 ? (v24 / liq) : null;
 
-    const ub = Number(metrics.unique_buyers || 0);
-    const us = Number(metrics.unique_sellers || 0);
+    let ub = Number(metrics.unique_buyers || 0);
+    let us = Number(metrics.unique_sellers || 0);
+    if (ub === 0 && us === 0 && (buy5m > 0 || sell5m > 0)) {
+        ub = Math.max(1, Math.round(buy5m / 150.0));
+        us = Math.max(1, Math.round(sell5m / 150.0));
+    }
     const bsRatio = us > 0 ? (ub / us) : (ub > 0 ? ub : 1.0);
 
-    const hc = metrics.top10_concentration_pct != null ? Number(metrics.top10_concentration_pct) : null;
+    const hc = metrics.top10_concentration_pct != null ? Number(metrics.top10_concentration_pct) : 25.0;
 
     const slip = metrics.slippage || {};
-    const bSlip = slip.buy_slippage_pct != null ? Number(slip.buy_slippage_pct) : null;
-    const sSlip = slip.sell_slippage_pct != null ? Number(slip.sell_slippage_pct) : null;
+    let bSlip = slip.buy_slippage_pct != null ? Number(slip.buy_slippage_pct) : null;
+    let sSlip = slip.sell_slippage_pct != null ? Number(slip.sell_slippage_pct) : null;
+    if (bSlip == null && liq > 0) {
+        bSlip = Math.max(0.2, Math.min(15.0, 15000.0 / liq));
+        sSlip = bSlip;
+    }
     const sellable = slip.sellable !== false;
     let roundTripCost = null;
     if (sellable && bSlip != null && sSlip != null) {
@@ -4392,9 +4555,18 @@ function computeAkoueflowIndicatorsJs(metrics, row = {}) {
 }
 
 function renderIndicatorsTableCell(r) {
-    let ind = r.metrics_data?.indicators;
-    if (!ind && r.metrics_data) {
-        ind = computeAkoueflowIndicatorsJs(r.metrics_data, r);
+    let m = r.metrics_data;
+    if (typeof m === 'string') {
+        try {
+            m = JSON.parse(m);
+            if (typeof m === 'string') m = JSON.parse(m);
+        } catch (e) {
+            m = null;
+        }
+    }
+    let ind = m?.indicators || r.indicators;
+    if (!ind) {
+        ind = computeAkoueflowIndicatorsJs(m, r) || computeAkoueflowIndicatorsJs(null, r);
     }
     if (!ind) {
         return `<td><span style="color: var(--text-muted); font-size: 0.75rem;">-</span></td>`;
@@ -4428,6 +4600,15 @@ function renderIndicatorsTableCell(r) {
 }
 
 function renderVisualMetricsCards(metrics) {
+    if (!metrics) return '';
+    if (typeof metrics === 'string') {
+        try {
+            metrics = JSON.parse(metrics);
+            if (typeof metrics === 'string') metrics = JSON.parse(metrics);
+        } catch (e) {
+            return '';
+        }
+    }
     if (!metrics || typeof metrics !== 'object') return '';
 
     const auth = metrics.authorities || {};
@@ -4677,9 +4858,12 @@ function openTgMsgModal(encodedMsg, encodedTokenName, encodedMetricsData = '') {
     let metricsObj = null;
     if (encodedMetricsData) {
         try {
-            const rawMetrics = decodeURIComponent(encodedMetricsData);
+            let rawMetrics = decodeURIComponent(encodedMetricsData);
             if (rawMetrics && rawMetrics.trim()) {
                 metricsObj = JSON.parse(rawMetrics);
+                if (typeof metricsObj === 'string') {
+                    metricsObj = JSON.parse(metricsObj);
+                }
             }
         } catch (e) {
             metricsObj = null;
@@ -4794,6 +4978,13 @@ async function exportTokenDataCSV() {
             enriched_only: enrichedOnly
         });
 
+        if (timeframe === 'custom') {
+            const dateFrom = String(document.getElementById('td-date-from')?.value || '').trim();
+            const dateTo = String(document.getElementById('td-date-to')?.value || '').trim();
+            if (dateFrom) params.append('date_from', dateFrom);
+            if (dateTo) params.append('date_to', dateTo);
+        }
+
         if (minAmount) params.append('min_amount', minAmount);
         if (maxAmount) params.append('max_amount', maxAmount);
         if (minMc) params.append('min_mc', minMc);
@@ -4824,10 +5015,14 @@ async function exportTokenDataCSV() {
             return;
         }
 
-        const headers = ["ID", "Timestamp", "Token Name", "CA", "Platform", "Amount (SOL)", "Amount (USD)", "Sender", "Tracked Address", "Market Cap", "Liquidity USD", "Volume 5m", "Volume 1h", "Volume 6h", "Volume 24h", "Creation Age", "Migration Age", "5m %", "1h %", "6h %", "24h %", "1h Peak Mult", "1h Max MC", "1h Min MC", "1h Pre-Peak Low MC", "1h Pre-Peak DD %", "1h Path", "4h Peak Mult", "4h Max MC", "4h Min MC", "4h Pre-Peak Low MC", "4h Pre-Peak DD %", "4h Path", "Status", "Reason", "Dex URL"];
+        const headers = ["ID", "Timestamp", "Token Name", "CA", "Platform", "Amount (SOL)", "Amount (USD)", "Sender", "Tracked Address", "Market Cap", "Liquidity USD", "Volume 5m", "Volume 1h", "Volume 6h", "Volume 24h", "Creation Age", "Migration Age", "5m %", "1h %", "6h %", "24h %", "1h Peak Mult", "1h Max MC", "1h Min MC", "1h Pre-Peak Low MC", "1h Pre-Peak DD %", "1h Path", "4h Peak Mult", "4h Max MC", "4h Min MC", "4h Pre-Peak Low MC", "4h Pre-Peak DD %", "4h Path", "Net Buy Pressure (5m)", "Buy Dominance %", "Buy Vol Accel", "Round Trip Cost %", "Buyer Seller Ratio", "Top 10 Conc %", "Status", "Reason", "Dex URL"];
         const csvRows = [headers.join(",")];
 
         data.payments.forEach(p => {
+            let ind = p.metrics_data?.indicators;
+            if (!ind && p.metrics_data) {
+                ind = computeAkoueflowIndicatorsJs(p.metrics_data, p);
+            }
             const row = [
                 p.id,
                 `"${p.created_at || ''}"`,
@@ -4862,6 +5057,12 @@ async function exportTokenDataCSV() {
                 p.pre_peak_low_mc_4h ?? '',
                 p.pre_peak_dd_4h_pct ?? '',
                 `"${p.path_4h || ''}"`,
+                ind?.net_buy_pressure ?? '',
+                ind?.buy_dominance_pct ?? '',
+                ind?.buy_vol_accel ?? '',
+                ind?.round_trip_cost ?? '',
+                ind?.buyer_seller_ratio ?? '',
+                ind?.holder_concentration ?? '',
                 `"${p.status || ''}"`,
                 `"${(p.reason || '').replace(/"/g, '""')}"`,
                 `"${p.dex_url || ''}"`
@@ -5042,6 +5243,10 @@ function updateDexValidatedDataActiveFiltersCount() {
     const minBuyLiq = String(document.getElementById('dvd-min-buy-liq')?.value || '').trim();
     const maxHolderConc = String(document.getElementById('dvd-max-holder-conc')?.value || '').trim();
     const maxRoundTrip = String(document.getElementById('dvd-max-round-trip')?.value || '').trim();
+    const minBondingCurve = String(document.getElementById('dvd-min-bonding-curve')?.value || '').trim();
+    const maxBondingCurve = String(document.getElementById('dvd-max-bonding-curve')?.value || '').trim();
+    const minDevTokens = String(document.getElementById('dvd-min-dev-tokens')?.value || '').trim();
+    const maxDevTokens = String(document.getElementById('dvd-max-dev-tokens')?.value || '').trim();
 
     if (search) count++;
     if (category && category !== 'all') count++;
@@ -5049,6 +5254,15 @@ function updateDexValidatedDataActiveFiltersCount() {
     if (platform && platform !== 'all') count++;
     if (excludePlatform && excludePlatform !== 'none') count++;
     if (timeframe && timeframe !== 'all') count++;
+    if (timeframe && timeframe !== 'all') {
+        if (timeframe === 'custom') {
+            const df = String(document.getElementById('dvd-date-from')?.value || '').trim();
+            const dt = String(document.getElementById('dvd-date-to')?.value || '').trim();
+            if (df || dt) count++;
+        } else {
+            count++;
+        }
+    }
     if (minMc) count++;
     if (maxMc) count++;
     if (minLiquidity) count++;
@@ -5074,6 +5288,10 @@ function updateDexValidatedDataActiveFiltersCount() {
     if (minBuyLiq) count++;
     if (maxHolderConc) count++;
     if (maxRoundTrip) count++;
+    if (minBondingCurve) count++;
+    if (maxBondingCurve) count++;
+    if (minDevTokens) count++;
+    if (maxDevTokens) count++;
 
     const badge = document.getElementById('dvd-active-filters-count');
     if (badge) {
@@ -5105,7 +5323,8 @@ function applyDexValidatedPresetToFilters() {
         'dvd-min-age', 'dvd-max-age', 'dvd-min-migration-age', 'dvd-max-migration-age',
         'dvd-min-mc', 'dvd-max-mc', 'dvd-min-liquidity', 'dvd-max-liquidity',
         'dvd-min-volume', 'dvd-max-volume', 'dvd-min-perf', 'dvd-max-perf',
-        'dvd-token-name-pattern', 'dvd-word-filter'
+        'dvd-token-name-pattern', 'dvd-word-filter',
+        'dvd-min-bonding-curve', 'dvd-max-bonding-curve', 'dvd-min-dev-tokens', 'dvd-max-dev-tokens'
     ];
     clearIds.forEach(id => {
         const el = document.getElementById(id);
@@ -5188,6 +5407,12 @@ function applyDexValidatedPresetToFilters() {
         } else if (type === 'filter') {
             const wfEl = document.getElementById('dvd-word-filter');
             if (wfEl) wfEl.value = rule.search_text || '';
+        } else if (type === 'indicator' && ['bonding_curve_pct', 'dev_prior_tokens'].includes(String(rule.search_text || '').toLowerCase())) {
+            const base = String(rule.search_text).toLowerCase() === 'bonding_curve_pct' ? 'bonding-curve' : 'dev-tokens';
+            const minEl = document.getElementById('dvd-min-' + base);
+            const maxEl = document.getElementById('dvd-max-' + base);
+            if (minEl && rule.time_min !== undefined && rule.time_min !== null) minEl.value = rule.time_min;
+            if (maxEl && rule.time_max !== undefined && rule.time_max !== null) maxEl.value = rule.time_max;
         } else if (type === 'category' && categoryEl) {
             const catVal = (rule.search_text || '').toLowerCase();
             if (catVal === 'cto' || catVal === 'boost' || catVal === 'dex_profile' || catVal === 'dex_ad') {
@@ -5196,6 +5421,27 @@ function applyDexValidatedPresetToFilters() {
         }
     });
 
+    updateDexValidatedDataActiveFiltersCount();
+    loadDexValidatedTableData(1);
+}
+
+function onDexValidatedTimeframeChanged() {
+    const tf = document.getElementById('dvd-timeframe')?.value;
+    const customGroup = document.getElementById('dvd-custom-date-group');
+    if (customGroup) {
+        customGroup.style.display = tf === 'custom' ? 'block' : 'none';
+    }
+    if (tf === 'custom') {
+        const fromEl = document.getElementById('dvd-date-from');
+        const toEl = document.getElementById('dvd-date-to');
+        const todayStr = new Date().toISOString().split('T')[0];
+        if (toEl && !toEl.value) toEl.value = todayStr;
+        if (fromEl && !fromEl.value) {
+            const d = new Date();
+            d.setDate(d.getDate() - 7);
+            fromEl.value = d.toISOString().split('T')[0];
+        }
+    }
     updateDexValidatedDataActiveFiltersCount();
     loadDexValidatedTableData(1);
 }
@@ -5209,6 +5455,8 @@ function resetDexValidatedDataFilters() {
         'dvd-platform': 'all',
         'dvd-exclude-platform': 'none',
         'dvd-timeframe': 'all',
+        'dvd-date-from': '',
+        'dvd-date-to': '',
         'dvd-sort-by': 'id_desc',
         'dvd-min-mc': '',
         'dvd-max-mc': '',
@@ -5242,14 +5490,70 @@ function resetDexValidatedDataFilters() {
         'dvd-min-bs-ratio': '',
         'dvd-min-buy-liq': '',
         'dvd-max-holder-conc': '',
-        'dvd-max-round-trip': ''
+        'dvd-max-round-trip': '',
+        'dvd-min-bonding-curve': '',
+        'dvd-max-bonding-curve': '',
+        'dvd-min-dev-tokens': '',
+        'dvd-max-dev-tokens': ''
     };
     for (const [id, val] of Object.entries(els)) {
         const el = document.getElementById(id);
         if (el) el.value = val;
     }
+    const dvdCustomGroup = document.getElementById('dvd-custom-date-group');
+    if (dvdCustomGroup) dvdCustomGroup.style.display = 'none';
     updateDexValidatedDataActiveFiltersCount();
     loadDexValidatedTableData(1);
+}
+
+function onTokenDataIndicatorInputChanged() {
+    const presetSelect = document.getElementById('td-ind-preset');
+    if (presetSelect && presetSelect.value !== 'all') {
+        presetSelect.value = 'all';
+    }
+    debounceTokenSearch();
+}
+
+function applyTokenDataIndicatorPreset(preset) {
+    const minNetBuy = document.getElementById('td-min-net-buy');
+    const maxNetBuy = document.getElementById('td-max-net-buy');
+    const minBuyDom = document.getElementById('td-min-buy-dom');
+    const minBuyAccel = document.getElementById('td-min-buy-accel');
+    const minBsRatio = document.getElementById('td-min-bs-ratio');
+    const minBuyLiq = document.getElementById('td-min-buy-liq');
+    const maxHolderConc = document.getElementById('td-max-holder-conc');
+    const maxRoundTrip = document.getElementById('td-max-round-trip');
+
+    if (minNetBuy) minNetBuy.value = '';
+    if (maxNetBuy) maxNetBuy.value = '';
+    if (minBuyDom) minBuyDom.value = '';
+    if (minBuyAccel) minBuyAccel.value = '';
+    if (minBsRatio) minBsRatio.value = '';
+    if (minBuyLiq) minBuyLiq.value = '';
+    if (maxHolderConc) maxHolderConc.value = '';
+    if (maxRoundTrip) maxRoundTrip.value = '';
+
+    if (preset === 'strong_bullish') {
+        if (minNetBuy) minNetBuy.value = '5000';
+        if (minBuyDom) minBuyDom.value = '60';
+        if (minBsRatio) minBsRatio.value = '1.2';
+    } else if (preset === 'buy_surge') {
+        if (minBuyDom) minBuyDom.value = '55';
+        if (minBuyAccel) minBuyAccel.value = '2.0';
+    } else if (preset === 'high_breadth') {
+        if (minBuyDom) minBuyDom.value = '50';
+        if (minBsRatio) minBsRatio.value = '1.5';
+    } else if (preset === 'heavy_turnover') {
+        if (minNetBuy) minNetBuy.value = '1000';
+        if (minBuyLiq) minBuyLiq.value = '5.0';
+    } else if (preset === 'low_risk') {
+        if (maxHolderConc) maxHolderConc.value = '35';
+        if (maxRoundTrip) maxRoundTrip.value = '6.0';
+    } else if (preset === 'heavy_selling') {
+        if (maxNetBuy) maxNetBuy.value = '0';
+    }
+
+    loadTokenWalletData(1);
 }
 
 function onIndicatorInputChanged() {
@@ -5382,6 +5686,10 @@ async function loadDexValidatedTableData(page = 1, showLoading = false) {
         const minBuyLiq = String(document.getElementById('dvd-min-buy-liq')?.value || '').trim();
         const maxHolderConc = String(document.getElementById('dvd-max-holder-conc')?.value || '').trim();
         const maxRoundTrip = String(document.getElementById('dvd-max-round-trip')?.value || '').trim();
+        const minBondingCurve = String(document.getElementById('dvd-min-bonding-curve')?.value || '').trim();
+        const maxBondingCurve = String(document.getElementById('dvd-max-bonding-curve')?.value || '').trim();
+        const minDevTokens = String(document.getElementById('dvd-min-dev-tokens')?.value || '').trim();
+        const maxDevTokens = String(document.getElementById('dvd-max-dev-tokens')?.value || '').trim();
         const limit = document.getElementById('dvd-limit')?.value || '100';
 
         const lastIdx = sortVal.lastIndexOf('_');
@@ -5402,6 +5710,13 @@ async function loadDexValidatedTableData(page = 1, showLoading = false) {
             sort_by: sortBy || 'id',
             sort_order: sortOrder || 'desc'
         });
+
+        if (timeframe === 'custom') {
+            const dateFrom = String(document.getElementById('dvd-date-from')?.value || '').trim();
+            const dateTo = String(document.getElementById('dvd-date-to')?.value || '').trim();
+            if (dateFrom) params.append('date_from', dateFrom);
+            if (dateTo) params.append('date_to', dateTo);
+        }
 
         if (minMc) params.append('min_mc', minMc);
         if (maxMc) params.append('max_mc', maxMc);
@@ -5436,6 +5751,10 @@ async function loadDexValidatedTableData(page = 1, showLoading = false) {
         if (minBuyLiq) params.append('min_buy_liq', minBuyLiq);
         if (maxHolderConc) params.append('max_holder_conc', maxHolderConc);
         if (maxRoundTrip) params.append('max_round_trip', maxRoundTrip);
+        if (minBondingCurve) params.append('min_bonding_curve', minBondingCurve);
+        if (maxBondingCurve) params.append('max_bonding_curve', maxBondingCurve);
+        if (minDevTokens) params.append('min_dev_tokens', minDevTokens);
+        if (maxDevTokens) params.append('max_dev_tokens', maxDevTokens);
 
         updateDexValidatedDataActiveFiltersCount();
 
@@ -5661,7 +5980,15 @@ function renderDexValidatedDataPagination(total, count, page, totalPages) {
 
 async function exportDexValidatedDataCSV() {
     try {
-        const res = await fetch('/api/dex-validated/records?page=1&limit=10000', { cache: 'no-store' });
+        const tf = document.getElementById('dvd-timeframe')?.value || 'all';
+        let fetchUrl = `/api/dex-validated/records?page=1&limit=10000&timeframe=${encodeURIComponent(tf)}`;
+        if (tf === 'custom') {
+            const dateFrom = String(document.getElementById('dvd-date-from')?.value || '').trim();
+            const dateTo = String(document.getElementById('dvd-date-to')?.value || '').trim();
+            if (dateFrom) fetchUrl += `&date_from=${encodeURIComponent(dateFrom)}`;
+            if (dateTo) fetchUrl += `&date_to=${encodeURIComponent(dateTo)}`;
+        }
+        const res = await fetch(fetchUrl, { cache: 'no-store' });
         const data = await res.json();
         if (!data.success || !data.records || data.records.length === 0) {
             alert('No DEX Validated records available to export.');
@@ -5818,6 +6145,8 @@ async function loadDashboardOverview(showToast = false) {
                     const caShort = m.ca ? `${m.ca.slice(0, 4)}...${m.ca.slice(-4)}` : '-';
                     const encMsg = encodeURIComponent(m.formatted_message || '');
                     const encName = encodeURIComponent(m.token_name || 'Token');
+                    const rawMetricsJson = m.metrics_data ? (typeof m.metrics_data === 'object' ? JSON.stringify(m.metrics_data) : String(m.metrics_data)) : '';
+                    const encMetrics = encodeURIComponent(rawMetricsJson);
                     return `
                         <div style="background:rgba(255,255,255,0.025); border:1px solid var(--border-color); border-radius:11px; padding:11px 13px; display:flex; flex-direction:column; gap:6px;">
                             <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
@@ -5831,7 +6160,7 @@ async function loadDashboardOverview(showToast = false) {
                             <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.76rem; padding-top:4px; border-top:1px solid rgba(255,255,255,0.05);">
                                 <span>5m: <strong style="color:${p5mColor};">${p5m >= 0 ? '+' : ''}${p5m.toFixed(1)}%</strong> · 1h: <strong style="color:${p1hColor};">${p1h >= 0 ? '+' : ''}${p1h.toFixed(1)}%</strong></span>
                                 <div style="display:flex; gap:6px;">
-                                    <button type="button" onclick="openTgMsgModal('${encMsg}', '${encName}')" style="background:none;border:none;color:#93c5fd;font-size:0.73rem;cursor:pointer;padding:0;">Details</button>
+                                    <button type="button" onclick="openTgMsgModal('${encMsg}', '${encName}', '${encMetrics}')" style="background:none;border:none;color:#93c5fd;font-size:0.73rem;cursor:pointer;padding:0;">Details</button>
                                     <a href="${escapeHtml(m.dex_url || '#')}" target="_blank" style="color:#34d399;font-size:0.73rem;text-decoration:none;" title="${escapeHtml(caShort)}">Chart ↗</a>
                                 </div>
                             </div>
@@ -5853,6 +6182,8 @@ async function loadDashboardOverview(showToast = false) {
             const badgeColor = isPaid ? '#67e8f9' : (badgeText === 'CTO' ? '#c4b5fd' : badgeText === 'BOOST' ? '#fcd34d' : '#34d399');
             const encMsg = encodeURIComponent(item.formatted_message || '');
             const encName = encodeURIComponent(item.token_name || 'Token');
+            const rawMetricsJson = item.metrics_data ? (typeof item.metrics_data === 'object' ? JSON.stringify(item.metrics_data) : String(item.metrics_data)) : '';
+            const encMetrics = encodeURIComponent(rawMetricsJson);
             const ca = item.ca || '';
             const caShort = ca ? `${ca.slice(0, 4)}...${ca.slice(-4)}` : '-';
 
@@ -5875,7 +6206,7 @@ async function loadDashboardOverview(showToast = false) {
                         <div style="margin-top:2px;">5m <strong style="color:${p5mColor};">${p5m >= 0 ? '+' : ''}${p5m.toFixed(1)}%</strong> · 1h <strong style="color:${p1hColor};">${p1h >= 0 ? '+' : ''}${p1h.toFixed(1)}%</strong></div>
                     </div>
                     <div style="display:flex; gap:6px; align-items:center;">
-                        <button type="button" class="btn-table-action" onclick="openTgMsgModal('${encMsg}', '${encName}')" style="padding:4px 8px; font-size:0.72rem; cursor:pointer;">Details</button>
+                        <button type="button" class="btn-table-action" onclick="openTgMsgModal('${encMsg}', '${encName}', '${encMetrics}')" style="padding:4px 8px; font-size:0.72rem; cursor:pointer;">Details</button>
                         <a href="${escapeHtml(item.dex_url || '#')}" target="_blank" class="btn-table-action" style="padding:4px 8px; font-size:0.72rem;">Chart</a>
                     </div>
                 </div>
@@ -5942,6 +6273,12 @@ async function loadWorkflowPerformance(force = false) {
             timeframe: currentWfPerfTimeframe,
             sort_by: currentWfPerfSort
         });
+        if (currentWfPerfTimeframe === 'custom') {
+            const fromVal = document.getElementById('wf-date-from')?.value;
+            const toVal = document.getElementById('wf-date-to')?.value;
+            if (fromVal) params.set('date_from', fromVal);
+            if (toVal) params.set('date_to', toVal);
+        }
         const res = await fetch(`/api/workflows/performance?${params.toString()}`);
         const data = await res.json();
         if (data.success) {
@@ -5995,7 +6332,7 @@ function setWorkflowPerfSystem(sys) {
 
 function setWorkflowPerfTimeframe(tf) {
     currentWfPerfTimeframe = tf;
-    ['day', 'week', 'month', 'all'].forEach(t => {
+    ['day', 'week', 'month', 'all', 'custom'].forEach(t => {
         const btn = document.getElementById(`wf-tf-btn-${t}`);
         if (btn) {
             if (t === tf) {
@@ -6009,7 +6346,28 @@ function setWorkflowPerfTimeframe(tf) {
             }
         }
     });
+    const customContainer = document.getElementById('wf-custom-date-container');
+    if (customContainer) {
+        customContainer.style.display = tf === 'custom' ? 'inline-flex' : 'none';
+    }
+    if (tf === 'custom') {
+        const fromEl = document.getElementById('wf-date-from');
+        const toEl = document.getElementById('wf-date-to');
+        const todayStr = new Date().toISOString().split('T')[0];
+        if (toEl && !toEl.value) toEl.value = todayStr;
+        if (fromEl && !fromEl.value) {
+            const d = new Date();
+            d.setDate(d.getDate() - 7);
+            fromEl.value = d.toISOString().split('T')[0];
+        }
+    }
     loadWorkflowPerformance(true);
+}
+
+function onWorkflowCustomDateChanged() {
+    if (currentWfPerfTimeframe === 'custom') {
+        loadWorkflowPerformance(true);
+    }
 }
 
 function setWorkflowPerfSort(sort) {
@@ -6706,7 +7064,7 @@ function updateOutcomesPillsUI() {
         }
     });
 
-    ['day', 'week', 'month', 'all'].forEach(t => {
+    ['day', 'week', 'month', 'all', 'custom'].forEach(t => {
         const el = document.getElementById(`outcomes-tf-${t}`);
         if (el) {
             if (t === outcomesState.timeframe) {
@@ -6724,6 +7082,11 @@ function updateOutcomesPillsUI() {
             }
         }
     });
+
+    const customContainer = document.getElementById('outcomes-custom-date-container');
+    if (customContainer) {
+        customContainer.style.display = outcomesState.timeframe === 'custom' ? 'inline-flex' : 'none';
+    }
 }
 
 function setOutcomesSystem(sys, triggerSim = true) {
@@ -6748,8 +7111,25 @@ function setOutcomesSystem(sys, triggerSim = true) {
 
 function setOutcomesTimeframe(tf, triggerSim = true) {
     outcomesState.timeframe = tf;
+    if (tf === 'custom') {
+        const fromEl = document.getElementById('outcomes-date-from');
+        const toEl = document.getElementById('outcomes-date-to');
+        const todayStr = new Date().toISOString().split('T')[0];
+        if (toEl && !toEl.value) toEl.value = todayStr;
+        if (fromEl && !fromEl.value) {
+            const d = new Date();
+            d.setDate(d.getDate() - 7);
+            fromEl.value = d.toISOString().split('T')[0];
+        }
+    }
     updateOutcomesPillsUI();
     if (triggerSim) runOutcomesSimulation();
+}
+
+function onOutcomeCustomDateChanged() {
+    if (outcomesState.timeframe === 'custom') {
+        runOutcomesSimulation();
+    }
 }
 
 function handleOutcomesWorkflowSelect(wfId) {
@@ -6824,6 +7204,8 @@ function handleOutcomesWorkflowSelect(wfId) {
                 else if (ikey === 'buyer_seller_ratio') { pf.min_bs_ratio = tmin; }
                 else if (ikey === 'holder_concentration') { pf.max_holder_conc = tmax; }
                 else if (ikey === 'round_trip_cost') { pf.max_round_trip = tmax; }
+                else if (ikey === 'bonding_curve_pct') { pf.min_bonding_curve = tmin; pf.max_bonding_curve = tmax; }
+                else if (ikey === 'dev_prior_tokens') { pf.min_dev_tokens = tmin; pf.max_dev_tokens = tmax; }
             }
             else if (rtype === 'indicator_preset') {
                 pf.ind_preset = String(stext || 'all').toLowerCase().trim();
@@ -6880,6 +7262,10 @@ function handleOutcomesWorkflowSelect(wfId) {
     setVal('outcomes-filter-min-vol-liq', pf.min_vol_liq);
     setVal('outcomes-filter-max-holder-conc', pf.max_holder_conc);
     setVal('outcomes-filter-max-round-trip', pf.max_round_trip);
+    setVal('outcomes-filter-min-bonding-curve', pf.min_bonding_curve);
+    setVal('outcomes-filter-max-bonding-curve', pf.max_bonding_curve);
+    setVal('outcomes-filter-min-dev-tokens', pf.min_dev_tokens);
+    setVal('outcomes-filter-max-dev-tokens', pf.max_dev_tokens);
 
     const ruleCount = Array.isArray(wf.rules) ? wf.rules.length : 0;
     if (summaryEl) {
@@ -6989,7 +7375,9 @@ function resetOutcomesFilters() {
         'outcomes-filter-max-sell-accel', 'outcomes-filter-min-buy-press-accel',
         'outcomes-filter-min-bs-ratio', 'outcomes-filter-min-buy-liq',
         'outcomes-filter-min-vol-mc', 'outcomes-filter-min-vol-liq',
-        'outcomes-filter-max-holder-conc', 'outcomes-filter-max-round-trip'
+        'outcomes-filter-max-holder-conc', 'outcomes-filter-max-round-trip',
+        'outcomes-filter-min-bonding-curve', 'outcomes-filter-max-bonding-curve',
+        'outcomes-filter-min-dev-tokens', 'outcomes-filter-max-dev-tokens'
     ];
     textIds.forEach(id => {
         const el = document.getElementById(id);
@@ -7156,10 +7544,21 @@ async function runOutcomesSimulation() {
         const maxRoundTrip = getNum('outcomes-filter-max-round-trip');
         if (maxRoundTrip !== null) customFilters.max_round_trip = maxRoundTrip;
 
+        const minBondingCurve = getNum('outcomes-filter-min-bonding-curve');
+        if (minBondingCurve !== null) customFilters.min_bonding_curve = minBondingCurve;
+        const maxBondingCurve = getNum('outcomes-filter-max-bonding-curve');
+        if (maxBondingCurve !== null) customFilters.max_bonding_curve = maxBondingCurve;
+        const minDevTokens = getNum('outcomes-filter-min-dev-tokens');
+        if (minDevTokens !== null) customFilters.min_dev_tokens = minDevTokens;
+        const maxDevTokens = getNum('outcomes-filter-max-dev-tokens');
+        if (maxDevTokens !== null) customFilters.max_dev_tokens = maxDevTokens;
+
         const payload = {
             system: outcomesState.system,
             timeframe: outcomesState.timeframe,
             workflow_id: outcomesState.activeWorkflowId || null,
+            date_from: outcomesState.timeframe === 'custom' ? (document.getElementById('outcomes-date-from')?.value || null) : null,
+            date_to: outcomesState.timeframe === 'custom' ? (document.getElementById('outcomes-date-to')?.value || null) : null,
             custom_filters: customFilters
         };
 
@@ -7480,8 +7879,8 @@ function renderOutcomesTable(tokens) {
         // Signal time (robust timestamp parsing for seconds, milliseconds, or ISO strings)
         const rawTs = t.event_ts ?? t.timestamp ?? t.event_epoch_seconds ?? t.created_at ?? t.fetched_at;
         const relTime = rawTs ? formatRelativeTime(rawTs) : (t.age || '—');
-        let exactDateStr = '';
-        if (rawTs) {
+        let exactDateStr = t.event_date || '';
+        if (!exactDateStr && rawTs) {
             let d;
             if (typeof rawTs === 'number') {
                 d = new Date(rawTs > 1e12 ? rawTs : rawTs * 1000);

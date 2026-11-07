@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Akoueflow Dashboard</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/globals.css') }}?v={{ app_version }}&amp;ts=20261101_04">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/globals.css') }}?v={{ app_version }}">
     <style>
         .hidden { display: none !important; }
         .filter-panel { position: relative; z-index: 50; }
@@ -718,7 +718,7 @@
                             </div>
 
                             <!-- Timeframe Selector -->
-                            <div class="pill-group" style="display: flex; background: rgba(255,255,255,0.05); padding: 3px; border-radius: 8px; border: 1px solid var(--border-color);">
+                            <div class="pill-group" style="display: flex; background: rgba(255,255,255,0.05); padding: 3px; border-radius: 8px; border: 1px solid var(--border-color); align-items: center; flex-wrap: wrap;">
                                 <button type="button" id="wf-tf-btn-day" class="perf-tf-btn" onclick="setWorkflowPerfTimeframe('day')" style="padding: 4px 10px; font-size: 0.78rem; border-radius: 6px; border: none; background: #22d3ee; color: #083344; font-weight: 700; cursor: pointer;">
                                     Day
                                 </button>
@@ -731,6 +731,17 @@
                                 <button type="button" id="wf-tf-btn-all" class="perf-tf-btn" onclick="setWorkflowPerfTimeframe('all')" style="padding: 4px 10px; font-size: 0.78rem; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 500; cursor: pointer;">
                                     All Time
                                 </button>
+                                <button type="button" id="wf-tf-btn-custom" class="perf-tf-btn" onclick="setWorkflowPerfTimeframe('custom')" style="padding: 4px 10px; font-size: 0.78rem; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); font-weight: 500; cursor: pointer;">
+                                    📅 Custom
+                                </button>
+                            </div>
+
+                            <!-- Workflow Custom Date Inputs -->
+                            <div id="wf-custom-date-container" style="display: none; align-items: center; gap: 6px; background: rgba(255,255,255,0.05); padding: 3px 8px; border-radius: 8px; border: 1px solid var(--border-color);">
+                                <span style="font-size: 0.72rem; color: #94a3b8; font-weight: 600; text-transform: uppercase;">From</span>
+                                <input type="date" id="wf-date-from" class="form-input" style="padding: 3px 6px; font-size: 0.76rem; width: 130px; background: rgba(15, 23, 42, 0.8);" onchange="onWorkflowCustomDateChanged()">
+                                <span style="font-size: 0.72rem; color: #94a3b8; font-weight: 600; text-transform: uppercase;">To</span>
+                                <input type="date" id="wf-date-to" class="form-input" style="padding: 3px 6px; font-size: 0.76rem; width: 130px; background: rgba(15, 23, 42, 0.8);" onchange="onWorkflowCustomDateChanged()">
                             </div>
 
                             <!-- Limit Selector (Top 5, Top 10, Top 20) -->
@@ -959,13 +970,20 @@
                                     <button type="button" id="outcomes-sys-all" class="segmented-pill-btn" onclick="setOutcomesSystem('all')">🌐 Combined All</button>
                                 </div>
                             </div>
-                            <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                                 <span style="font-size: 0.78rem; color: #94a3b8; font-weight: 600;">Timeframe:</span>
                                 <div class="segmented-pill-group">
                                     <button type="button" id="outcomes-tf-day" class="segmented-pill-btn" onclick="setOutcomesTimeframe('day')">24h</button>
                                     <button type="button" id="outcomes-tf-week" class="segmented-pill-btn active" onclick="setOutcomesTimeframe('week')">7d</button>
                                     <button type="button" id="outcomes-tf-month" class="segmented-pill-btn" onclick="setOutcomesTimeframe('month')">30d</button>
                                     <button type="button" id="outcomes-tf-all" class="segmented-pill-btn" onclick="setOutcomesTimeframe('all')">All</button>
+                                    <button type="button" id="outcomes-tf-custom" class="segmented-pill-btn" onclick="setOutcomesTimeframe('custom')">📅 Custom</button>
+                                </div>
+                                <div id="outcomes-custom-date-container" style="display: none; align-items: center; gap: 6px; background: rgba(15, 23, 42, 0.75); padding: 3px 8px; border-radius: 9px; border: 1px solid rgba(148, 163, 184, 0.2);">
+                                    <span style="font-size: 0.72rem; color: #94a3b8; font-weight: 600; text-transform: uppercase;">From</span>
+                                    <input type="date" id="outcomes-date-from" class="form-input" style="padding: 3px 6px; font-size: 0.76rem; width: 130px; background: rgba(0,0,0,0.3); border-color: rgba(148,163,184,0.3);" onchange="onOutcomeCustomDateChanged()">
+                                    <span style="font-size: 0.72rem; color: #94a3b8; font-weight: 600; text-transform: uppercase;">To</span>
+                                    <input type="date" id="outcomes-date-to" class="form-input" style="padding: 3px 6px; font-size: 0.76rem; width: 130px; background: rgba(0,0,0,0.3); border-color: rgba(148,163,184,0.3);" onchange="onOutcomeCustomDateChanged()">
                                 </div>
                             </div>
                         </div>
@@ -1253,6 +1271,20 @@
                                 <div>
                                     <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;">Max Round-Trip Cost (%)</label>
                                     <input type="number" step="0.5" id="outcomes-filter-max-round-trip" class="form-input" placeholder="e.g. 6.0 (≤ 6%)" oninput="onOutcomeFilterChanged()" style="width: 100%;">
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;" title="Pump.fun bonding curve progress at signal time (100% = graduated)">Bonding Curve (%)</label>
+                                    <div style="display: flex; gap: 4px;">
+                                        <input type="number" step="1" min="0" max="100" id="outcomes-filter-min-bonding-curve" class="form-input" placeholder="Min" oninput="onOutcomeFilterChanged()" style="width: 50%;">
+                                        <input type="number" step="1" min="0" max="100" id="outcomes-filter-max-bonding-curve" class="form-input" placeholder="Max" oninput="onOutcomeFilterChanged()" style="width: 50%;">
+                                    </div>
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 3px;" title="How many other tokens the creator wallet launched before">Dev Prior Tokens</label>
+                                    <div style="display: flex; gap: 4px;">
+                                        <input type="number" step="1" min="0" id="outcomes-filter-min-dev-tokens" class="form-input" placeholder="Min" oninput="onOutcomeFilterChanged()" style="width: 50%;">
+                                        <input type="number" step="1" min="0" id="outcomes-filter-max-dev-tokens" class="form-input" placeholder="Max" oninput="onOutcomeFilterChanged()" style="width: 50%;">
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1902,14 +1934,23 @@
                         </div>
                         <div class="form-group" style="margin-bottom: 0; min-width: 135px; flex: 1;">
                             <label>Timeframe</label>
-                            <select class="form-input" id="td-timeframe" onchange="loadTokenWalletData(1)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white;">
+                            <select class="form-input" id="td-timeframe" onchange="onTokenDataTimeframeChanged()" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white;">
                                 <option value="all">All Time</option>
                                 <option value="1h">Past 1 Hour</option>
                                 <option value="6h">Past 6 Hours</option>
                                 <option value="24h">Past 24 Hours</option>
                                 <option value="7d">Past 7 Days</option>
                                 <option value="30d">Past 30 Days</option>
+                                <option value="custom">📅 Custom Date Range...</option>
                             </select>
+                        </div>
+                        <div class="form-group" id="td-custom-date-group" style="margin-bottom: 0; min-width: 250px; flex: 1.5; display: none;">
+                            <label>Custom Date Range (From - To)</label>
+                            <div style="display: flex; gap: 6px; align-items: center;">
+                                <input type="date" id="td-date-from" class="form-input" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" onchange="loadTokenWalletData(1)">
+                                <span style="color: var(--text-muted); font-size: 0.78rem;">to</span>
+                                <input type="date" id="td-date-to" class="form-input" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" onchange="loadTokenWalletData(1)">
+                            </div>
                         </div>
                         <div class="form-group" style="margin-bottom: 0; min-width: 165px; flex: 1.2;">
                             <label>Sort By</label>
@@ -2147,6 +2188,89 @@
                         </div>
                     </div>
 
+                    <!-- Row 5: Akoueflow Trading Indicators Filter Section -->
+                    <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 0.85rem 1rem; margin-bottom: 1rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.65rem; flex-wrap: wrap; gap: 8px;">
+                            <div style="font-size: 0.76rem; font-weight: 600; text-transform: uppercase; color: #818cf8; letter-spacing: 0.5px; display: flex; align-items: center; gap: 6px;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                                <span>Akoueflow Indicators Filters (10 On-Chain Metrics)</span>
+                            </div>
+                            <div style="font-size: 0.72rem; color: var(--text-muted);">
+                                Filter by buy pressure, acceleration, wallet breadth &amp; supply concentration
+                            </div>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.85rem; align-items: flex-end;">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.76rem;">Indicator Preset</label>
+                                <select class="form-input" id="td-ind-preset" onchange="applyTokenDataIndicatorPreset(this.value)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white; padding: 6px 10px; font-size: 0.8rem;">
+                                    <option value="all">Custom / All Indicators</option>
+                                    <option value="strong_bullish">🔥 Strong Bullish Flow (Net Buy &gt; $5K, Dom ≥ 60%)</option>
+                                    <option value="buy_surge">⚡ Buy Volume Surge (Accel ≥ 2x, Dom ≥ 55%)</option>
+                                    <option value="high_breadth">👥 High Wallet Breadth (Buyer/Seller ≥ 1.5x)</option>
+                                    <option value="heavy_turnover">🌊 Heavy Liquidity Turnover (Net Buy/Liq ≥ 5%)</option>
+                                    <option value="low_risk">🛡️ Low Supply &amp; Exit Risk (Top 10 ≤ 35%, Exit Cost ≤ 6%)</option>
+                                    <option value="heavy_selling">🔴 Heavy Selling Pressure (Net Selling &lt; $0)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.76rem;">Net Buy Pressure ($ 5m)</label>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <input type="number" class="form-input" id="td-min-net-buy" placeholder="Min $" oninput="onTokenDataIndicatorInputChanged()" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                    <span style="color: var(--text-muted); font-size: 0.78rem;">to</span>
+                                    <input type="number" class="form-input" id="td-max-net-buy" placeholder="Max $" oninput="onTokenDataIndicatorInputChanged()" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" />
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.76rem;">Min Buy Dominance (%)</label>
+                                <input type="number" step="1" class="form-input" id="td-min-buy-dom" placeholder="e.g. 60 (≥ 60%)" oninput="onTokenDataIndicatorInputChanged()" onchange="loadTokenWalletData(1)" style="padding: 6px 10px; font-size: 0.8rem;" />
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.76rem;">Min Buy Vol Accel (x)</label>
+                                <input type="number" step="0.1" class="form-input" id="td-min-buy-accel" placeholder="e.g. 1.5 (≥ 1.5x)" oninput="onTokenDataIndicatorInputChanged()" onchange="loadTokenWalletData(1)" style="padding: 6px 10px; font-size: 0.8rem;" />
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.76rem;">Min Buyer/Seller Ratio</label>
+                                <input type="number" step="0.1" class="form-input" id="td-min-bs-ratio" placeholder="e.g. 1.2 (≥ 1.2x)" oninput="onTokenDataIndicatorInputChanged()" onchange="loadTokenWalletData(1)" style="padding: 6px 10px; font-size: 0.8rem;" />
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.76rem;">Min Net Buy / Liq (%)</label>
+                                <input type="number" step="0.5" class="form-input" id="td-min-buy-liq" placeholder="e.g. 5 (≥ 5%)" oninput="onTokenDataIndicatorInputChanged()" onchange="loadTokenWalletData(1)" style="padding: 6px 10px; font-size: 0.8rem;" />
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.76rem;">Max Top 10 Holders (%)</label>
+                                <input type="number" step="1" class="form-input" id="td-max-holder-conc" placeholder="e.g. 40 (≤ 40%)" oninput="onTokenDataIndicatorInputChanged()" onchange="loadTokenWalletData(1)" style="padding: 6px 10px; font-size: 0.8rem;" />
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.76rem;">Max Round-Trip Cost (%)</label>
+                                <input type="number" step="0.5" class="form-input" id="td-max-round-trip" placeholder="e.g. 6 (≤ 6%)" oninput="onTokenDataIndicatorInputChanged()" onchange="loadTokenWalletData(1)" style="padding: 6px 10px; font-size: 0.8rem;" />
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.76rem;">Bonding Curve (%)</label>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <input type="number" step="1" min="0" max="100" class="form-input" id="td-min-bonding-curve" placeholder="Min %" oninput="onTokenDataIndicatorInputChanged()" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" title="Pump.fun bonding curve progress at signal time (100% = graduated)" />
+                                    <span style="color: var(--text-muted); font-size: 0.78rem;">to</span>
+                                    <input type="number" step="1" min="0" max="100" class="form-input" id="td-max-bonding-curve" placeholder="Max %" oninput="onTokenDataIndicatorInputChanged()" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" title="Pump.fun bonding curve progress at signal time (100% = graduated)" />
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.76rem;">Dev Prior Tokens</label>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <input type="number" step="1" min="0" class="form-input" id="td-min-dev-tokens" placeholder="Min" oninput="onTokenDataIndicatorInputChanged()" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" title="How many other tokens the creator wallet launched before" />
+                                    <span style="color: var(--text-muted); font-size: 0.78rem;">to</span>
+                                    <input type="number" step="1" min="0" class="form-input" id="td-max-dev-tokens" placeholder="Max" oninput="onTokenDataIndicatorInputChanged()" onchange="loadTokenWalletData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" title="How many other tokens the creator wallet launched before" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Bottom Action Toolbar -->
                     <div style="display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap; padding-top: 0.5rem;">
                         <div style="display: flex; gap: 1.25rem; align-items: center; flex-wrap: wrap;">
@@ -2221,6 +2345,7 @@
                                     <th class="sortable-th" data-sort="perf_24h" data-default-dir="desc" onclick="sortTableByColumn('td', 'perf_24h', 'desc')">24h<span class="sort-arrow">⇅</span></th>
                                     <th class="sortable-th" data-sort="peak_mult_1h" data-default-dir="desc" onclick="sortTableByColumn('td', 'peak_mult_1h', 'desc')">1h Peak<span class="sort-arrow">⇅</span></th>
                                     <th class="sortable-th" data-sort="peak_mult_4h" data-default-dir="desc" onclick="sortTableByColumn('td', 'peak_mult_4h', 'desc')">4h Peak<span class="sort-arrow">⇅</span></th>
+                                    <th class="sortable-th" data-sort="net_buy_pressure" data-default-dir="desc" onclick="sortTableByColumn('td', 'net_buy_pressure', 'desc')">Akoueflow Indicators<span class="sort-arrow">⇅</span></th>
                                     <th class="sortable-th" data-sort="status" data-default-dir="asc" onclick="sortTableByColumn('td', 'status', 'asc')">Status<span class="sort-arrow">⇅</span></th>
                                     <th class="sortable-th" data-sort="reason" data-default-dir="asc" onclick="sortTableByColumn('td', 'reason', 'asc')">Forwarded Flow<span class="sort-arrow">⇅</span></th>
                                     <th style="text-align: right; padding-right: 1.5rem;">Actions</th>
@@ -2228,7 +2353,7 @@
                             </thead>
                             <tbody id="token-data-tbody">
                                 <tr>
-                                    <td colspan="18" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                                    <td colspan="19" style="text-align: center; padding: 3rem; color: var(--text-muted);">
                                         Loading token wallet data...
                                     </td>
                                 </tr>
@@ -2386,14 +2511,23 @@
                         </div>
                         <div class="form-group" style="margin-bottom: 0; min-width: 135px; flex: 1;">
                             <label>Timeframe</label>
-                            <select class="form-input" id="dvd-timeframe" onchange="loadDexValidatedTableData(1)" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white;">
+                            <select class="form-input" id="dvd-timeframe" onchange="onDexValidatedTimeframeChanged()" style="-webkit-appearance: none; background: rgba(255,255,255,0.05); color: white;">
                                 <option value="all">All Time</option>
                                 <option value="1h">Past 1 Hour</option>
                                 <option value="6h">Past 6 Hours</option>
                                 <option value="24h">Past 24 Hours</option>
                                 <option value="7d">Past 7 Days</option>
                                 <option value="30d">Past 30 Days</option>
+                                <option value="custom">📅 Custom Date Range...</option>
                             </select>
+                        </div>
+                        <div class="form-group" id="dvd-custom-date-group" style="margin-bottom: 0; min-width: 250px; flex: 1.5; display: none;">
+                            <label>Custom Date Range (From - To)</label>
+                            <div style="display: flex; gap: 6px; align-items: center;">
+                                <input type="date" id="dvd-date-from" class="form-input" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" onchange="loadDexValidatedTableData(1)">
+                                <span style="color: var(--text-muted); font-size: 0.78rem;">to</span>
+                                <input type="date" id="dvd-date-to" class="form-input" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" onchange="loadDexValidatedTableData(1)">
+                            </div>
                         </div>
                         <div class="form-group" style="margin-bottom: 0; min-width: 165px; flex: 1.2;">
                             <label>Sort By</label>
@@ -2673,6 +2807,23 @@
                                 <label style="font-size: 0.76rem;">Max Round-Trip Cost (%)</label>
                                 <input type="number" step="0.5" class="form-input" id="dvd-max-round-trip" placeholder="e.g. 6 (≤ 6%)" oninput="onIndicatorInputChanged()" onchange="loadDexValidatedTableData(1)" style="padding: 6px 10px; font-size: 0.8rem;" />
                             </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.76rem;">Bonding Curve (%)</label>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <input type="number" step="1" min="0" max="100" class="form-input" id="dvd-min-bonding-curve" placeholder="Min %" oninput="onIndicatorInputChanged()" onchange="loadDexValidatedTableData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" title="Pump.fun bonding curve progress at signal time (100% = graduated)" />
+                                    <span style="color: var(--text-muted); font-size: 0.78rem;">to</span>
+                                    <input type="number" step="1" min="0" max="100" class="form-input" id="dvd-max-bonding-curve" placeholder="Max %" oninput="onIndicatorInputChanged()" onchange="loadDexValidatedTableData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" title="Pump.fun bonding curve progress at signal time (100% = graduated)" />
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.76rem;">Dev Prior Tokens</label>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <input type="number" step="1" min="0" class="form-input" id="dvd-min-dev-tokens" placeholder="Min" oninput="onIndicatorInputChanged()" onchange="loadDexValidatedTableData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" title="How many other tokens the creator wallet launched before" />
+                                    <span style="color: var(--text-muted); font-size: 0.78rem;">to</span>
+                                    <input type="number" step="1" min="0" class="form-input" id="dvd-max-dev-tokens" placeholder="Max" oninput="onIndicatorInputChanged()" onchange="loadDexValidatedTableData(1)" style="flex: 1; padding: 6px 8px; font-size: 0.8rem;" title="How many other tokens the creator wallet launched before" />
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -2922,6 +3073,14 @@
                                     <button type="button" class="btn-rule-cat" onclick="addRule('indicator', 'round_trip_cost')">
                                         <span class="btn-rule-cat__title">Round-Trip Cost %</span>
                                         <span class="btn-rule-cat__desc">Buy Slip + Sell Slip + Fee</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('indicator', 'bonding_curve_pct')">
+                                        <span class="btn-rule-cat__title">Bonding Curve %</span>
+                                        <span class="btn-rule-cat__desc">Pump.fun curve progress (100 = graduated)</span>
+                                    </button>
+                                    <button type="button" class="btn-rule-cat" onclick="addRule('indicator', 'dev_prior_tokens')">
+                                        <span class="btn-rule-cat__title">Dev Prior Tokens</span>
+                                        <span class="btn-rule-cat__desc">Tokens the creator launched before</span>
                                     </button>
                                 </div>
 
@@ -3247,6 +3406,6 @@
         const initialWorkflows = {{ workflows | tojson | safe }};
         const initialSettings = {{ settings | tojson | safe }};
     </script>
-    <script src="{{ url_for('static', filename='js/app.js') }}?v={{ app_version }}&amp;ts=20261101_04"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v={{ app_version }}"></script>
 </body>
 </html>
